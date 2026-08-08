@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { Camera, Upload, X, Check, Loader2, RefreshCw, Plus } from 'lucide-react'
 import { recognizeCard, addToCollection } from '../api/client'
@@ -153,7 +153,40 @@ export default function CardScanner({ isOpen, onClose, onCardSelected }) {
   const [selectedMatch, setSelectedMatch] = useState(null)
   const [addModal, setAddModal] = useState(null) // match to show modal for
   const fileRef = useRef()
+  // Bumped on every open and every reset. A recognition request that
+  // resolves after the scanner was closed and reopened belongs to an older
+  // generation and must not repopulate the new one with stale results.
+  const generationRef = useRef(0)
   const { t } = useSettings()
+
+  // "Upload image" removes the capture attribute to open the file picker
+  // instead of the camera. Restoring it matters: without this, every scan after
+  // the first upload opens the picker even when the camera was asked for.
+  const resetFileInput = () => {
+    if (!fileRef.current) return
+    fileRef.current.value = ''
+    fileRef.current.setAttribute('capture', 'environment')
+  }
+
+
+  // The component stays mounted while closed (it only returns null), so its
+  // state survives a close. Without this, reopening the scanner showed the
+  // previous scan's photo and results. Clearing the file input too, otherwise
+  // picking the same file again fires no change event.
+  useEffect(() => {
+    // Bump on close as well as open: a recognition request that resolves while
+    // the scanner is shut would otherwise still match the current generation
+    // and repopulate hidden state, or raise a toast for a scan already
+    // abandoned.
+    generationRef.current += 1
+    if (isOpen) {
+      setPhase('capture')
+      setResults(null)
+      setSelectedMatch(null)
+      setAddModal(null)
+      resetFileInput()
+    }
+  }, [isOpen])
 
   if (!isOpen) return null
 
@@ -163,13 +196,16 @@ export default function CardScanner({ isOpen, onClose, onCardSelected }) {
       toast.error(t('scanner.recognitionFailed'))
       return
     }
+    const generation = generationRef.current
     setPhase('loading')
     try {
       const data = await recognizeCard(file)
+      if (generation !== generationRef.current) return
       setResults(data)
       setSelectedMatch(data.matches?.[0] || null)
       setPhase('results')
     } catch (e) {
+      if (generation !== generationRef.current) return
       const msg = e?.response?.data?.detail || t('scanner.recognitionFailed')
       toast.error(msg)
       setPhase('capture')
@@ -177,10 +213,12 @@ export default function CardScanner({ isOpen, onClose, onCardSelected }) {
   }
 
   const reset = () => {
+    generationRef.current += 1
     setPhase('capture')
     setResults(null)
     setSelectedMatch(null)
     setAddModal(null)
+    resetFileInput()
   }
 
   const detectedLang = results?.recognized?.language || 'en'
