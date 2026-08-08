@@ -59,8 +59,8 @@ Be kind. Be clear. Assume good intent. Keep feedback constructive.
 - Search the locally cached card database by name, set, type, rarity, HP, artist, and more
 - Short-code search like `PFL 001`
 - Multi-select search results and bulk-add matching cards to the collection
-- Smart scanner with Gemini-powered recognition
-- Scanner retries transient Gemini capacity errors and shows clearer rate-limit / temporary-unavailable messages
+- Smart scanner with AI recognition, via Google Gemini or OpenAI
+- Scanner retries transient provider capacity errors and shows clearer rate-limit / temporary-unavailable messages
 - Two-step scanner matching: number ranking first, visual verification second when useful
 - Scanner strips suffixes like `ex` / `GX` / `VSTAR` for broader matching
 - Card modal auto-preselects a likely variant from TCGdex variant flags
@@ -81,7 +81,7 @@ Be kind. Be clear. Assume good intent. Keep feedback constructive.
 ### 👤 Single-User & Multi-User
 - Single-user mode: no login required, auto-auth as admin
 - Multi-user mode: JWT login, admin/trainer roles, separate user data
-- Per-user settings for language, currency, Telegram keys, and Gemini key
+- Per-user settings for language, currency, Telegram keys, and scanner API keys
 - Force password change support on first login
 - Profile avatar and profile name editing
 - Cascade deletion of user-owned data
@@ -161,6 +161,11 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=your_admin_password
 GEMINI_API_KEY=your_gemini_key
 GEMINI_MODEL=gemini-flash-latest
+OPENAI_API_KEY=your_openai_key
+OPENAI_MODEL=gpt-4o-mini
+SCANNER_PROVIDER=gemini
+ALLOW_SHARED_SCANNER_KEY=false
+DEFAULT_CURRENCY=EUR
 TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
 TCGDEX_SYNC_LANGUAGES=en,de
@@ -260,6 +265,11 @@ The **Users** tab is only visible to admin users and only while multi-user mode 
 | `ADMIN_PASSWORD` | Password for the bootstrap admin account | Random, optionally logged |
 | `GEMINI_API_KEY` | Initial Gemini key for the admin user; other users configure their own key in Settings | *(empty)* |
 | `GEMINI_MODEL` | Gemini model used by the card scanner. Change this if Google retires the default model for new API keys. | `gemini-flash-latest` |
+| `OPENAI_API_KEY` | Initial OpenAI key for the admin user; other users configure their own key in Settings | *(empty)* |
+| `OPENAI_MODEL` | OpenAI model used by the card scanner | `gpt-4o-mini` |
+| `SCANNER_PROVIDER` | Which vision model reads card photos: `gemini` or `openai`. The admin-set **Card scanner** setting takes precedence. | `gemini` |
+| `ALLOW_SHARED_SCANNER_KEY` | When `true`, accounts without their own key fall back to the installation key above, so one key covers every user. Off by default: consider the billing and isolation implications on a multi-user install. | `false` |
+| `DEFAULT_CURRENCY` | Currency new accounts start on: `EUR`, `USD` or `GBP` | `EUR` |
 | `TELEGRAM_BOT_TOKEN` | Initial Telegram bot token for the admin user | *(empty)* |
 | `TELEGRAM_CHAT_ID` | Initial Telegram chat ID for the admin user | *(empty)* |
 | `TCGDEX_SYNC_LANGUAGES` | Initial admin default for TCGdex set/card sync languages on first launch only. After bootstrap, the DB setting in Settings is authoritative. Comma-separated TCGdex language codes, or `all` to enable every supported TCGdex language. Empty or invalid values safely fall back to `en,de`. Extra languages increase sync time, API calls, and database size. | `en,de` |
@@ -337,7 +347,7 @@ The old nested `pokemon-tcg-collection/` layout is no longer used.
 | Backend | Python 3.11, FastAPI, SQLAlchemy, APScheduler, Pydantic |
 | Database | PostgreSQL 18 |
 | Card Data | [TCGdex](https://tcgdex.dev/) |
-| AI Scanner | Google Gemini, configurable via `GEMINI_MODEL` |
+| AI Scanner | Google Gemini (`GEMINI_MODEL`) or OpenAI (`OPENAI_MODEL`), selected with `SCANNER_PROVIDER` |
 | Deploy | Docker + Docker Compose |
 
 ---
@@ -350,7 +360,8 @@ PokéCollector is self-hosted, but it can call these external sources depending 
 |--------|---------|----------|-------------------|
 | TCGdex | `api.tcgdex.net`, `assets.tcgdex.net` | Set/card catalogue data, images, prices, localized card metadata, Pokédex `dexId`, and Cardmarket product metadata | Initial sync, manual/admin sync, search fallbacks, metadata backfills, and card image display |
 | PokeAPI sprites | `raw.githubusercontent.com/PokeAPI/sprites` | Profile/avatar GIFs, achievement badges, binder icons, National Pokédex sprites, and official artwork cache | Browser image display, Pokédex image cache misses, and `scripts.cache_pokedex_images` |
-| Google Gemini | `generativelanguage.googleapis.com` | AI card scanner recognition | Only when scanner recognition is used and `GEMINI_API_KEY` is configured |
+| Google Gemini | `generativelanguage.googleapis.com` | AI card scanner recognition | Only when scanner recognition is used, the Gemini provider is selected, and a Gemini key is configured |
+| OpenAI | `api.openai.com` | AI card scanner recognition | Only when scanner recognition is used, the OpenAI provider is selected, and an OpenAI key is configured |
 | Telegram Bot API | `api.telegram.org` | Telegram notifications and alerts | Only when Telegram settings are configured and an alert/notification is sent |
 | Frankfurter | `api.frankfurter.dev` | Currency exchange rates | Currency conversion and Telegram price formatting when non-EUR values are needed |
 | GitHub | `api.github.com`, `raw.githubusercontent.com`, `avatars.githubusercontent.com`, `github.com` | Community contributor/supporter data, GitHub avatars, project links, and release/source links | Settings community section and linked project metadata |

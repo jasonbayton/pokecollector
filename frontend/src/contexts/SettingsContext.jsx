@@ -4,6 +4,11 @@ import { priceFieldFromPrimary } from '../utils/prices'
 import { normalizeTcgdexLanguageCsv } from '../utils/tcgdexLanguages'
 import { useAuth } from './AuthContext'
 
+// Display currencies. Prices are stored in EUR, so EUR_FALLBACK_RATES are
+// EUR -> target and are only used until the live rate lookup returns.
+const CURRENCY_SYMBOLS = { EUR: '€', USD: '$', GBP: '£' }
+const EUR_FALLBACK_RATES = { EUR: 1.0, USD: 1.1, GBP: 0.85 }
+
 const TRANSLATION_LOADERS = {
   de: () => import('../i18n/de'),
   zh: () => import('../i18n/zh'),
@@ -79,6 +84,7 @@ export function SettingsProvider({ children }) {
   const [exchangeRateReady, setExchangeRateReady] = useState(true)
   const [exchangeRateCurrency, setExchangeRateCurrency] = useState('EUR')
   const [usdToEurRate, setUsdToEurRate] = useState(0.91)
+  const [usdRateReady, setUsdRateReady] = useState(false)
   const [loadedTranslations, setLoadedTranslations] = useState({ en })
 
   // Load settings from backend once auth mode is known. Single-user mode has no
@@ -158,23 +164,32 @@ export function SettingsProvider({ children }) {
 
     const curr = settings.currency || 'EUR'
     let cancelled = false
-    if (curr === 'USD') {
-      setExchangeRateReady(false)
-      setExchangeRateCurrency(null)
-      setExchangeRate(1.1)
-      fetchExchangeRate('EUR', 'USD', 1.1).then(rate => {
-        if (!cancelled) {
-          setExchangeRate(rate)
-          setExchangeRateCurrency('USD')
-          setExchangeRateReady(true)
-        }
-      })
-    } else {
+
+    // USD-sourced prices need a USD->EUR rate whatever the display currency is,
+    // so this is no longer tied to the non-USD branch.
+    setUsdRateReady(false)
+    fetchExchangeRate('USD', 'EUR', 0.91).then(rate => {
+      if (!cancelled) {
+        setUsdToEurRate(rate)
+        setUsdRateReady(true)
+      }
+    })
+
+    if (curr === 'EUR') {
       setExchangeRateReady(true)
       setExchangeRateCurrency('EUR')
       setExchangeRate(1.0)
-      fetchExchangeRate('USD', 'EUR', 0.91).then(rate => {
-        if (!cancelled) setUsdToEurRate(rate)
+    } else {
+      const fallback = EUR_FALLBACK_RATES[curr] ?? 1.0
+      setExchangeRateReady(false)
+      setExchangeRateCurrency(null)
+      setExchangeRate(fallback)
+      fetchExchangeRate('EUR', curr, fallback).then(rate => {
+        if (!cancelled) {
+          setExchangeRate(rate)
+          setExchangeRateCurrency(curr)
+          setExchangeRateReady(true)
+        }
       })
     }
     return () => { cancelled = true }
@@ -248,8 +263,14 @@ export function SettingsProvider({ children }) {
   }, [settings.price_primary])
 
   const currency = settings.currency || 'EUR'
-  const currencySymbol = currency === 'USD' ? '$' : '€'
-  const moneyExchangeRateReady = currency !== 'USD' || (exchangeRateReady && exchangeRateCurrency === 'USD')
+  const currencySymbol = CURRENCY_SYMBOLS[currency] || CURRENCY_SYMBOLS.EUR
+  // True only when every rate a displayed amount can depend on has been
+  // fetched: EUR->display for stored prices, and USD->EUR for USD-sourced ones.
+  // Reporting readiness on the display rate alone let formatUsdPrice quietly use
+  // the coarse 0.91 fallback while consumers believed the rate was live.
+  const displayRateReady =
+    currency === 'EUR' || (exchangeRateReady && exchangeRateCurrency === currency)
+  const moneyExchangeRateReady = displayRateReady && usdRateReady
   const pricePrimary = getPricePrimary()
   const pricePrimaryField = priceFieldFromPrimary(pricePrimary)
 
@@ -261,9 +282,13 @@ export function SettingsProvider({ children }) {
 
   const formatUsdPrice = useCallback((usdAmount) => {
     if (usdAmount == null || isNaN(Number(usdAmount))) return '-'
-    const converted = currency === 'USD' ? Number(usdAmount) : Number(usdAmount) * usdToEurRate
+    // USD -> EUR -> display currency. exchangeRate is 1.0 when displaying EUR,
+    // and USD is passed straight through rather than round-tripped.
+    const converted = currency === 'USD'
+      ? Number(usdAmount)
+      : Number(usdAmount) * usdToEurRate * exchangeRate
     return `${currencySymbol}${converted.toFixed(2)}`
-  }, [currency, currencySymbol, usdToEurRate])
+  }, [currency, currencySymbol, usdToEurRate, exchangeRate])
 
   return (
     <SettingsContext.Provider value={{

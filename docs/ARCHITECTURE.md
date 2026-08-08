@@ -9,7 +9,7 @@ This document reflects the current code layout at the repository root.
 | Frontend | React 18 + Vite + Tailwind CSS | 3000 |
 | Backend | FastAPI | 8000 |
 | Database | PostgreSQL 18 | 5432 |
-| External APIs | TCGdex, Gemini, Frankfurter, GitHub | external |
+| External APIs | TCGdex, Gemini or OpenAI, Frankfurter, GitHub | external |
 | Containerization | Docker + docker compose | - |
 
 ## Directory Structure
@@ -133,7 +133,7 @@ The split is defined in `backend/api/settings.py`:
   - currency
   - price display preferences
   - Telegram keys and alert preferences
-  - Gemini key
+  - Scanner API keys (Gemini, OpenAI)
   - trainer name
 - `ADMIN_ONLY_KEYS`
   - full sync interval
@@ -173,11 +173,11 @@ Recognition is implemented in `backend/api/recognize.py` and surfaced in `fronte
 Current flow:
 
 1. User uploads or captures a card image
-2. Gemini extracts card name, English name, printed number, set hint, type, HP, and language
+2. The configured vision provider extracts card name, English name, printed number, set hint, type, HP, and language
 3. Search terms are broadened by stripping suffixes such as `EX`, `GX`, `V`, `VMAX`, `VSTAR`, `TAG TEAM`, `BREAK`, and `LV.X`
 4. TCGdex search results are collected in the detected language, with English fallback when needed
 5. Results are ranked by printed card number
-6. If number ranking is not decisive and there are enough candidates, Gemini visually compares the top candidates and picks the best match
+6. If number ranking is not decisive and there are enough candidates, the provider visually compares the top candidates and picks the best match
 
 Transient Gemini `502` / `503` / `504` capacity errors are retried with backoff. Gemini `429` responses are surfaced as rate-limit errors, invalid API keys get a dedicated message, and remaining temporary Gemini outages return a clearer temporary-unavailable response instead of a generic backend `500`.
 
@@ -213,11 +213,15 @@ Current frontend state layers:
 - English is the preferred fallback for missing data, images, and prices only when the same exact TCGdex card or set ID exists in English
 - Regional-only cards are not guessed by translated name
 
-### Gemini
+### Vision providers
 
 - Used for smart scanner recognition
 - Key is read per user from `user_settings`
-- Scanner model is configurable through `GEMINI_MODEL` and defaults to `gemini-flash-latest`
+- Provider is chosen by the admin-only `scanner_provider` setting, then `SCANNER_PROVIDER`, then Gemini
+- Gemini model is configurable through `GEMINI_MODEL` and defaults to `gemini-flash-latest`
+- OpenAI model is configurable through `OPENAI_MODEL` and defaults to `gpt-4o-mini`
+- Keys are read per user; the installation key is used as a fallback only when `ALLOW_SHARED_SCANNER_KEY` is enabled
+- Provider wire formats live behind `services/vision_provider.py`; callers pass provider-neutral text/image parts
 - Scanner calls use the API-key header rather than putting the key in the request URL
 - Transient capacity failures are retried; rate limits, invalid keys, and unavailable models are reported separately
 

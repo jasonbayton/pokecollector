@@ -2,7 +2,13 @@ import httpx
 import os
 import logging
 
-from services.exchange_rates import parse_frankfurter_v2_rate
+from services.exchange_rates import (
+    BASE_CURRENCY,
+    currency_symbol,
+    fallback_exchange_rate,
+    normalize_currency,
+    parse_frankfurter_v2_rate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +83,12 @@ def send_message(text: str, db=None, user_id=None) -> bool:
 
 
 def _format_user_eur(amount: float, db=None, user_id=None) -> str:
-    currency = "EUR"
+    """Format an EUR amount in the user's display currency.
+
+    Previously this special-cased USD and treated everything else as EUR, so a
+    GBP user was sent euro-labelled, unconverted figures.
+    """
+    currency = BASE_CURRENCY
     if db is not None and user_id is not None:
         try:
             from models import UserSetting
@@ -85,20 +96,24 @@ def _format_user_eur(amount: float, db=None, user_id=None) -> str:
                 UserSetting.user_id == user_id,
                 UserSetting.key == "currency",
             ).first()
-            currency = (row.value if row and row.value else "EUR").upper()
+            currency = normalize_currency(row.value if row else None)
         except Exception:
-            currency = "EUR"
+            currency = BASE_CURRENCY
 
-    if currency == "USD":
-        try:
-            with httpx.Client(timeout=5.0) as client:
-                response = client.get("https://api.frankfurter.dev/v2/rate/EUR/USD")
-                response.raise_for_status()
-                rate = parse_frankfurter_v2_rate(response.json())
-        except Exception:
-            rate = 1.1
-        return f"${(amount or 0) * rate:.2f}"
-    return f"€{(amount or 0):.2f}"
+    symbol = currency_symbol(currency)
+    if currency == BASE_CURRENCY:
+        return f"{symbol}{(amount or 0):.2f}"
+
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            response = client.get(
+                f"https://api.frankfurter.dev/v2/rate/{BASE_CURRENCY}/{currency}"
+            )
+            response.raise_for_status()
+            rate = parse_frankfurter_v2_rate(response.json())
+    except Exception:
+        rate = fallback_exchange_rate(BASE_CURRENCY, currency)
+    return f"{symbol}{(amount or 0) * rate:.2f}"
 
 
 def send_price_alert(card_name: str, current_price: float, threshold: float, alert_type: str, db=None, user_id=None):

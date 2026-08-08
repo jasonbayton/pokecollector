@@ -5,6 +5,7 @@ from api.auth import get_current_user
 from database import get_db
 from services.card_values import effective_market_price, normalize_price_field
 from services.card_visibility import visible_card_filter
+from services.exchange_rates import BASE_CURRENCY, currency_symbol, normalize_currency
 from models import CollectionItem, Card, User
 import io
 import csv
@@ -14,16 +15,15 @@ router = APIRouter()
 
 
 def _normalize_currency(value: str | None) -> tuple[str, str]:
-    currency = (value or "EUR").upper()
-    if currency == "USD":
-        return "USD", "$"
-    return "EUR", "€"
+    currency = normalize_currency(value)
+    return currency, currency_symbol(currency)
 
 
 def _convert_eur(amount: float | None, exchange_rate: float, currency: str) -> float | None:
     if amount is None:
         return None
-    return float(amount) * exchange_rate if currency == "USD" else float(amount)
+    # Stored amounts are EUR, so anything else needs the caller's EUR->target rate.
+    return float(amount) if currency == BASE_CURRENCY else float(amount) * exchange_rate
 
 
 def _format_money(amount: float | None, symbol: str) -> str:
