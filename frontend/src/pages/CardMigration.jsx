@@ -88,7 +88,9 @@ function MatchCard({ match, onMigrate, onDismiss, migrating, dismissing }) {
           <button onClick={() => onDismiss(match.match_id)} disabled={migrating || dismissing} className="btn-ghost justify-center">
             <XCircle size={15} /> {dismissing ? t('migration.dismissing') : t('migration.dismiss')}
           </button>
-          <button onClick={() => onMigrate(match.match_id)} disabled={migrating || dismissing} className="btn-primary justify-center">
+          {/* No preview means nothing to confirm against, and migrating is
+              destructive: it moves collection rows and deletes the manual card. */}
+          <button onClick={() => onMigrate(match.match_id)} disabled={migrating || dismissing || !match.api_card} className="btn-primary justify-center">
             <CheckCircle size={15} /> {migrating ? t('migration.migrating') : t('migration.migrateCard')}
           </button>
         </div>

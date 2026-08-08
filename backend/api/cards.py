@@ -26,6 +26,7 @@ from services.digital_sets import digital_sets_enabled
 from services.display_language import get_tcgdex_display_language
 from services.image_url_security import validate_public_https_image_url
 from services.card_numbers import card_number_matches
+from services.sync_service import _is_plausible_match, match_custom_card_in_background
 from services.tcgdex_languages import english_fallback_languages, has_lang_suffix, is_supported_tcgdex_language, normalize_tcgdex_language
 from services.text_search import accent_insensitive_contains
 from services.card_state import card_state_summaries
@@ -296,6 +297,7 @@ def _search_by_code_number(
 @router.post("/custom")
 def create_custom_card(
     data: CardCustomCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -354,6 +356,12 @@ def create_custom_card(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+    # A card is usually created by hand because the catalogue lookup failed to
+    # surface it, which is not the same as it being absent. Check straight away
+    # rather than waiting for the next full sync, but off the request path: the
+    # creation must not block on TCGdex or fail because of it.
+    background_tasks.add_task(match_custom_card_in_background, card.id)
 
     return _card_to_dict(card)
 
@@ -580,7 +588,10 @@ def get_custom_matches(
     for match in matches:
         custom_card = db.query(Card).filter(Card.id == match.custom_card_id).first()
 
-        # Try to get the API card info from the local DB (look up by tcg_card_id since DB id is composite)
+        # Prefer the local copy, but fall back to the catalogue: a target from a
+        # set this installation has not synced produced an empty preview, and
+        # migration stayed available, so the destructive step could be confirmed
+        # without seeing what it was migrating to.
         api_card_info = None
         api_card = db.query(Card).filter(Card.tcg_card_id == match.api_card_id).first()
         if api_card:
@@ -593,6 +604,23 @@ def get_custom_matches(
                 "number": api_card.number,
                 "set_id": api_card.set_id,
             }
+        elif custom_card is not None:
+            try:
+                remote = pokemon_api.get_card(match.api_card_id, lang=custom_card.lang or "en")
+            except Exception as e:
+                logger.warning("Preview lookup failed for %s: %s", match.api_card_id, e)
+                remote = None
+            if remote:
+                image = remote.get("image")
+                api_card_info = {
+                    "id": match.api_card_id,
+                    "name": remote.get("name"),
+                    "images_small": f"{image}/low.webp" if image else None,
+                    "images_large": f"{image}/high.png" if image else None,
+                    "rarity": remote.get("rarity"),
+                    "number": remote.get("localId"),
+                    "set_id": (remote.get("set") or {}).get("id"),
+                }
 
         result.append({
             "match_id": match.id,
@@ -646,6 +674,14 @@ def migrate_custom_card(
                     break
         if not api_data:
             raise HTTPException(status_code=404, detail="API card not found on TCGdex")
+        # Confirm identity at the point of no return. A match recorded by an
+        # earlier build was not identity-checked, and migration moves collection,
+        # wishlist and binder rows and then deletes the manual card.
+        if custom_card_obj is not None and not _is_plausible_match(custom_card_obj, api_data):
+            raise HTTPException(
+                status_code=409,
+                detail="This match no longer looks like the same card. Dismiss it and re-check.",
+            )
         parsed = pokemon_api.parse_card_for_db(api_data, lang=fetch_lang)
         parsed = apply_cross_language_fallbacks(db, parsed)
         composite_api_card_id = parsed["id"]  # e.g. "sv1-1_en"

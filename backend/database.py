@@ -463,6 +463,58 @@ def _run_migrations(conn):
             conn.rollback()
 
 
+def install_custom_match_uniqueness(conn) -> bool:
+    """One open suggestion per custom card, enforced by the database.
+
+    Kept out of the migration list above, which swallows every failure: this
+    index is the only thing preventing a duplicate suggestion once a card can be
+    matched from a request and the scheduled sync at the same time, so a failure
+    to install it has to be visible rather than silently leaving the code
+    relying on protection that is not there.
+
+    Only pending rows are covered. Migration rewrites custom_card_id to the API
+    card's id, so two custom cards that legitimately resolve to the same
+    catalogue card both end up migrated under that id.
+    """
+    try:
+        # Drop the earlier form, which also covered migrated rows. Keep this in
+        # the strict installer so a failed drop is reported rather than hidden
+        # by the best-effort migration loop.
+        conn.execute(text("DROP INDEX IF EXISTS ux_custom_card_match_open"))
+
+        # Historical duplicates would make the index creation fail. Keep the
+        # newest suggestion per card and drop the rest; they are advisory rows,
+        # regenerated on the next check. A missing timestamp ranks as older
+        # than every real timestamp, with id providing a deterministic order
+        # when both timestamps are missing.
+        conn.execute(text("""
+            DELETE FROM custom_card_matches a
+            USING custom_card_matches b
+            WHERE a.status = 'pending' AND b.status = 'pending'
+              AND a.custom_card_id = b.custom_card_id
+              AND (
+                    COALESCE(a.matched_at, TIMESTAMP '-infinity'),
+                    a.id
+                  ) < (
+                    COALESCE(b.matched_at, TIMESTAMP '-infinity'),
+                    b.id
+                  )
+        """))
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_custom_card_match_pending "
+            "ON custom_card_matches (custom_card_id) WHERE status = 'pending'"
+        ))
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        logger.error(
+            "Could not install ux_custom_card_match_pending: %s. Duplicate custom "
+            "card suggestions are possible until this is resolved.", e
+        )
+        return False
+
+
 def migrate_collection_variants():
     """Move rarity-like values out of collection.variant into explicit physical variants."""
     rarity_values = (
@@ -658,6 +710,7 @@ def init_db():
     try:
         with engine.connect() as conn:
             _run_migrations(conn)
+            install_custom_match_uniqueness(conn)
     except Exception:
         pass  # Non-blocking — may not be needed on fresh installs
 

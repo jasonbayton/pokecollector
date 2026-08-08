@@ -1,6 +1,7 @@
 import logging
 import datetime
 import math
+import httpx
 from contextlib import contextmanager
 from typing import Any, Iterable, Mapping
 from sqlalchemy.orm import Session, load_only
@@ -9,6 +10,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from models import Card, Set, CollectionItem, WishlistItem, BinderCard, PriceHistory, SyncLog, PortfolioSnapshot, CustomCardMatch, User, UserSetting
 from services import pokemon_api, telegram
+from sqlalchemy.exc import IntegrityError
+from services.card_numbers import candidate_card_ids, number_matches_candidate
 from services.card_fallbacks import apply_cross_language_fallbacks, build_missing_language_cards_for_set
 from services.card_metadata import enrich_missing_card_metadata
 from services.card_upsert import upsert_card
@@ -650,55 +653,150 @@ def take_portfolio_snapshot(db: Session, user_id: int | None = None):
     db.commit()
 
 
-def check_custom_card_matches(db: Session):
-    """Check if any custom cards now have an equivalent card available via the TCGdex API.
+def _is_plausible_match(card, api_card: dict) -> bool:
+    """Whether a catalogue card is credibly the same card as a manual entry.
 
-    For each custom card that has both set_id and number:
-    - Tries GET /cards/{set_id}-{number} on TCGdex.
-    - If found and not already matched (pending/migrated), creates a CustomCardMatch
-      and sends a Telegram notification.
+    An id resolving is not evidence: candidate ids are generated, so "74a" can
+    produce a request for card "74", which exists and is a different card.
+    Accepting it would later move collection, wishlist and binder rows onto the
+    wrong card and delete the manual one, so both the name and the printed
+    number have to agree before a match is suggested.
     """
+    # Check whatever the manual card actually provides, and require at least one
+    # real check to have happened. Demanding both unconditionally rejected cards
+    # entered without a number, which is common; demanding neither is what made
+    # a wrong-card migration possible in the first place.
+    checked = False
+
+    own_number = str(card.number or "").strip()
+    if own_number:
+        if not number_matches_candidate(own_number, api_card.get("localId")):
+            return False
+        checked = True
+
+    own_name = str(card.name or "").strip().casefold()
+    api_name = str(api_card.get("name") or "").strip().casefold()
+    if own_name:
+        if not api_name or own_name != api_name:
+            return False
+        checked = True
+
+    return checked
+
+
+def find_api_match(db: Session, card) -> str | None:
+    """The catalogue id a manually created card now corresponds to, if any.
+
+    Returns None when the card still has no equivalent, when one has already
+    been recorded, or when the only candidates that resolve are a different
+    card.
+    """
+    if not card.set_id or not card.number:
+        return None
+
+    already = db.query(CustomCardMatch).filter(
+        CustomCardMatch.custom_card_id == card.id,
+        CustomCardMatch.status.in_(["pending", "migrated"]),
+    ).first()
+    if already:
+        return None
+
+    card_lang = card.lang or "en"
+    # The number as typed is rarely the number TCGdex stores: a card entered as
+    # me02 #12 is me02-012 upstream, and one whose number still read "001/093"
+    # is B2a-001. Building the id verbatim missed both.
+    for candidate in candidate_card_ids(card.set_id, card.number):
+        api_card = pokemon_api.get_card(candidate, lang=card_lang)
+        if api_card and _is_plausible_match(card, api_card):
+            return candidate
+    return None
+
+
+def record_custom_card_match(db: Session, card, *, notify: bool = True) -> str | None:
+    """Record a pending match for a custom card, if the catalogue now has it.
+
+    Catalogue unavailability and a losing insert race are treated as no match.
+    Unexpected query, schema, or programming failures propagate so scheduled
+    checks can count them; the request-path worker has its own outer guard.
+    """
+    try:
+        api_card_id = find_api_match(db, card)
+    except (httpx.RequestError, httpx.HTTPStatusError) as e:
+        logger.warning(f"Failed to check API match for custom card {card.id}: {e}")
+        return None
+    if not api_card_id:
+        return None
+
+    try:
+        db.add(CustomCardMatch(
+            custom_card_id=card.id,
+            api_card_id=api_card_id,
+            matched_at=datetime.datetime.utcnow(),
+            status="pending",
+        ))
+        db.commit()
+    except IntegrityError:
+        # The losing side of a race with the full sync. The row it inserted is
+        # the same suggestion, so this is success from the caller's point of
+        # view, but the session must still be rolled back.
+        db.rollback()
+        logger.info(f"Match for custom card {card.id} was recorded concurrently")
+        return None
+    except Exception:
+        # Anything else is a real persistence problem. Roll back so the session
+        # is usable, then let the caller decide: swallowing it here let a full
+        # sync report success while writing nothing.
+        db.rollback()
+        raise
+
+    if notify:
+        try:
+            telegram.send_message(
+                f"🔄 Karte '<b>{card.name}</b>' ({card.set_id} #{card.number}) ist jetzt in der API verfügbar! "
+                f"Öffne die App um die Daten zu migrieren.",
+                db=db,
+            )
+        except Exception as e:
+            logger.warning(f"Match recorded but notification failed for {card.id}: {e}")
+
+    logger.info(f"API match found for custom card '{card.id}' -> '{api_card_id}'")
+    return api_card_id
+
+
+def match_custom_card_in_background(card_id: str) -> None:
+    """Run the catalogue check off the request path, with its own session.
+
+    Card creation must not block on TCGdex, and must not fail because of it.
+    """
+    from database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        card = db.query(Card).filter(Card.id == card_id).first()
+        if card is not None:
+            record_custom_card_match(db, card)
+    except Exception as e:
+        logger.warning(f"Background match failed for custom card {card_id}: {e}")
+    finally:
+        db.close()
+
+
+def check_custom_card_matches(db: Session):
+    """Check whether any custom card now has a catalogue equivalent."""
     custom_cards = db.query(Card).filter(Card.is_custom == True).all()
     if not custom_cards:
         return
 
     logger.info(f"Checking {len(custom_cards)} custom cards for API matches...")
-
+    failures = 0
     for card in custom_cards:
-        if not card.set_id or not card.number:
-            continue
-
-        # Skip if already has a pending or migrated match
-        existing_match = db.query(CustomCardMatch).filter(
-            CustomCardMatch.custom_card_id == card.id,
-            CustomCardMatch.status.in_(["pending", "migrated"]),
-        ).first()
-        if existing_match:
-            continue
-
-        card_lang = card.lang or "en"
-        api_card_id = f"{card.set_id}-{card.number}"
         try:
-            api_card = pokemon_api.get_card(api_card_id, lang=card_lang)
-            if api_card:
-                match = CustomCardMatch(
-                    custom_card_id=card.id,
-                    api_card_id=api_card_id,
-                    matched_at=datetime.datetime.utcnow(),
-                    status="pending",
-                )
-                db.add(match)
-                db.commit()
-
-                set_name = card.set_id
-                telegram.send_message(
-                    f"🔄 Karte '<b>{card.name}</b>' ({set_name} #{card.number}) ist jetzt in der API verfügbar! "
-                    f"Öffne die App um die Daten zu migrieren.",
-                    db=db
-                )
-                logger.info(f"API match found for custom card '{card.id}' → '{api_card_id}'")
+            record_custom_card_match(db, card)
         except Exception as e:
-            logger.warning(f"Failed to check API match for custom card {card.id}: {e}")
+            failures += 1
+            logger.error(f"Could not record match for custom card {card.id}: {e}")
+    if failures:
+        logger.error("%s custom card(s) could not be checked for matches", failures)
 
 
 # A full sync takes ~20 min. A "running" full-sync row older than this is

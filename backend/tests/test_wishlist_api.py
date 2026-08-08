@@ -159,7 +159,8 @@ class WishlistApiTests(unittest.TestCase):
     def test_custom_card_migration_merges_wishlist_and_binder_quantities(self):
         custom_card = Card(
             id="custom-test",
-            name="Custom Sprigatito",
+            name="Sprigatito",
+            number="1",
             lang="en",
             is_custom=True,
             variants_normal=True,
@@ -188,7 +189,8 @@ class WishlistApiTests(unittest.TestCase):
             "lang": "en",
             "variants_normal": True,
         }
-        with patch("api.cards.pokemon_api.get_card", return_value={"id": "sv1-1", "name": "Sprigatito"}), \
+        with patch("api.cards.pokemon_api.get_card",
+                   return_value={"id": "sv1-1", "name": "Sprigatito", "localId": "1"}), \
              patch("api.cards.pokemon_api.parse_card_for_db", return_value=parsed_card), \
              patch("api.cards.apply_cross_language_fallbacks", side_effect=lambda _db, parsed: parsed):
             result = migrate_custom_card(match.id, db=self.db, current_user=self.user)
