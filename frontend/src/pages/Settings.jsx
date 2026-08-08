@@ -192,6 +192,17 @@ const CURRENCY_SYMBOLS = {
   GBP: '£',
 }
 
+// Shown when a value is coming from the service environment rather than from
+// something the user saved, so the field does not look mysteriously empty.
+function EnvSourceHint({ data, label }) {
+  if (data?.source !== 'env') return null
+  return (
+    <p className="text-xs mt-1 opacity-70">
+      {label}{data.hint ? ` (${data.hint})` : ''}
+    </p>
+  )
+}
+
 function formatSupporterAmount(amount, currency = 'EUR') {
   const numericAmount = Number(amount || 0)
   const safeCurrency = currency || 'EUR'
@@ -315,6 +326,9 @@ export default function Settings() {
 
   const [geminiKey, setGeminiKey] = useState('')
   const [geminiDirty, setGeminiDirty] = useState(false)
+  const [openaiKey, setOpenaiKey] = useState('')
+  const [openaiDirty, setOpenaiDirty] = useState(false)
+  const [scannerProvider, setScannerProvider] = useState('gemini')
   const [backupOptions, setBackupOptions] = useState(['full'])
   const [debugModeEnabled, setDebugModeEnabled] = useState(false)
 
@@ -350,6 +364,16 @@ export default function Settings() {
   const { data: geminiKeyData } = useQuery({
     queryKey: ['setting', 'gemini_api_key'],
     queryFn: () => getSetting('gemini_api_key').catch(() => ({ value: '' })),
+  })
+
+  const { data: openaiKeyData } = useQuery({
+    queryKey: ['setting', 'openai_api_key'],
+    queryFn: () => getSetting('openai_api_key').catch(() => ({ value: '' })),
+  })
+
+  const { data: scannerProviderData } = useQuery({
+    queryKey: ['setting', 'scanner_provider'],
+    queryFn: () => getSetting('scanner_provider').catch(() => ({ value: 'gemini' })),
   })
 
   // Public profile
@@ -424,6 +448,14 @@ export default function Settings() {
   useEffect(() => {
     if (geminiKeyData?.value !== undefined && !geminiDirty) setGeminiKey(geminiKeyData.value)
   }, [geminiKeyData])
+
+  useEffect(() => {
+    if (openaiKeyData?.value !== undefined && !openaiDirty) setOpenaiKey(openaiKeyData.value)
+  }, [openaiKeyData])
+
+  useEffect(() => {
+    if (scannerProviderData?.value) setScannerProvider(scannerProviderData.value)
+  }, [scannerProviderData])
 
   useEffect(() => {
     setDebugModeEnabled(settings.debug_mode === 'true')
@@ -522,13 +554,18 @@ export default function Settings() {
   const isRunning = syncStatus?.is_running || syncStatus?.is_price_sync_running || syncMutation.isPending || allPriceSyncMutation.isPending
 
   // Save helper
+  // Returns whether the write succeeded. It deliberately does not rethrow,
+  // because most callers do not await it inside a try block, but a caller that
+  // needs to roll optimistic state back has to be able to tell.
   const saveSetting = async (key, value) => {
     try {
       await setSetting(key, value)
       queryClient.invalidateQueries({ queryKey: ['setting', key] })
       toast.success(t('settings.saved'))
+      return true
     } catch {
       toast.error(t('settings.saveFailed'))
+      return false
     }
   }
 
@@ -645,6 +682,16 @@ export default function Settings() {
 
   const currentLang = settings.language || 'en'
   const currentAppLang = currentLang === 'zh' ? 'zh-cn' : currentLang
+  // A key counts as present whether the user saved one or the service supplies it.
+  const activeProviderKeyData = scannerProvider === 'openai' ? openaiKeyData : geminiKeyData
+  // Credentials are never returned, so presence is reported by `configured`
+  // rather than by a non-empty value.
+  const activeProviderHasKey = Boolean(
+    activeProviderKeyData?.configured ||
+    activeProviderKeyData?.value ||
+    activeProviderKeyData?.source === 'env'
+  )
+
   const currentCurrency = settings.currency || 'EUR'
   const currentPriceType = settings.price_primary || 'trend'
   const exportParams = { price_field: pricePrimaryField, currency: currentCurrency, exchange_rate: exchangeRate }
@@ -915,6 +962,7 @@ export default function Settings() {
                   options={[
                     { value: 'EUR', label: '€ EUR' },
                     { value: 'USD', label: '$ USD' },
+                    { value: 'GBP', label: '£ GBP' },
                   ]}
                   onChange={handleCurrencyChange}
                 />
@@ -940,32 +988,102 @@ export default function Settings() {
           <section className="space-y-1">
             <SectionHeader title={t('settings.sectionAI')} />
             <SettingsCard>
-              <SettingsRow label={t('settings.geminiApiKey')} description={t('settings.geminiApiKeyDesc')} last>
-                <div className="flex items-center gap-2 w-full mt-2">
-                  <input
-                    type={geminiDirty ? "text" : "password"}
-                    value={geminiKey}
-                    onChange={e => { setGeminiKey(e.target.value); setGeminiDirty(true) }}
-                    placeholder="AIza..."
-                    className="input flex-1 text-xs font-mono"
-                    style={{ minWidth: 0 }}
+              {/* scanner_provider is a global, admin-only setting: the API returns
+                  403 for anyone else, so do not offer the control to them. */}
+              {user?.role === 'admin' && (
+              <SettingsRow label={t('settings.scannerProvider')} description={t('settings.scannerProviderDesc')}>
+                <div className="w-full">
+                  <SelectControl
+                    value={scannerProvider}
+                    options={[
+                      { value: 'gemini', label: t('settings.scannerProviderGemini') },
+                      { value: 'openai', label: t('settings.scannerProviderOpenai') },
+                    ]}
+                    onChange={async (val) => {
+                      const previous = scannerProvider
+                      setScannerProvider(val)
+                      const saved = await saveSetting('scanner_provider', val)
+                      if (saved) {
+                        queryClient.invalidateQueries({ queryKey: ['setting', 'scanner_provider'] })
+                      } else {
+                        // The API rejects this for non-admins; do not leave the
+                        // control showing a value the server did not accept.
+                        setScannerProvider(previous)
+                      }
+                    }}
                   />
-                  {geminiKey && !geminiDirty && (
-                    <span className="text-xs text-green flex-shrink-0">✅</span>
+                  {/* Selecting a provider with no key succeeds here and then
+                      fails at scan time, so say so at the point of choosing. */}
+                  {!activeProviderHasKey && (
+                    <p className="text-xs mt-2 opacity-80">
+                      ⚠️ {t('settings.scannerNoKey')}
+                    </p>
                   )}
-                  {geminiDirty && (
-                    <button
-                      onClick={async () => {
-                        await saveSetting('gemini_api_key', geminiKey)
-                        setGeminiDirty(false)
-                        queryClient.invalidateQueries({ queryKey: ['setting', 'gemini_api_key'] })
-                        toast.success(t('settings.apiKeySaved'))
-                      }}
-                      className="btn-primary-sm flex-shrink-0"
-                    >
-                      {t('common.save')}
-                    </button>
-                  )}
+                </div>
+              </SettingsRow>
+              )}
+              <SettingsRow label={t('settings.geminiApiKey')} description={t('settings.geminiApiKeyDesc')}>
+                <div className="w-full mt-2">
+                  <div className="flex items-center gap-2 w-full">
+                    <input
+                      type={geminiDirty ? "text" : "password"}
+                      value={geminiKey}
+                      onChange={e => { setGeminiKey(e.target.value); setGeminiDirty(true) }}
+                      placeholder="AIza..."
+                      className="input flex-1 text-xs font-mono"
+                      style={{ minWidth: 0 }}
+                    />
+                    {(geminiKey || geminiKeyData?.configured) && !geminiDirty && (
+                      <span className="text-xs text-green flex-shrink-0">✅</span>
+                    )}
+                    {geminiDirty && (
+                      <button
+                        onClick={async () => {
+                          // saveSetting already reports the outcome; leaving the
+                          // field dirty on failure keeps the unsaved value.
+                          if (!(await saveSetting('gemini_api_key', geminiKey))) return
+                          setGeminiDirty(false)
+                          queryClient.invalidateQueries({ queryKey: ['setting', 'gemini_api_key'] })
+                        }}
+                        className="btn-primary-sm flex-shrink-0"
+                      >
+                        {t('common.save')}
+                      </button>
+                    )}
+                  </div>
+                  <EnvSourceHint data={geminiKeyData} label={t('settings.settingFromEnvironment')} />
+                </div>
+              </SettingsRow>
+              <SettingsRow label={t('settings.openaiApiKey')} description={t('settings.openaiApiKeyDesc')} last>
+                <div className="w-full mt-2">
+                  <div className="flex items-center gap-2 w-full">
+                    <input
+                      type={openaiDirty ? "text" : "password"}
+                      value={openaiKey}
+                      onChange={e => { setOpenaiKey(e.target.value); setOpenaiDirty(true) }}
+                      placeholder="sk-..."
+                      className="input flex-1 text-xs font-mono"
+                      style={{ minWidth: 0 }}
+                    />
+                    {(openaiKey || openaiKeyData?.configured) && !openaiDirty && (
+                      <span className="text-xs text-green flex-shrink-0">✅</span>
+                    )}
+                    {openaiDirty && (
+                      <button
+                        onClick={async () => {
+                          // saveSetting already reports the outcome; leaving the
+                          // field dirty on failure keeps the unsaved value.
+                          if (!(await saveSetting('openai_api_key', openaiKey))) return
+                          setOpenaiDirty(false)
+                          queryClient.invalidateQueries({ queryKey: ['setting', 'openai_api_key'] })
+                        }}
+                        className="btn-primary-sm flex-shrink-0"
+                      >
+                        {t('common.save')}
+                      </button>
+                    )}
+                  </div>
+                  <EnvSourceHint data={openaiKeyData} label={t('settings.settingFromEnvironment')} />
                 </div>
               </SettingsRow>
             </SettingsCard>

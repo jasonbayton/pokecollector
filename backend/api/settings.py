@@ -17,7 +17,9 @@ from services.exchange_rates import (
     parse_frankfurter_v2_rate,
 )
 from services.card_visibility import get_visible_filter_languages
+from services.exchange_rates import SUPPORTED_CURRENCIES
 from services.public_profile_feature import PUBLIC_PROFILES_SETTING_KEY
+from services.vision_provider import PROVIDERS, shared_scanner_key_allowed
 from services.tcgdex_languages import (
     DEFAULT_TCGDEX_SYNC_LANGUAGES,
     supported_tcgdex_language_payload,
@@ -32,16 +34,51 @@ PER_USER_KEYS = {
     "set_overview_filters", "hidden_set_ids",
     "telegram_bot_token", "telegram_chat_id", "telegram_enabled",
     "price_alerts_enabled", "price_alert_threshold",
-    "gemini_api_key", "trainer_name", "portfolio_display_mode",
+    "gemini_api_key", "openai_api_key", "trainer_name", "portfolio_display_mode",
 }
 
 ADMIN_ONLY_KEYS = {
     "full_sync_interval_days", "price_sync_interval_minutes", "multi_user_mode",
+    "scanner_provider",
     "tcgdex_sync_languages", "debug_mode",
     "cross_language_price_fallback", "cross_language_image_fallback",
     DIGITAL_SETS_SETTING_KEY,
     PUBLIC_PROFILES_SETTING_KEY,
 }
+
+# Settings that can be supplied by the service environment when the user has
+# not set one of their own. The UI uses this to show where a value came from
+# and to offer an override.
+ENV_BACKED_KEYS = {
+    "telegram_bot_token": "TELEGRAM_BOT_TOKEN",
+    "telegram_chat_id": "TELEGRAM_CHAT_ID",
+    "gemini_api_key": "GEMINI_API_KEY",
+    "openai_api_key": "OPENAI_API_KEY",
+    "scanner_provider": "SCANNER_PROVIDER",
+}
+
+# Credentials. Never returned to the browser in full, whoever set them; the UI
+# only needs to know one is present.
+SECRET_KEYS = {"telegram_bot_token", "gemini_api_key", "openai_api_key"}
+
+# Scanner credentials, which only fall back to the environment when the
+# operator has opted into sharing one key across accounts.
+SCANNER_KEY_SETTINGS = {"gemini_api_key", "openai_api_key"}
+
+
+def _default_currency() -> str:
+    """Installation default currency, validated so a typo cannot leave every
+    new account on an unsupported code the frontend would render as euro."""
+    configured = os.environ.get("DEFAULT_CURRENCY", "").strip().upper()
+    if not configured:
+        return "EUR"
+    if configured not in SUPPORTED_CURRENCIES:
+        logger.warning(
+            "DEFAULT_CURRENCY=%r is not supported (%s); falling back to EUR",
+            configured, ", ".join(sorted(SUPPORTED_CURRENCIES)),
+        )
+        return "EUR"
+    return configured
 
 DEFAULT_SETTINGS = {
     "trainer_name": "TRAINER",
@@ -52,7 +89,9 @@ DEFAULT_SETTINGS = {
     "price_alerts_enabled": "false",
     "price_alert_threshold": "10",
     "language": "en",
-    "currency": "EUR",
+    # Env-driven so an installation can pick its own default without a code
+    # change, and so new accounts inherit it rather than starting on EUR.
+    "currency": _default_currency(),
     "price_primary": "trend",
     "portfolio_display_mode": "portfolio_value",
     "price_display": '["trend", "avg", "avg1", "avg7", "avg30", "low"]',
@@ -63,6 +102,7 @@ DEFAULT_SETTINGS = {
     "cross_language_price_fallback": "true",
     "cross_language_image_fallback": "true",
     "debug_mode": "false",
+    "scanner_provider": "gemini",
     PUBLIC_PROFILES_SETTING_KEY: "false",
 }
 
@@ -88,6 +128,28 @@ def _coerce_setting_value(key: str, value) -> str:
         if normalized not in {"portfolio_value", "capital_invested"}:
             raise HTTPException(status_code=422, detail="portfolio_display_mode is invalid")
         return normalized
+    if key == "scanner_provider":
+        # Reject unknown providers rather than letting resolve_provider() quietly
+        # fall back to the default, which hides a typo until a scan fails.
+        provider = str(value).strip().lower()
+        if provider not in PROVIDERS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unsupported scanner provider. Choose one of: {', '.join(sorted(PROVIDERS))}.",
+            )
+        return provider
+    if key == "currency":
+        currency = str(value).strip().upper()
+        if currency not in SUPPORTED_CURRENCIES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unsupported currency. Choose one of: {', '.join(sorted(SUPPORTED_CURRENCIES))}.",
+            )
+        return currency
+    if key in SECRET_KEYS:
+        # Stored untrimmed, a key of spaces looks configured and shadows the
+        # environment while failing every request it is used for.
+        return str(value).strip()
     return str(value)
 
 
@@ -126,18 +188,17 @@ def _get_user_settings(db: Session, user_id: int) -> dict:
 
     # Env var fallback ONLY for admin — other users get empty defaults
     if _is_admin(db, user_id):
-        if "telegram_bot_token" not in result:
-            env_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-            if env_token:
-                result["telegram_bot_token"] = env_token
-        if "telegram_chat_id" not in result:
-            env_chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
-            if env_chat_id:
-                result["telegram_chat_id"] = env_chat_id
-        if "gemini_api_key" not in result:
-            env_gemini = os.environ.get("GEMINI_API_KEY", "")
-            if env_gemini:
-                result["gemini_api_key"] = env_gemini
+        # A cleared override leaves an empty user row behind. Treat empty as
+        # absent, otherwise it shadows the environment value here while the
+        # key-resolution path in api/recognize.py still falls through to the
+        # environment, and the two disagree about what is actually in use.
+        for key, env_name in ENV_BACKED_KEYS.items():
+            if key in SCANNER_KEY_SETTINGS and not shared_scanner_key_allowed():
+                continue
+            if not result.get(key):
+                env_value = os.environ.get(env_name, "").strip()
+                if env_value:
+                    result[key] = env_value.lower() if key == "scanner_provider" else env_value
 
     for key, value in DEFAULT_SETTINGS.items():
         result.setdefault(key, value)
@@ -145,9 +206,25 @@ def _get_user_settings(db: Session, user_id: int) -> dict:
     return result
 
 
+def _redact_secrets(settings: dict) -> dict:
+    """Blank every credential before a settings dict reaches the browser.
+
+    Redacting only environment-sourced values was not enough. A global
+    GEMINI_API_KEY is copied into the admin's user_settings by the v42 startup
+    migration, after which it looks user-set and skipped the mask. Nothing needs
+    the plaintext value client-side, so none of them are returned: the per-key
+    endpoint reports `configured` and a masked `hint` instead.
+    """
+    redacted = dict(settings)
+    for key in SECRET_KEYS:
+        if redacted.get(key):
+            redacted[key] = ""
+    return redacted
+
+
 @router.get("/")
 def get_settings(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return _get_user_settings(db, current_user.id)
+    return _redact_secrets(_get_user_settings(db, current_user.id))
 
 
 @router.get("/tcgdex-languages")
@@ -197,7 +274,7 @@ def update_settings(data: dict, db: Session = Depends(get_db), current_user: Use
     for key, value in pending_side_effects:
         _apply_setting_side_effect(db, key, value)
     db.commit()
-    return _get_user_settings(db, current_user.id)
+    return _redact_secrets(_get_user_settings(db, current_user.id))
 
 
 @router.get("/debug-log")
@@ -253,15 +330,55 @@ def get_exchange_rate(
         return {"from": source, "to": target, "rate": fallback_rate, "fallback": True}
 
 
+def _mask_secret(value: str) -> str:
+    """Enough of a secret to recognise it, not enough to use it."""
+    v = (value or "").strip()
+    if len(v) <= 4:
+        return "•" * 4
+    return "•" * 4 + v[-4:]
+
+
+def _setting_source(db: Session, user_id: int, key: str) -> str:
+    """Where a setting's effective value came from: user, env, or default."""
+    if key in ADMIN_ONLY_KEYS:
+        row = db.query(Setting).filter(Setting.key == key).first()
+    else:
+        row = db.query(UserSetting).filter(
+            UserSetting.user_id == user_id, UserSetting.key == key
+        ).first()
+    if row and row.value:
+        return "user"
+    env_name = ENV_BACKED_KEYS.get(key)
+    if key in SCANNER_KEY_SETTINGS and not shared_scanner_key_allowed():
+        return "default"
+    if env_name and _is_admin(db, user_id) and os.environ.get(env_name, "").strip():
+        return "env"
+    return "default"
+
+
 @router.get("/{key}")
 def get_setting(key: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if key == "sync_interval_hours":
         settings = _get_user_settings(db, current_user.id)
         days = int(settings.get("full_sync_interval_days", "5"))
-        return {"key": key, "value": str(days * 24)}
+        return {
+            "key": key,
+            "value": str(days * 24),
+            "source": _setting_source(db, current_user.id, "full_sync_interval_days"),
+        }
     settings = _get_user_settings(db, current_user.id)
     if key in settings:
-        return {"key": key, "value": settings[key]}
+        source = _setting_source(db, current_user.id, key)
+        value = settings[key]
+        payload = {"key": key, "value": value, "source": source}
+        if key in SECRET_KEYS:
+            # No credential goes back to the browser, whoever set it. The UI
+            # only needs to know one exists and roughly which one it is.
+            payload["value"] = ""
+            payload["configured"] = bool(value)
+            if value:
+                payload["hint"] = _mask_secret(value)
+        return payload
     raise HTTPException(status_code=404, detail=f"Setting {key} not found")
 
 
@@ -288,4 +405,10 @@ def set_setting(key: str, body: dict, db: Session = Depends(get_db), current_use
     if key in ADMIN_ONLY_KEYS:
         _apply_setting_side_effect(db, *pending_side_effect)
     db.commit()
-    return {"key": key, "value": value}
+    payload = {"key": key, "value": value, "source": _setting_source(db, current_user.id, key)}
+    if key in SECRET_KEYS:
+        payload["value"] = ""
+        payload["configured"] = bool(value)
+        if value:
+            payload["hint"] = _mask_secret(value)
+    return payload
