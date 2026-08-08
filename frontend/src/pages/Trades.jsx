@@ -145,7 +145,7 @@ function DraftItem({ item, side, onUpdate, onRemove, t, formatPrice, exchangeRat
       <MiniCardRow
         card={card}
         variant={item.variant}
-        meta={`${item.variant || 'Normal'} - ${item.condition || 'NM'} - ${item.lang || card?.lang || 'en'}`}
+        meta={`${item.variant || 'Normal'} - ${item.condition || 'Mint'} - ${item.lang || card?.lang || 'en'}`}
         value={formatPrice(total)}
         rightAction={
           <button onClick={onRemove} className="btn-ghost p-2 text-brand-red" aria-label={t('common.remove')}>
@@ -345,7 +345,7 @@ export default function Trades() {
 
   const addIncomingCard = (card) => {
     const variant = getDefaultVariantOrNull(card) || 'Normal'
-    const condition = 'NM'
+    const condition = 'Mint'
     const lang = card.lang || card._lang || 'en'
     const price = getEffectiveCardPrice(card, variant, priceField)
     setIncoming(prev => {
@@ -746,7 +746,7 @@ export default function Trades() {
                           key={item.id}
                           card={snapshotTradeCard(item)}
                           variant={item.variant}
-                          meta={`${item.quantity} - ${item.variant || 'Normal'} - ${item.condition || 'NM'}${item.notes ? ` · ${item.notes}` : ''}`}
+                          meta={`${item.quantity} - ${item.variant || 'Normal'} - ${item.condition || 'Mint'}${item.notes ? ` · ${item.notes}` : ''}`}
                           value={formatPrice(item.value_total)}
                         />
                       )

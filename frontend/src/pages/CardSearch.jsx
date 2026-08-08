@@ -432,7 +432,7 @@ export default function CardSearch() {
       const items = Array.from(selectedItems.values()).map(({ card_id, lang, variant }) => ({
         card_id,
         quantity: 1,
-        condition: 'NM',
+        condition: 'Mint',
         variant,
         purchase_price: null,
         lang,

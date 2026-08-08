@@ -183,7 +183,7 @@ See [`CARD_SYSTEM.md`](CARD_SYSTEM.md) for usage, design tokens, review guidance
 - Main search UI for locally cached TCGdex cards and matched custom cards
 - Supports select mode for search results
 - Can select the current page or all matching search results
-- Bulk-add sends selected cards to `/api/collection/bulk-add` with default quantity `1`, condition `NM`, no variant, no purchase price, and the card language
+- Bulk-add sends selected cards to `/api/collection/bulk-add` with default quantity `1`, condition `Mint`, no variant, no purchase price, and the card language
 - Bulk-add success toast reports added, updated, and failed counts
 
 ### `CardScanner`

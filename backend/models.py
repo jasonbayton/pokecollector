@@ -159,7 +159,7 @@ class CollectionItem(Base):
     card_id = Column(String, ForeignKey("cards.id", ondelete="SET NULL"), nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     quantity = Column(Integer, default=1)
-    condition = Column(String, default="NM")  # Mint/NM/LP/MP/HP
+    condition = Column(String, default="Mint")  # Mint/NM/LP/MP/HP
     variant = Column(String, nullable=False, default="Normal")  # Normal/Holo/Reverse Holo/First Edition
     purchase_price = Column(Float)
     lang = Column(String, default="en")  # fixed TCGdex card language
@@ -285,7 +285,7 @@ class ProductCard(Base):
     initial_quantity = Column(Integer, default=1, nullable=False)
     active_quantity = Column(Integer, default=1, nullable=False)
     sold_quantity = Column(Integer, default=0, nullable=False)
-    condition = Column(String, default="NM")
+    condition = Column(String, default="Mint")  # Mint/NM/LP/MP/HP
     variant = Column(String, nullable=False, default="Normal")
     lang = Column(String, default="en")
     purchase_price = Column(Float)

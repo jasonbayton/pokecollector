@@ -234,6 +234,13 @@ const getProductLifecycleStatus = (product) => {
   return 'sealed'
 }
 
+function collectionItemLabel(item, formatPrice) {
+  const card = item.card || {}
+  const setName = card.set_ref?.name || card.set_id || '-'
+  const price = item.purchase_price != null ? ` · ${formatPrice(item.purchase_price)}` : ''
+  return `${card.name || item.card_id} · ${setName} #${card.number || '?'} · ${item.variant || 'Normal'} · ${item.condition || 'Mint'} · ${item.lang || 'en'} · owned ${item.quantity}${price}`
+}
+
 const getProductLifecycleLabel = (product, t) => ({
   sealed: t('products.statusSealed'),
   opened: t('products.statusOpened'),

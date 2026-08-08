@@ -120,7 +120,7 @@ All columns must be present, but only `set_code` and `number` need values in eac
 | `set_code` | Yes | First part of the card code shown in the app, e.g. `ASC` from `ASC 152`. |
 | `number` | Yes | Second part of the card code shown in the app, e.g. `152` from `ASC 152`. |
 | `quantity` | No | Defaults to `1`; must be `1`-`999` when provided. |
-| `condition` | No | Defaults to `NM`; allowed: `Mint`, `NM`, `LP`, `MP`, `HP`. |
+| `condition` | No | Defaults to `Mint`; allowed: `Mint`, `NM`, `LP`, `MP`, `HP`. |
 | `variant` | No | Leave blank or use `Normal`, `Holo`, `Reverse Holo`, `First Edition`. |
 | `lang` | No | Defaults to `en`; accepts any supported TCGdex language code. |
 | `purchase_price` | No | Optional per-card purchase price. |
@@ -129,7 +129,7 @@ Example:
 
 ```csv
 set_code,number,quantity,condition,variant,lang,purchase_price
-ASC,152,2,NM,,en,
+ASC,152,2,Mint,,en,
 PFL,001,1,LP,Reverse Holo,de,1.25
 ```
 

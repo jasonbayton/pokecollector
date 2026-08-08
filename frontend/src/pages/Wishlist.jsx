@@ -159,7 +159,7 @@ export default function Wishlist() {
   })
 
   const addToColMutation = useMutation({
-    mutationFn: (cardId) => addToCollection({ card_id: cardId, quantity: 1, condition: 'NM' }),
+    mutationFn: (cardId) => addToCollection({ card_id: cardId, quantity: 1, condition: 'Mint' }),
     onSuccess: () => {
       toast.success(t('wishlist.addedToCollection'))
       invalidateCardState(queryClient)

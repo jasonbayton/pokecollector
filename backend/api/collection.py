@@ -380,7 +380,7 @@ def _parse_import_row(row: dict, row_number: int) -> CollectionItemCreate:
     if quantity < 1 or quantity > 999:
         raise ValueError("quantity must be between 1 and 999")
 
-    condition = (row.get("condition") or "NM").strip() or "NM"
+    condition = (row.get("condition") or "Mint").strip() or "Mint"
     if condition not in ALLOWED_CONDITIONS:
         raise ValueError(f"condition must be one of: {', '.join(sorted(ALLOWED_CONDITIONS))}")
 

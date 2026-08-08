@@ -128,7 +128,7 @@ class CardWithSet(CardBase):
 class CollectionItemCreate(BaseModel):
     card_id: str
     quantity: int = Field(default=1, ge=1, le=999)
-    condition: str = "NM"
+    condition: str = "Mint"
     variant: Optional[str] = "Normal"
     purchase_price: Optional[float] = None
     lang: str = "en"  # fixed TCGdex language of this card item
@@ -421,7 +421,7 @@ class TradeOutgoingItemCreate(BaseModel):
 class TradeIncomingItemCreate(BaseModel):
     card_id: str
     quantity: int = Field(default=1, ge=1, le=999)
-    condition: str = "NM"
+    condition: str = "Mint"
     variant: Optional[str] = "Normal"
     lang: str = "en"
     value_per_card: Optional[float] = Field(default=None, ge=0)
@@ -441,7 +441,7 @@ class TradeIncomingItemUpdate(BaseModel):
     trade_item_id: Optional[int] = None
     card_id: Optional[str] = None
     quantity: int = Field(default=1, ge=1, le=999)
-    condition: str = "NM"
+    condition: str = "Mint"
     variant: Optional[str] = "Normal"
     lang: str = "en"
     notes: Optional[str] = None

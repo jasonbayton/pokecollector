@@ -142,7 +142,7 @@ function ProductSourceBadge({ item, t, compact = false, className = '' }) {
 
 
 const CSV_IMPORT_HEADER = 'set_code,number,quantity,condition,variant,lang,purchase_price'
-const CSV_IMPORT_TEMPLATE = `${CSV_IMPORT_HEADER}\nASC,152,1,NM,Normal,en,\n`
+const CSV_IMPORT_TEMPLATE = `${CSV_IMPORT_HEADER}\nASC,152,1,Mint,Normal,en,\n`
 
 const naturalCardNumberKey = (number) => String(number || '').trim().split(/(\d+)/).map(part => /^\d+$/.test(part) ? part.padStart(8, '0') : part.toLowerCase()).join('')
 
@@ -236,7 +236,7 @@ function CsvImportModal({ t, onClose, onChooseFile, onDownloadTemplate, isImport
                 <p className="text-[11px] font-semibold text-text-primary mb-1">{t('collection.csvImportDefaultsTitle')}</p>
                 <div className="grid grid-cols-3 gap-2 text-[11px]">
                   <div><span className="font-mono text-text-primary">quantity</span><br /><span className="text-text-muted">1</span></div>
-                  <div><span className="font-mono text-text-primary">condition</span><br /><span className="text-text-muted">NM</span></div>
+                  <div><span className="font-mono text-text-primary">condition</span><br /><span className="text-text-muted">Mint</span></div>
                   <div><span className="font-mono text-text-primary">lang</span><br /><span className="text-text-muted">en</span></div>
                 </div>
               </div>
@@ -264,13 +264,13 @@ function CollectionEditModal({ item, onClose }) {
   const productSourceSummary = getProductSourceSummary(item)
 
   const [quantity, setQuantity] = useState(item.quantity)
-  const [condition, setCondition] = useState(item.condition || 'NM')
+  const [condition, setCondition] = useState(item.condition || 'Mint')
   const [variant, setVariant] = useState(item.variant || 'Normal')
   const [lang, setLang] = useState(item.lang || 'en')
   const [price, setPrice] = useState(itemPriceInput)
   const [showAddVersionForm, setShowAddVersionForm] = useState(false)
   const [newVersionQuantity, setNewVersionQuantity] = useState(1)
-  const [newVersionCondition, setNewVersionCondition] = useState(item.condition || 'NM')
+  const [newVersionCondition, setNewVersionCondition] = useState('Mint')
   const [newVersionVariant, setNewVersionVariant] = useState(item.variant || 'Normal')
   const [newVersionLang, setNewVersionLang] = useState(item.lang || 'en')
   const [newVersionPrice, setNewVersionPrice] = useState('')
@@ -283,7 +283,7 @@ function CollectionEditModal({ item, onClose }) {
   const prevItemRef = useRef({
     id: item.id,
     quantity: item.quantity,
-    condition: item.condition || 'NM',
+    condition: item.condition || 'Mint',
     variant: item.variant || 'Normal',
     lang: item.lang || 'en',
     price: itemPriceInput,
@@ -294,7 +294,7 @@ function CollectionEditModal({ item, onClose }) {
     const nextItem = {
       id: item.id,
       quantity: item.quantity,
-      condition: item.condition || 'NM',
+      condition: item.condition || 'Mint',
       variant: item.variant || 'Normal',
       lang: item.lang || 'en',
       price: itemPriceInput,
@@ -489,7 +489,7 @@ function CollectionEditModal({ item, onClose }) {
             [t('card.hp'), card?.hp],
             [t('card.artist'), card?.artist],
             [t('lang.selectLabel'), tcgdexLanguageLabel(item.lang || 'en')],
-            [t('card.condition'), item.condition || 'NM'],
+            [t('card.condition'), item.condition || 'Mint'],
           ].filter(([, value]) => value).map(([label, value]) => (
             <div key={label} className="rounded-xl border border-border bg-bg-card p-3">
               <p className="text-xs text-text-muted">{label}</p>
@@ -522,7 +522,7 @@ function CollectionEditModal({ item, onClose }) {
             <div className="min-w-0">
               <p className="font-bold text-text-primary">{item.variant || 'Normal'}</p>
               <p className="mt-1 text-xs text-text-muted">
-                {[item.condition || 'NM', tcgdexLanguageLabel(item.lang || 'en')].join(' · ')}
+                {[item.condition || 'Mint', tcgdexLanguageLabel(item.lang || 'en')].join(' · ')}
               </p>
             </div>
             <span className="inline-flex min-w-12 items-center justify-center rounded-lg border border-brand-red/35 bg-brand-red/15 px-3 py-2 text-sm font-black text-brand-red">

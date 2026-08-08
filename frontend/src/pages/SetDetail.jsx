@@ -133,7 +133,7 @@ function OwnedVersionRow({ item, onQuantityChange, onRemove, isUpdating, isRemov
 function SetCardActionModal({ card, setLang, initialTab = 'overview', onClose, onAdd, onAddWishlist, onQuantityChange, onRemove, isAdding, isAddingWishlist, isUpdatingQuantity, isRemoving, t }) {
   const { exchangeRate, exchangeRateReady, formatPrice, pricePrimaryField } = useSettings()
   const [addQuantity, setAddQuantity] = useState(1)
-  const [addCondition, setAddCondition] = useState('NM')
+  const [addCondition, setAddCondition] = useState('Mint')
   const [addVariant, setAddVariant] = useState('Normal')
   const [addLang, setAddLang] = useState(setLang)
   const [addPrice, setAddPrice] = useState('')
@@ -142,7 +142,7 @@ function SetCardActionModal({ card, setLang, initialTab = 'overview', onClose, o
   useEffect(() => {
     if (!card) return
     setAddQuantity(1)
-    setAddCondition('NM')
+    setAddCondition('Mint')
     setAddVariant(getDefaultVariantOrNull(card))
     setAddLang(setLang)
     setAddPrice('')
@@ -333,7 +333,7 @@ export default function SetDetail() {
   const setLang = data?.set?.lang || 'en'
 
   const addMutation = useMutation({
-    mutationFn: ({ card, quantity = 1, condition = 'NM', variant, lang = setLang, purchase_price }) => addToCollection({
+    mutationFn: ({ card, quantity = 1, condition = 'Mint', variant, lang = setLang, purchase_price }) => addToCollection({
       card_id: card.id,
       quantity,
       condition,

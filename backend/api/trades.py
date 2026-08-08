@@ -88,7 +88,7 @@ def _resolve_incoming_card(db: Session, card_id: str, lang: str) -> Card:
 def _prepare_incoming_card(db: Session, incoming, price_field: str) -> dict:
     if not positive_quantity(incoming.quantity, TRADE_QUANTITY_MAX):
         raise HTTPException(status_code=422, detail="quantity must be between 1 and 999")
-    condition = incoming.condition or "NM"
+    condition = incoming.condition or "Mint"
     if condition not in ALLOWED_CONDITIONS:
         raise HTTPException(status_code=422, detail="condition is not supported")
     variant = normalize_collection_variant(incoming.variant)
@@ -241,7 +241,7 @@ def _same_inventory_identity(
     return (
         collection_item.card_id == card_id
         and collection_item.variant == (variant or "Normal")
-        and collection_item.condition == (condition or "NM")
+        and collection_item.condition == (condition or "Mint")
         and collection_item.lang == (lang or "en")
         and _same_purchase_price(collection_item.purchase_price, purchase_price)
     )
@@ -268,7 +268,7 @@ def _legacy_snapshot_purchase_price(
         if (
             item.card_id == trade_item.card_id
             and item.variant == (trade_item.variant or "Normal")
-            and item.condition == (trade_item.condition or "NM")
+            and item.condition == (trade_item.condition or "Mint")
             and item.lang == (trade_item.lang or "en")
         ):
             return item.purchase_price
@@ -964,7 +964,7 @@ def update_trade(
             requested = requested_outgoing.get(trade_item.id)
             new_quantity = int(requested.quantity) if requested else 0
             old_quantity = int(trade_item.quantity or 0)
-            old_condition = trade_item.condition or "NM"
+            old_condition = trade_item.condition or "Mint"
             new_condition = (requested.condition or old_condition) if requested else old_condition
             if requested and new_condition not in ALLOWED_CONDITIONS:
                 raise HTTPException(status_code=422, detail="condition is not supported")
@@ -1083,10 +1083,10 @@ def update_trade(
             requested = requested_incoming.get(trade_item.id)
             new_quantity = int(requested.quantity) if requested else 0
             old_quantity = int(trade_item.quantity or 0)
-            old_condition = trade_item.condition or "NM"
+            old_condition = trade_item.condition or "Mint"
             old_variant = trade_item.variant or "Normal"
             old_lang = trade_item.lang or "en"
-            new_condition = (requested.condition or "NM") if requested else old_condition
+            new_condition = (requested.condition or "Mint") if requested else old_condition
             new_variant = normalize_collection_variant(requested.variant) if requested else old_variant
             new_lang = _normalize_lang(requested.lang) if requested else old_lang
             if requested and new_condition not in ALLOWED_CONDITIONS:
@@ -1128,7 +1128,7 @@ def update_trade(
                             collection_items,
                             card=trade_item.card,
                             quantity=new_quantity,
-                            condition=new_condition or "NM",
+                            condition=new_condition or "Mint",
                             variant=new_variant or "Normal",
                             lang=new_lang or "en",
                             purchase_price=purchase_price,
@@ -1158,7 +1158,7 @@ def update_trade(
                         collection_items,
                         card=trade_item.card,
                         quantity=new_quantity - old_quantity,
-                        condition=trade_item.condition or "NM",
+                        condition=trade_item.condition or "Mint",
                         variant=trade_item.variant or "Normal",
                         lang=trade_item.lang or "en",
                         purchase_price=purchase_price,

@@ -18,7 +18,7 @@ import { isSupportedScannerImage, SCANNER_IMAGE_ACCEPT } from '../utils/scannerI
 function ScanAddModal({ match, defaultLang, onClose, onAdded }) {
   const { t, exchangeRate, exchangeRateReady } = useSettings()
   const [quantity, setQuantity] = useState(1)
-  const [condition, setCondition] = useState('NM')
+  const [condition, setCondition] = useState('Mint')
   const [variant, setVariant] = useState(() => getDefaultVariant(match))
   const [lang, setLang] = useState(match.lang || defaultLang || 'en')
   const [purchasePrice, setPurchasePrice] = useState('')

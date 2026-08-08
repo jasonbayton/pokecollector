@@ -64,7 +64,7 @@ export function CustomCardModal({ onClose, onCreated, sets: setsProp = [], autoA
 
   const [createdCard, setCreatedCard] = useState(null)
   const [quantity, setQuantity] = useState(1)
-  const [condition, setCondition] = useState('NM')
+  const [condition, setCondition] = useState('Mint')
   const [variant, setVariant] = useState('Normal')
   const [purchasePrice, setPurchasePrice] = useState('')
   const queryClient = useQueryClient()
@@ -441,7 +441,7 @@ export function CardModal({ card, onClose, onEdit, defaultLang = 'en', ownedItem
 
   const [activeTab, setActiveTab] = useState(initialTab)
   const [quantity, setQuantity] = useState(1)
-  const [condition, setCondition] = useState('NM')
+  const [condition, setCondition] = useState('Mint')
   const [variant, setVariant] = useState(() => getDefaultVariant(card))
   const [purchasePrice, setPurchasePrice] = useState('')
   const [resolvedCardId, setResolvedCardId] = useState(card.id)

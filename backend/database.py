@@ -277,7 +277,7 @@ def _run_migrations(conn):
             initial_quantity INTEGER NOT NULL DEFAULT 1,
             active_quantity INTEGER NOT NULL DEFAULT 1,
             sold_quantity INTEGER NOT NULL DEFAULT 0,
-            condition VARCHAR DEFAULT 'NM',
+            condition VARCHAR DEFAULT 'Mint',
             variant VARCHAR NOT NULL DEFAULT 'Normal',
             lang VARCHAR DEFAULT 'en',
             purchase_price FLOAT,
