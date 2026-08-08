@@ -1075,6 +1075,10 @@ const en = {
 
   // Card modal
   card: {
+    printings: 'Printings that exist',
+    printing_normal: 'Normal',
+    printing_reverse: 'Reverse holo',
+    printing_holo: 'Holo',
     rarity: 'Rarity',
     availableVariants: 'Available',
     type: 'Type',

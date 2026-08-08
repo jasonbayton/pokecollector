@@ -61,6 +61,11 @@ export function CustomCardModal({ onClose, onCreated, sets: setsProp = [], autoA
   const [hp, setHp] = useState(editCard?.hp || '')
   const [artist, setArtist] = useState(editCard?.artist || '')
   const [imageUrl, setImageUrl] = useState(editCard?.images_small || editCard?.image_url || '')
+  // Which printings of this card exist. A manual card previously had none, so it
+  // could not be recorded as holo or reverse holo at all.
+  const [hasNormal, setHasNormal] = useState(editCard ? !!editCard.variants_normal : true)
+  const [hasReverse, setHasReverse] = useState(!!editCard?.variants_reverse)
+  const [hasHolo, setHasHolo] = useState(!!editCard?.variants_holo)
 
   const [createdCard, setCreatedCard] = useState(null)
   const [quantity, setQuantity] = useState(1)
@@ -165,6 +170,9 @@ export function CustomCardModal({ onClose, onCreated, sets: setsProp = [], autoA
       artist: artist.trim() || undefined,
       image_url: imageUrl.trim() || undefined,
       lang: selectedSet?.lang || 'en',
+      variants_normal: hasNormal,
+      variants_reverse: hasReverse,
+      variants_holo: hasHolo,
     }
     if (isEditMode) {
       updateMutation.mutate(payload)
@@ -278,6 +286,18 @@ export function CustomCardModal({ onClose, onCreated, sets: setsProp = [], autoA
                   <label className="text-xs text-text-secondary mb-1 block">{t('common.artist')}</label>
                   <input type="text" placeholder={t('cardSearch.artistPlaceholder')} value={artist}
                     onChange={(e) => setArtist(e.target.value)} className="input" />
+
+              <div className="mt-3">
+                <p className="text-xs text-text-muted mb-1">{t('card.printings')}</p>
+                <div className="flex flex-wrap gap-3">
+                  {[['normal', hasNormal, setHasNormal], ['reverse', hasReverse, setHasReverse], ['holo', hasHolo, setHasHolo]].map(([key, val, setVal]) => (
+                    <label key={key} className="flex items-center gap-1.5 text-xs">
+                      <input type="checkbox" checked={val} onChange={e => setVal(e.target.checked)} />
+                      {t(`card.printing_${key}`)}
+                    </label>
+                  ))}
+                </div>
+              </div>
                 </div>
               </div>
               <div>

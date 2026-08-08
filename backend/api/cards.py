@@ -346,6 +346,13 @@ def create_custom_card(
         artist=data.artist or None,
         images_small=data.image_url or None,
         images_large=data.image_url or None,
+        # Default to a normal printing when the caller says nothing, so a card
+        # created without variant details is still addable rather than having no
+        # selectable printing at all.
+        variants_normal=True if data.variants_normal is None else data.variants_normal,
+        variants_reverse=bool(data.variants_reverse),
+        variants_holo=bool(data.variants_holo),
+        variants_first_edition=bool(data.variants_first_edition),
         is_custom=True,
         lang=card_lang,
     )

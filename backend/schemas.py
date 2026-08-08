@@ -104,6 +104,13 @@ class CardCustomCreate(BaseModel):
     artist: Optional[str] = None
     image_url: Optional[str] = None
     lang: Optional[str] = None
+    # Which printings of this card exist. Without these a manually created card
+    # has no variants at all, so it cannot be recorded as holo or reverse holo -
+    # the distinction that decides what a card is actually worth.
+    variants_normal: Optional[bool] = None
+    variants_reverse: Optional[bool] = None
+    variants_holo: Optional[bool] = None
+    variants_first_edition: Optional[bool] = None
 
 
 class CustomCardUpdate(BaseModel):
@@ -115,6 +122,13 @@ class CustomCardUpdate(BaseModel):
     image_url: Optional[str] = None
     hp: Optional[str] = None
     lang: Optional[str] = None
+    # Which printings of this card exist. Without these a manually created card
+    # has no variants at all, so it cannot be recorded as holo or reverse holo -
+    # the distinction that decides what a card is actually worth.
+    variants_normal: Optional[bool] = None
+    variants_reverse: Optional[bool] = None
+    variants_holo: Optional[bool] = None
+    variants_first_edition: Optional[bool] = None
 
 
 class CardCustomImageUpdate(BaseModel):
