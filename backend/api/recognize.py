@@ -1,5 +1,4 @@
 import base64
-import asyncio
 import httpx
 import os
 import json
@@ -9,16 +8,29 @@ import logging
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from sqlalchemy.orm import Session
 from api.auth import get_current_user
-from database import get_db
+from database import get_db, get_setting
 from models import Setting, UserSetting, User, Set
+from services.vision_provider import (  # noqa: F401  (re-exported for callers/tests)
+    DEFAULT_GEMINI_MODEL,
+    DEFAULT_OPENAI_MODEL,
+    TRANSIENT_STATUS_CODES as GEMINI_TRANSIENT_STATUS_CODES,
+    build_gemini_generate_url,
+    gemini_error_message,
+    get_gemini_model,
+    get_openai_model,
+    image_part,
+    post_gemini_generate,
+    post_openai_chat,
+    resolve_provider,
+    shared_scanner_key_allowed,
+    text_part,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-GEMINI_TRANSIENT_STATUS_CODES = {502, 503, 504}
-DEFAULT_GEMINI_MODEL = "gemini-flash-latest"
-GEMINI_MODELS_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+SCANNER_PROVIDER_SETTING = "scanner_provider"
 
 
 def normalize_scanner_card_number(value) -> str | None:
@@ -51,110 +63,39 @@ def prioritize_cards_by_number(
     return matches + rest, len(matches)
 
 
-def get_gemini_model() -> str:
-    """Return the configured Gemini model name without the optional models/ prefix."""
-    model = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip()
-    if not model:
-        model = DEFAULT_GEMINI_MODEL
-    if model.startswith("models/"):
-        model = model.removeprefix("models/")
-    return model
+def get_scanner_provider():
+    """Resolve the configured vision provider.
+
+    Order of precedence: the admin-set ``scanner_provider`` setting, then the
+    SCANNER_PROVIDER env var, then Gemini.
+    """
+    return resolve_provider(get_setting(SCANNER_PROVIDER_SETTING))
 
 
-def build_gemini_generate_url(model: str | None = None) -> str:
-    """Build the Gemini generateContent endpoint for the configured scanner model."""
-    gemini_model = (model or get_gemini_model()).strip()
-    if gemini_model.startswith("models/"):
-        gemini_model = gemini_model.removeprefix("models/")
-    return f"{GEMINI_MODELS_BASE_URL}/{gemini_model}:generateContent"
+def get_provider_key(db: Session, provider, user_id: int = None) -> str:
+    """Read the provider's API key: the user's own first, then the environment.
 
-
-def gemini_error_message(resp: httpx.Response) -> str:
-    """Extract the useful upstream Gemini error body when available."""
-    try:
-        data = resp.json()
-    except ValueError:
-        return resp.text.strip()
-    error = data.get("error") if isinstance(data, dict) else None
-    message = error.get("message") if isinstance(error, dict) else None
-    return str(message or "").strip()
+    The environment is consulted only when ALLOW_SHARED_SCANNER_KEY is set, so
+    the default remains one key per user.
+    """
+    if user_id is not None:
+        row = db.query(UserSetting).filter(
+            UserSetting.user_id == user_id, UserSetting.key == provider.settings_key
+        ).first()
+        # Whitespace is not a key: a blank override must not shadow the
+        # environment, nor be sent upstream as credentials.
+        if row and row.value and row.value.strip():
+            return row.value.strip()
+    if not shared_scanner_key_allowed():
+        return ""
+    return os.environ.get(provider.env_key, "").strip()
 
 
 def get_gemini_key(db: Session, user_id: int = None) -> str:
-    """Read Gemini API key from user settings only. No cross-user fallback."""
-    if user_id is not None:
-        row = db.query(UserSetting).filter(
-            UserSetting.user_id == user_id, UserSetting.key == "gemini_api_key"
-        ).first()
-        if row and row.value:
-            return row.value
-    # No global/env fallback — each user must configure their own key
-    return ""
+    """Backwards-compatible accessor for the Gemini key."""
+    from services.vision_provider import GeminiVisionProvider
 
-
-async def post_gemini_generate(
-    client: httpx.AsyncClient,
-    gemini_url: str,
-    api_key: str,
-    payload: dict,
-    *,
-    max_attempts: int = 3,
-) -> httpx.Response:
-    """Call Gemini with small retries for transient capacity errors."""
-    last_error = None
-
-    for attempt in range(max_attempts):
-        try:
-            resp = await client.post(
-                gemini_url,
-                headers={"x-goog-api-key": api_key},
-                json=payload,
-            )
-
-            if resp.status_code == 429:
-                raise HTTPException(
-                    status_code=429,
-                    detail="Gemini Rate Limit erreicht – bitte kurz warten und nochmal versuchen.",
-                )
-            if resp.status_code in {400, 401, 403}:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Ungültiger Gemini API Key. Bitte in den Einstellungen prüfen.",
-                )
-            if resp.status_code == 404:
-                upstream_message = gemini_error_message(resp)
-                detail = "Gemini Modell nicht verfügbar. Bitte GEMINI_MODEL auf ein unterstütztes Modell setzen."
-                if upstream_message:
-                    detail = f"{detail} Google meldet: {upstream_message}"
-                raise HTTPException(status_code=502, detail=detail)
-            if resp.status_code in GEMINI_TRANSIENT_STATUS_CODES:
-                if attempt < max_attempts - 1:
-                    await asyncio.sleep(2 ** attempt)
-                    continue
-                raise HTTPException(
-                    status_code=503,
-                    detail="Gemini ist gerade temporär überlastet oder nicht verfügbar. Bitte gleich nochmal versuchen.",
-                )
-            if resp.is_error:
-                upstream_message = gemini_error_message(resp)
-                detail = f"Gemini Anfrage fehlgeschlagen ({resp.status_code})."
-                if upstream_message:
-                    detail = f"{detail} Google meldet: {upstream_message}"
-                raise HTTPException(status_code=502, detail=detail)
-            return resp
-        except HTTPException:
-            raise
-        except httpx.RequestError as e:
-            last_error = e
-            if attempt < max_attempts - 1:
-                await asyncio.sleep(2 ** attempt)
-                continue
-            raise HTTPException(
-                status_code=503,
-                detail="Gemini konnte gerade nicht erreicht werden. Bitte Verbindung prüfen oder später erneut versuchen.",
-            )
-
-    raise HTTPException(status_code=500, detail=f"Gemini Anfrage fehlgeschlagen: {last_error}")
+    return get_provider_key(db, GeminiVisionProvider(), user_id=user_id)
 
 
 @router.post("/recognize")
@@ -164,24 +105,22 @@ async def recognize_card(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Accepts a card image, uses Gemini Vision to extract card details
-    including the card's language, then searches TCGdex in that language.
+    Accepts a card image, uses the configured vision provider to extract card
+    details including the card's language, then searches TCGdex in that language.
     Supports configured TCGdex card languages automatically.
     """
-    api_key = get_gemini_key(db, user_id=current_user.id)
+    provider = get_scanner_provider()
+    api_key = get_provider_key(db, provider, user_id=current_user.id)
     if not api_key:
         raise HTTPException(
             status_code=400,
-            detail="Kein Gemini API Key konfiguriert. Bitte in den Einstellungen eintragen."
+            detail=f"Kein {provider.label} API Key konfiguriert. Bitte in den Einstellungen eintragen."
         )
 
     # Read image
     image_bytes = await file.read()
     image_b64 = base64.b64encode(image_bytes).decode()
     mime_type = file.content_type or "image/jpeg"
-
-    # Call Gemini Vision — ask for language detection too
-    gemini_url = build_gemini_generate_url()
 
     prompt = """Look at this Pokemon Trading Card Game card image. Extract the following:
 1. Card name (exactly as printed on the card, in the card's language)
@@ -205,22 +144,15 @@ Respond ONLY with this exact JSON (no markdown, no explanation):
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await post_gemini_generate(client, gemini_url, api_key, {
-                "contents": [{
-                    "parts": [
-                        {"text": prompt},
-                        {"inline_data": {"mime_type": mime_type, "data": image_b64}}
-                    ]
-                }]
-            })
+            text = await provider.generate(client, api_key, [
+                text_part(prompt),
+                image_part(mime_type, image_b64),
+            ])
 
-        result = resp.json()
-        text = result["candidates"][0]["content"]["parts"][0]["text"].strip()
-
-        # Parse JSON from Gemini response (handles markdown code blocks too)
+        # Parse JSON from the model response (handles markdown code blocks too)
         json_match = re.search(r'\{.*\}', text, re.DOTALL)
         if not json_match:
-            raise ValueError("No JSON found in Gemini response")
+            raise ValueError(f"No JSON found in {provider.label} response")
         card_info = json.loads(json_match.group())
 
     except HTTPException:
@@ -356,68 +288,56 @@ Respond ONLY with this exact JSON (no markdown, no explanation):
             normalize_scanner_card_number(recognized_number),
         )
 
-    # Visual verification: ask Gemini to pick the best match from candidate images.
-    # Skip this second Gemini call when number ranking is decisive or there
+    # Visual verification: ask the provider to pick the best match from candidate
+    # images. Skip this second call when number ranking is decisive or there
     # are not enough candidate images to compare visually.
     top_candidates = [card for card in deduped[:5] if card.get("image")]  # max 5 to keep costs low
     if len(top_candidates) >= 2 and not number_match_clear:
         try:
             # Download candidate images
             candidate_parts = [
-                {"text": "Here is the original card photo the user took:"},
-                {"inline_data": {"mime_type": mime_type, "data": image_b64}},
-                {
-                    "text": (
-                        "Below are candidate cards from our database. Which one matches the photo "
-                        "above? Look at the artwork, card name, and card number. Respond with ONLY "
-                        "the number (1, 2, 3...) of the best match, or 0 if none match.\n"
-                    )
-                },
+                text_part("Here is the original card photo the user took:"),
+                image_part(mime_type, image_b64),
+                text_part(
+                    "Below are candidate cards from our database. Which one matches the photo "
+                    "above? Look at the artwork, card name, and card number. Respond with ONLY "
+                    "the number (1, 2, 3...) of the best match, or 0 if none match.\n"
+                ),
             ]
 
             async with httpx.AsyncClient(timeout=20) as client:
                 for i, candidate in enumerate(top_candidates):
                     img_url = candidate.get("image")
                     if not img_url:
-                        candidate_parts.append({
-                            "text": f"\nCandidate {i + 1}: {candidate.get('name', '?')} (no image available)"
-                        })
+                        candidate_parts.append(text_part(
+                            f"\nCandidate {i + 1}: {candidate.get('name', '?')} (no image available)"
+                        ))
                         continue
                     try:
                         img_resp = await client.get(img_url, timeout=5)
                         if img_resp.status_code == 200:
                             img_b64 = base64.b64encode(img_resp.content).decode()
-                            candidate_parts.append({
-                                "text": (
-                                    f"\nCandidate {i + 1}: {candidate.get('name', '?')} "
-                                    f"#{candidate.get('number', '?')}"
-                                )
-                            })
-                            candidate_parts.append({
-                                "inline_data": {"mime_type": "image/webp", "data": img_b64}
-                            })
-                        else:
-                            candidate_parts.append({
-                                "text": (
-                                    f"\nCandidate {i + 1}: {candidate.get('name', '?')} "
-                                    "(image unavailable)"
-                                )
-                            })
-                    except Exception:
-                        candidate_parts.append({
-                            "text": (
+                            candidate_parts.append(text_part(
                                 f"\nCandidate {i + 1}: {candidate.get('name', '?')} "
-                                "(image fetch failed)"
-                            )
-                        })
+                                f"#{candidate.get('number', '?')}"
+                            ))
+                            candidate_parts.append(image_part("image/webp", img_b64))
+                        else:
+                            candidate_parts.append(text_part(
+                                f"\nCandidate {i + 1}: {candidate.get('name', '?')} "
+                                "(image unavailable)"
+                            ))
+                    except Exception:
+                        candidate_parts.append(text_part(
+                            f"\nCandidate {i + 1}: {candidate.get('name', '?')} "
+                            "(image fetch failed)"
+                        ))
 
-                verify_resp = await post_gemini_generate(client, gemini_url, api_key, {
-                    "contents": [{"parts": candidate_parts}]
-                }, max_attempts=2)
+                verify_text = await provider.generate(
+                    client, api_key, candidate_parts, max_attempts=2
+                )
 
-            if verify_resp.status_code == 200:
-                verify_result = verify_resp.json()
-                verify_text = verify_result["candidates"][0]["content"]["parts"][0]["text"].strip()
+            if verify_text:
                 # Extract the number from response
                 pick_match = re.search(r"(\d+)", verify_text)
                 if pick_match:
