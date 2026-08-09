@@ -16,3 +16,6 @@ export const getPublicProfiles = () =>
 
 export const getPublicBinder = (handle, binderId) =>
   publicApi.get(`/profiles/${encodeURIComponent(handle)}/binders/${binderId}`).then(r => r.data)
+
+export const getPublicCollection = (handle) =>
+  publicApi.get(`/profiles/${encodeURIComponent(handle)}/collection`).then(r => r.data)

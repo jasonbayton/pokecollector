@@ -37,6 +37,13 @@ export default function PublicProfile() {
             <p className="text-sm text-text-secondary">@{profile.handle}</p>
           </div>
         </div>
+        {profile.shows_collection && (
+          <Link to={`/u/${handle}/collection`}
+                className="mb-3 block rounded-2xl border border-border bg-bg-secondary p-4 shadow-sm transition hover:-translate-y-0.5 hover:bg-bg-elevated">
+            <div className="font-semibold">{t('publicProfiles.viewCollection')}</div>
+            <div className="mt-1 text-sm text-text-secondary">{t('publicProfiles.viewCollectionDesc')}</div>
+          </Link>
+        )}
         {profile.binders.length === 0 && (
           <div className="rounded-2xl border border-border bg-bg-secondary p-8 text-center text-text-secondary">
             {t('publicProfiles.noSharedBinders')}

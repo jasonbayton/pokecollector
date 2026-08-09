@@ -73,6 +73,9 @@ def _run_migrations(conn):
         "ALTER TABLE collection DROP CONSTRAINT IF EXISTS uq_collection_card_variant",
         # Add is_custom column to cards table
         "ALTER TABLE cards ADD COLUMN IF NOT EXISTS is_custom BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS public_show_collection BOOLEAN DEFAULT FALSE",
+        "UPDATE users SET public_show_collection = FALSE WHERE public_show_collection IS NULL",
+        "ALTER TABLE users ALTER COLUMN public_show_collection SET NOT NULL",
         "ALTER TABLE sets ADD COLUMN IF NOT EXISTS is_digital BOOLEAN DEFAULT FALSE",
         "ALTER TABLE cards ADD COLUMN IF NOT EXISTS is_digital BOOLEAN DEFAULT FALSE",
         # Create custom_card_matches table if it doesn't exist (handled by create_all, belt+suspenders)

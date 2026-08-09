@@ -550,3 +550,4 @@ class SyncLogResponse(BaseModel):
 class ProfileUpdate(BaseModel):
     is_profile_public: Optional[bool] = None
     public_show_values: Optional[bool] = None
+    public_show_collection: Optional[bool] = None

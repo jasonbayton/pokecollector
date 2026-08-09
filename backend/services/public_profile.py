@@ -5,7 +5,7 @@ from urllib.parse import quote
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
 
-from models import User, Binder, BinderCard, Card, Setting
+from models import User, Binder, BinderCard, Card, CollectionItem, Setting
 from services.card_numbers import natural_card_number_key
 from services.card_values import effective_market_price
 
@@ -243,10 +243,14 @@ def _card_variant(bc: BinderCard) -> str | None:
     return bc.collection_item.variant if bc.collection_item else None
 
 
-def _serialize_card(bc: BinderCard, show_values: bool) -> dict:
-    card = bc.card
-    quantity = bc.required_quantity or 1
-    variant = _card_variant(bc)
+def _serialize_card(card, *, quantity: int, variant: str | None, show_values: bool) -> dict:
+    """The only shape public surfaces may expose a card in.
+
+    Deliberately not the stored row: no purchase price, no condition, no grade,
+    and the custom image URL is reduced to a boolean because it is a
+    user-supplied URL. Every public surface goes through here so that stays
+    true in one place rather than three.
+    """
     value = effective_market_price(card, variant, _PRICE_FIELD) if show_values else None
     return {
         "id": card.id,
@@ -290,7 +294,15 @@ def serialize_binder_summary(db, binder: Binder, show_values: bool, cards: list[
 def serialize_binder_detail(db, binder: Binder, show_values: bool) -> dict:
     cards = _binder_cards(db, binder)
     summary = serialize_binder_summary(db, binder, show_values, cards=cards)
-    summary["cards"] = [_serialize_card(bc, show_values) for bc in cards if bc.card]
+    summary["cards"] = [
+        _serialize_card(
+            bc.card,
+            quantity=bc.required_quantity or 1,
+            variant=_card_variant(bc),
+            show_values=show_values,
+        )
+        for bc in cards if bc.card
+    ]
     return summary
 
 
@@ -303,8 +315,58 @@ def serialize_profile(db, user: User) -> dict:
         "trainer_name": trainer_name_for(db, user),
         "avatar_id": user.avatar_id,
         "show_values": show_values,
+        "shows_collection": bool(user.public_show_collection),
         "binders": [
             serialize_binder_summary(db, binder, show_values, cards=cards_by_binder.get(binder.id, []))
             for binder in binders
         ],
+    }
+
+
+def serialize_public_collection(db, user: User, show_values: bool) -> dict:
+    """Every card the trainer owns, in the public card shape.
+
+    Grouped by card and variant rather than per row, so buying the same card
+    twice in different conditions shows as a quantity, not as two entries that
+    hint at how the collection is recorded.
+    """
+    rows = (
+        db.query(CollectionItem, Card)
+        .join(Card, Card.id == CollectionItem.card_id)
+        # _serialize_card reads card.set_ref. Without this an anonymous request
+        # becomes one query per distinct card, and the rate limit caps how often
+        # that happens, not how much it costs.
+        .options(joinedload(Card.set_ref))
+        .filter(CollectionItem.user_id == user.id, CollectionItem.quantity > 0)
+        .all()
+    )
+
+    grouped: dict[tuple, dict] = {}
+    for item, card in rows:
+        key = (card.id, item.variant)
+        entry = grouped.get(key)
+        if entry is None:
+            entry = {"card": card, "variant": item.variant, "quantity": 0}
+            grouped[key] = entry
+        entry["quantity"] += int(item.quantity or 0)
+
+    cards = [
+        _serialize_card(e["card"], quantity=e["quantity"], variant=e["variant"], show_values=show_values)
+        for e in grouped.values()
+    ]
+    cards.sort(key=lambda c: ((c["set_name"] or ""), natural_card_number_key(c["number"])))
+
+    total_value = None
+    if show_values:
+        total_value = round(sum((c["market_value"] or 0) * c["quantity"] for c in cards), 2)
+
+    # Distinct cards, not distinct (card, variant) groups, so this means the
+    # same thing here as it does on a binder.
+    unique_cards = {e["card"].id for e in grouped.values()}
+
+    return {
+        "card_count": sum(c["quantity"] for c in cards),
+        "unique_card_count": len(unique_cards),
+        "total_value": total_value,
+        "cards": cards,
     }

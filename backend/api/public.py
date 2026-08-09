@@ -50,7 +50,15 @@ class PublicProfile(BaseModel):
     trainer_name: str
     avatar_id: Optional[int] = None
     show_values: bool
+    shows_collection: bool = False
     binders: List[PublicBinderSummary]
+
+
+class PublicCollection(BaseModel):
+    card_count: int
+    unique_card_count: int
+    total_value: Optional[float] = None
+    cards: List[PublicCard]
 
 
 class PublicProfileSummary(BaseModel):
@@ -108,6 +116,21 @@ def get_public_profile(handle: str, db: Session = Depends(get_db), response: Res
         raise _not_found("Profile not found")
     _set_public_cache(response)
     return pp.serialize_profile(db, user)
+
+
+@router.get("/profiles/{handle}/collection", response_model=PublicCollection)
+def get_public_collection(handle: str, db: Session = Depends(get_db), response: Response = None):
+    _require_public_profiles_enabled(db)
+    user = pp.get_live_profile(db, handle.lower())
+    if not user:
+        raise _not_found("Profile not found")
+    # Sharing the profile does not share the collection; that is a separate
+    # opt-in, and 404 rather than 403 so a closed collection is indistinguishable
+    # from one that was never shared.
+    if not user.public_show_collection:
+        raise _not_found("Collection not found")
+    _set_public_cache(response)
+    return pp.serialize_public_collection(db, user, show_values=bool(user.public_show_values))
 
 
 @router.get("/profiles/{handle}/binders/{binder_id}", response_model=PublicBinderDetail)
