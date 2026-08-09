@@ -4,11 +4,17 @@ from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from api.auth import get_current_user
 from database import get_db
-from models import BinderCard, CollectionItem, Card, ProductCard, ProductPurchase, Set, User
+from models import BinderCard, CollectionItem, Card, DeletedCollectionItem, ProductCard, ProductPurchase, Set, User
 from schemas import CollectionItemCreate, CollectionItemUpdate, CollectionItemResponse, BulkCollectionAddRequest, BulkCollectionAddResponse
 from services import pokemon_api
 from services.card_fallbacks import apply_cross_language_fallbacks, build_missing_language_card
 from services.card_numbers import card_number_matches
+from services.deleted_collection import (
+    archive_collection_item,
+    restore_blocker,
+    restore_entry,
+    serialize_entry,
+)
 from services.card_visibility import visible_card_filter
 from services.binder_allocations import collection_item_allocated_quantity
 from services.digital_sets import digital_sets_enabled
@@ -787,9 +793,59 @@ def remove_from_collection(
             detail=f"This collection item has {allocated_quantity} copie(s) assigned to binders. Remove them from those binders first.",
         )
 
+    # Snapshot before deleting, in this transaction: either both happen or
+    # neither, so the recycle bin can never claim a card that still exists.
+    archive_collection_item(db, item, current_user)
     db.delete(item)
     db.commit()
     return {"message": "Removed from collection"}
+
+
+@router.get("/deleted/")
+def list_deleted_collection_items(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Recently deleted rows: your own, or everyone's for an admin."""
+    is_admin = current_user.role == "admin"
+    query = db.query(DeletedCollectionItem)
+    if not is_admin:
+        query = query.filter(DeletedCollectionItem.user_id == current_user.id)
+    entries = query.order_by(
+        DeletedCollectionItem.deleted_at.desc(), DeletedCollectionItem.id.desc()
+    ).limit(200).all()
+    return [serialize_entry(db, entry, include_owner=is_admin) for entry in entries]
+
+
+@router.post("/deleted/{entry_id}/restore")
+def restore_deleted_collection_item(
+    entry_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Put a deleted row back where it came from."""
+    is_admin = current_user.role == "admin"
+    query = db.query(DeletedCollectionItem).filter(DeletedCollectionItem.id == entry_id)
+    if not is_admin:
+        # 404 rather than 403: another user's entry should be indistinguishable
+        # from one that does not exist, so ids cannot be probed.
+        query = query.filter(DeletedCollectionItem.user_id == current_user.id)
+    entry = query.with_for_update().first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Deleted item not found")
+
+    blocker = restore_blocker(db, entry)
+    if blocker:
+        # The archive row is kept: a restore that cannot happen yet is not a
+        # reason to throw the snapshot away.
+        raise HTTPException(status_code=409, detail=blocker)
+
+    # An admin restores to the original owner, never to themselves.
+    item, outcome = restore_entry(db, entry)
+    db.delete(entry)
+    db.commit()
+    db.refresh(item)
+    return {"outcome": outcome, "collection_item_id": item.id, "quantity": item.quantity}
 
 
 @router.get("/stats/summary")

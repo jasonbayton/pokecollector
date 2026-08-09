@@ -26,6 +26,7 @@ from services.digital_sets import digital_sets_enabled
 from services.display_language import get_tcgdex_display_language
 from services.image_url_security import validate_public_https_image_url
 from services.card_numbers import card_number_matches
+from services.deleted_collection import rewrite_archived_card_id
 from services.sync_service import _is_plausible_match, match_custom_card_in_background
 from services.tcgdex_languages import english_fallback_languages, has_lang_suffix, is_supported_tcgdex_language, normalize_tcgdex_language
 from services.text_search import accent_insensitive_contains
@@ -736,6 +737,11 @@ def migrate_custom_card(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to load API card: {e}")
+
+    # Follow the card id in the recycle bin too. Migration deletes the old
+    # custom card, so an entry archived beforehand would otherwise point at a
+    # card that no longer exists and could never be restored.
+    rewrite_archived_card_id(db, custom_card_id, composite_api_card_id)
 
     # 2. Re-assign collection items
     try:
