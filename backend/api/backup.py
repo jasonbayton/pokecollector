@@ -1,7 +1,10 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from api.auth import get_current_user
-from models import User
+from sqlalchemy.orm import Session
+
+from database import get_db
+from models import ImageCache, User
 import subprocess
 import os
 import datetime
@@ -11,7 +14,7 @@ import logging
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-BACKUP_DIR = "/app/backups"
+BACKUP_DIR = os.getenv("BACKUP_DIR", "/app/backups")
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 BACKUP_GROUPS = {
     "collection": ["collection", "wishlist", "binders", "binder_cards"],
@@ -172,13 +175,13 @@ async def restore_backup(
 
 
 @router.post("/clear-image-cache")
-def clear_image_cache(current_user: User = Depends(get_current_user)):
-    """Clear the image cache directory (admin only)."""
+def clear_image_cache(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Clear cached card images (admin only)."""
     if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
-    import shutil
-    images_dir = "/app/images"
-    if os.path.exists(images_dir):
-        shutil.rmtree(images_dir)
-        os.makedirs(images_dir, exist_ok=True)
-    return {"message": "Image cache cleared"}
+    removed = db.query(ImageCache).delete()
+    db.commit()
+    return {"message": "Image cache cleared", "removed": removed}
