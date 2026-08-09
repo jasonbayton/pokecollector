@@ -878,7 +878,7 @@ export default function Settings() {
                   label={t('settings.publicProfileToggle')}
                 />
               </SettingsRow>}
-              {publicProfilesEnabled && <SettingsRow label={t('settings.publicShowValues')} description={t('settings.publicShowValuesDesc')} last={!(profilePublic && publicHandle)}>
+              {publicProfilesEnabled && <SettingsRow label={t('settings.publicShowValues')} description={t('settings.publicShowValuesDesc')}>
                 <Toggle
                   value={publicShowValues}
                   onChange={(val) => { setPublicShowValues(val); setProfileDirty(true) }}

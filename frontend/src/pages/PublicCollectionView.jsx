@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
+import { HelpCircle } from 'lucide-react'
+import clsx from 'clsx'
 import { getPublicCollection, getPublicProfile } from '../api/publicClient'
 import { formatEur } from '../utils/formatEur'
 import { useSettings } from '../contexts/SettingsContext'
-import { CardDisplay } from '../components/card-system'
+import { CardDisplay, CardLegend } from '../components/card-system'
 
 /**
  * A trainer's whole collection, for anyone with the link. Read-only by
@@ -15,6 +17,7 @@ export default function PublicCollectionView() {
   const [collection, setCollection] = useState(null)
   const [profile, setProfile] = useState(null)
   const [error, setError] = useState(null)
+  const [badgeLegendOpen, setBadgeLegendOpen] = useState(false)
   const { t } = useSettings()
 
   useEffect(() => {
@@ -42,6 +45,8 @@ export default function PublicCollectionView() {
     return <div className="min-h-screen flex items-center justify-center text-text-secondary">{t('common.loading')}</div>
   }
 
+  const cardsLabel = collection.card_count === 1 ? t('serverCollection.card') : t('serverCollection.cards')
+
   return (
     <main className="min-h-screen bg-bg-primary px-4 py-8 text-text-primary">
       <div className="mx-auto max-w-6xl">
@@ -49,13 +54,34 @@ export default function PublicCollectionView() {
           &larr; {profile?.trainer_name || `@${handle}`}
         </Link>
 
-        <div className="mb-6 mt-3">
-          <h1 className="text-xl font-bold text-text-primary">{t('publicProfiles.viewCollection')}</h1>
-          <p className="mt-1 text-sm text-text-secondary">
-            {collection.unique_card_count} {t('serverCollection.uniqueCards')} · {collection.card_count} {t('serverCollection.cards')}
-            {collection.total_value != null ? ` · ${formatEur(collection.total_value)}` : ''}
-          </p>
+        <div className="mb-4 mt-3 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-xl font-bold text-text-primary">{t('publicProfiles.viewCollection')}</h1>
+            <p className="mt-1 text-sm text-text-secondary">
+              {collection.unique_card_count} {t('serverCollection.uniqueCards')} · {collection.card_count} {cardsLabel}
+              {collection.total_value != null ? ` · ${formatEur(collection.total_value)}` : ''}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setBadgeLegendOpen(open => !open)}
+            className={clsx('btn-ghost px-3 py-2 text-sm', badgeLegendOpen && 'border-brand-red/30 bg-brand-red/10 text-brand-red')}
+            aria-expanded={badgeLegendOpen}
+            aria-controls="public-collection-badge-legend"
+          >
+            <HelpCircle size={15} />
+            <span>{t('setDetail.badgeLegend')}</span>
+          </button>
         </div>
+
+        {badgeLegendOpen && (
+          <div id="public-collection-badge-legend" className="card mb-4 p-3">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-text-muted">
+              {t('setDetail.badgeLegend')}
+            </p>
+            <CardLegend collapsible={false} showWishlist={false} />
+          </div>
+        )}
 
         {collection.cards.length === 0 ? (
           <div className="rounded-2xl border border-border bg-bg-secondary p-8 text-center text-text-secondary">
@@ -70,7 +96,17 @@ export default function PublicCollectionView() {
                 image={card.image}
                 price={card.market_value != null ? formatEur(card.market_value) : null}
                 variantEffectSource={card.variant}
-                stateIndicatorProps={{ card: { quantity: card.quantity }, alwaysShowQuantity: true }}
+                captionAccessory={
+                  <span className="block truncate text-[11px] text-text-muted">
+                    {[card.set_name, card.number ? `#${card.number}` : null].filter(Boolean).join(' · ')}
+                  </span>
+                }
+                stateIndicatorProps={{
+                  // getCardState reads owned_variants; a bare quantity renders nothing.
+                  card: { owned_variants: [{ variant: card.variant || 'Normal', quantity: card.quantity }] },
+                  showWishlist: false,
+                  alwaysShowQuantity: true,
+                }}
               />
             ))}
           </div>

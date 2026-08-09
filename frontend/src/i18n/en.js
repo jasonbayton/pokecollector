@@ -1082,6 +1082,7 @@ const en = {
   // Card modal
   serverCollection: {
     title: 'Server collection',
+    card: 'card',
     cards: 'cards',
     uniqueCards: 'unique',
     contributors: 'Sharing',
