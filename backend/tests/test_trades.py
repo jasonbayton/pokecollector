@@ -41,6 +41,7 @@ class TradeApiTests(unittest.TestCase):
         self.db = Session()
         self.user = User(username="ash", hashed_password="x", role="trainer", is_active=True)
         self.other_user = User(username="misty", hashed_password="x", role="trainer", is_active=True)
+        self.admin = User(username="oak", hashed_password="x", role="admin", is_active=True)
         self.outgoing_card = Card(
             id="sv1-1_en",
             tcg_card_id="sv1-1",
@@ -323,7 +324,7 @@ class TradeApiTests(unittest.TestCase):
             db=self.db,
         )
 
-        delete_custom_card(self.custom_card.id, current_user=self.user, db=self.db)
+        delete_custom_card(self.custom_card.id, current_user=self.admin, db=self.db)
         trades = get_trades(current_user=self.user, db=self.db)
 
         self.assertEqual(len(trades), 1)
@@ -368,7 +369,7 @@ class TradeApiTests(unittest.TestCase):
             db=self.db,
         )
 
-        delete_custom_card(cash_named_card.id, current_user=self.user, db=self.db)
+        delete_custom_card(cash_named_card.id, current_user=self.admin, db=self.db)
         summary = get_trades_summary(current_user=self.user, db=self.db)
 
         self.assertEqual(summary["incoming_card_value"], 33)

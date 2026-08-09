@@ -137,6 +137,7 @@ class ProductLedgerApiTests(unittest.TestCase):
         self.db = Session()
         self.user = User(username="ash", hashed_password="x", role="trainer", is_active=True)
         self.other_user = User(username="misty", hashed_password="x", role="trainer", is_active=True)
+        self.admin = User(username="oak", hashed_password="x", role="admin", is_active=True)
         self.card = Card(
             id="sv1-1_en",
             tcg_card_id="sv1-1",
@@ -975,7 +976,7 @@ class ProductLedgerApiTests(unittest.TestCase):
         )
 
         with self.assertRaises(HTTPException) as ctx:
-            delete_custom_card(custom_card.id, current_user=self.user, db=self.db)
+            delete_custom_card(custom_card.id, current_user=self.admin, db=self.db)
 
         product_card = self.db.query(ProductCard).one()
         self.assertEqual(ctx.exception.status_code, 409)

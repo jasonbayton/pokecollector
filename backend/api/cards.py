@@ -404,6 +404,12 @@ def delete_custom_card(
     current_user: User = Depends(get_current_user),
 ):
     """Delete a custom card and all related records."""
+    # Custom cards are global, and deleting one removes it from EVERY user's
+    # collection, wishlist and binders below, not just the caller's. Without
+    # this gate any signed-in user can destroy other people's data.
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin only")
+
     card = db.query(Card).filter(Card.id == card_id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
