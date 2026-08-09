@@ -26,7 +26,7 @@ function OwnerSummary({ owners }) {
  * pricing. A row can span several printings, so the dearest one anyone holds
  * is what the range is matched against.
  */
-function entryPrice(entry, priceField) {
+export function entryPrice(entry, priceField) {
   const card = entry.card || {}
   const variants = entry.variants || []
   if (!variants.length) return getEffectiveCardPrice(card, null, priceField)
@@ -61,8 +61,10 @@ export default function ServerCollection() {
   const [filterDuplicates, setFilterDuplicates] = useState(false)
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['server-collection'],
-    queryFn: () => getServerCollection(),
+    // Valued with the same price field the filter uses, or the totals on screen
+    // would disagree with the range that selected them.
+    queryKey: ['server-collection', pricePrimaryField],
+    queryFn: () => getServerCollection({ price_field: pricePrimaryField }),
   })
 
   const entries = data?.data || []
