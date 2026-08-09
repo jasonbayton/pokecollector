@@ -33,7 +33,7 @@ def archive_collection_item(db: Session, item: CollectionItem, actor: User) -> D
         variant=item.variant or "Normal",
         purchase_price=item.purchase_price,
         lang=item.lang,
-        grade=getattr(item, "grade", None),
+        grade=item.grade,
         added_at=item.added_at,
         deleted_by_user_id=actor.id,
         # Stored, not looked up later: the account may be gone by the time
@@ -73,6 +73,10 @@ def restore_entry(db: Session, entry: DeletedCollectionItem) -> tuple[Collection
             CollectionItem.lang == entry.lang,
             CollectionItem.purchase_price == entry.purchase_price,
         )
+        # Locked: without this a concurrent edit could change the row's
+        # condition, variant, language or price between the match and the
+        # increment, and the restore would add to a row it no longer matches.
+        .with_for_update()
         .first()
     )
 
@@ -93,15 +97,42 @@ def restore_entry(db: Session, entry: DeletedCollectionItem) -> tuple[Collection
         variant=entry.variant or "Normal",
         purchase_price=entry.purchase_price,
         lang=entry.lang,
+        grade=entry.grade,
         added_at=entry.added_at,
     )
     db.add(restored)
     return restored, "recreated"
 
 
-def serialize_entry(db: Session, entry: DeletedCollectionItem, *, include_owner: bool) -> dict:
-    card = db.query(Card).filter(Card.id == entry.card_id).first() if entry.card_id else None
-    blocker = restore_blocker(db, entry)
+def serialize_entries(db: Session, entries: list, *, include_owner: bool) -> list:
+    """Serialise a page of entries with two queries rather than two per row."""
+    card_ids = {e.card_id for e in entries if e.card_id}
+    cards = {
+        c.id: c for c in db.query(Card).filter(Card.id.in_(card_ids)).all()
+    } if card_ids else {}
+    user_ids = {e.user_id for e in entries}
+    users = {
+        u.id: u.username for u in db.query(User).filter(User.id.in_(user_ids)).all()
+    } if user_ids else {}
+    return [
+        _serialize_entry(entry, cards, users, include_owner=include_owner)
+        for entry in entries
+    ]
+
+
+def _blocker_from(entry: DeletedCollectionItem, cards: dict, users: dict) -> str | None:
+    if int(entry.quantity or 0) <= 0:
+        return BLOCKER_INVALID_QUANTITY
+    if entry.user_id not in users:
+        return BLOCKER_OWNER_MISSING
+    if not entry.card_id or entry.card_id not in cards:
+        return BLOCKER_CARD_MISSING
+    return None
+
+
+def _serialize_entry(entry: DeletedCollectionItem, cards: dict, users: dict, *, include_owner: bool) -> dict:
+    card = cards.get(entry.card_id)
+    blocker = _blocker_from(entry, cards, users)
     payload = {
         "id": entry.id,
         "card_id": entry.card_id,
@@ -119,8 +150,7 @@ def serialize_entry(db: Session, entry: DeletedCollectionItem, *, include_owner:
         "restore_blocker": blocker,
     }
     if include_owner:
-        owner = db.query(User).filter(User.id == entry.user_id).first()
-        payload["owner"] = owner.username if owner else f"User #{entry.user_id}"
+        payload["owner"] = users.get(entry.user_id) or f"User #{entry.user_id}"
     return payload
 
 

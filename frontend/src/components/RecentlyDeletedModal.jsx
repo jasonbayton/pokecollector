@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 
 import { getDeletedCollectionItems, restoreDeletedCollectionItem } from '../api/client'
 import { useSettings } from '../contexts/SettingsContext'
+import { invalidateCardState } from '../utils/queryInvalidation'
 import Modal from './ui/Modal'
 import { CardRow } from './card-system'
 import { resolveCardImageUrl } from '../utils/imageUrl'
@@ -29,8 +30,10 @@ export default function RecentlyDeletedModal({ isOpen, onClose }) {
       toast.success(data?.outcome === 'merged'
         ? t('collection.deleted.restoredMerged')
         : t('collection.deleted.restored'))
-      // Covers both the live collection and this list.
-      queryClient.invalidateQueries({ queryKey: ['collection'] })
+      // A restored card changes every cached card-tile view, not just this
+      // list. The project already has a helper for that fan-out.
+      invalidateCardState(queryClient)
+      queryClient.invalidateQueries({ queryKey: ['collection', 'deleted'] })
     },
     onError: (err) => {
       const blocker = err?.response?.data?.detail

@@ -165,6 +165,7 @@ class CollectionItem(Base):
     purchase_price = Column(Float)
     lang = Column(String, default="en")  # fixed TCGdex card language
     added_at = Column(DateTime, default=func.now())
+    grade = Column(String, default="raw")
 
     card = relationship("Card", back_populates="collection_items")
 
@@ -506,7 +507,11 @@ class DeletedCollectionItem(Base):
     id = Column(Integer, primary_key=True, index=True)
     original_collection_item_id = Column(Integer, nullable=True, index=True)
 
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    # Deliberately not a foreign key: this is a snapshot, and an account can be
+    # deleted while its recycle bin entries remain. A constraint here would make
+    # deleting a user fail outright, and would contradict the owner_missing
+    # blocker that exists precisely for that case.
+    user_id = Column(Integer, nullable=False, index=True)
     card_id = Column(String, nullable=True, index=True)
     quantity = Column(Integer, nullable=False)
     condition = Column(String, nullable=True)

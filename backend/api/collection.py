@@ -13,7 +13,7 @@ from services.deleted_collection import (
     archive_collection_item,
     restore_blocker,
     restore_entry,
-    serialize_entry,
+    serialize_entries,
 )
 from services.card_visibility import visible_card_filter
 from services.binder_allocations import collection_item_allocated_quantity
@@ -814,7 +814,7 @@ def list_deleted_collection_items(
     entries = query.order_by(
         DeletedCollectionItem.deleted_at.desc(), DeletedCollectionItem.id.desc()
     ).limit(200).all()
-    return [serialize_entry(db, entry, include_owner=is_admin) for entry in entries]
+    return serialize_entries(db, entries, include_owner=is_admin)
 
 
 @router.post("/deleted/{entry_id}/restore")

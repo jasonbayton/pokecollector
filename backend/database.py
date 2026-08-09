@@ -74,6 +74,9 @@ def _run_migrations(conn):
         # Add is_custom column to cards table
         "ALTER TABLE cards ADD COLUMN IF NOT EXISTS is_custom BOOLEAN DEFAULT FALSE",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS public_show_collection BOOLEAN DEFAULT FALSE",
+        # The recycle bin keeps a snapshot, so it must not hold a live reference
+        # that blocks deleting the account it refers to.
+        "ALTER TABLE deleted_collection_items DROP CONSTRAINT IF EXISTS deleted_collection_items_user_id_fkey",
         "UPDATE users SET public_show_collection = FALSE WHERE public_show_collection IS NULL",
         "ALTER TABLE users ALTER COLUMN public_show_collection SET NOT NULL",
         "ALTER TABLE sets ADD COLUMN IF NOT EXISTS is_digital BOOLEAN DEFAULT FALSE",
