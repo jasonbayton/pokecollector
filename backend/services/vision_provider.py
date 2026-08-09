@@ -26,7 +26,22 @@ DEFAULT_GEMINI_MODEL = "gemini-flash-latest"
 GEMINI_MODELS_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
-OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
+DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
+
+
+def openai_base_url() -> str:
+    """Where the OpenAI-compatible API lives.
+
+    Ollama, llama.cpp and LM Studio all serve the same chat completions shape,
+    so pointing this elsewhere is the whole of what is needed to run the scanner
+    against a local model.
+    """
+    configured = (os.environ.get("OPENAI_BASE_URL") or "").strip().rstrip("/")
+    return configured or DEFAULT_OPENAI_BASE_URL
+
+
+def openai_chat_completions_url() -> str:
+    return f"{openai_base_url()}/chat/completions"
 
 DEFAULT_PROVIDER = "gemini"
 
@@ -210,10 +225,15 @@ async def post_openai_chat(
     max_attempts: int = 3,
 ) -> httpx.Response:
     """Call the OpenAI chat completions API with the same retry semantics."""
+    # A self-hosted endpoint usually wants no key at all, so only send the
+    # header when there is something to send.
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     return await _post_with_retries(
         client,
-        OPENAI_CHAT_COMPLETIONS_URL,
-        {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        openai_chat_completions_url(),
+        headers,
         payload,
         label="OpenAI",
         vendor="OpenAI",
@@ -264,6 +284,10 @@ class VisionProvider:
         return self.extract_text(resp.json()).strip()
 
 
+    def requires_api_key(self) -> bool:
+        """Whether a scan can even be attempted without a credential."""
+        return True
+
 class GeminiVisionProvider(VisionProvider):
     name = "gemini"
     settings_key = "gemini_api_key"
@@ -304,6 +328,11 @@ class OpenAIVisionProvider(VisionProvider):
 
     def model(self) -> str:
         return get_openai_model()
+
+    def requires_api_key(self) -> bool:
+        # Only the hosted API needs a credential. Pointing OPENAI_BASE_URL at
+        # Ollama, llama.cpp or LM Studio means there is usually no key to give.
+        return openai_base_url() == DEFAULT_OPENAI_BASE_URL
 
     def build_payload(self, parts: list[dict]) -> dict:
         content = []

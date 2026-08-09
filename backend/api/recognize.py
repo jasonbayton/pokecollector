@@ -129,7 +129,7 @@ async def recognize_card(
     """
     provider = get_scanner_provider()
     api_key = get_provider_key(db, provider, user_id=current_user.id)
-    if not api_key:
+    if not api_key and provider.requires_api_key():
         raise HTTPException(
             status_code=400,
             detail=f"Kein {provider.label} API Key konfiguriert. Bitte in den Einstellungen eintragen."

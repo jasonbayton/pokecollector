@@ -163,6 +163,7 @@ GEMINI_API_KEY=your_gemini_key
 GEMINI_MODEL=gemini-flash-latest
 OPENAI_API_KEY=your_openai_key
 OPENAI_MODEL=gpt-4o-mini
+# OPENAI_BASE_URL=http://127.0.0.1:11434/v1   # optional: any OpenAI-compatible API
 SCANNER_PROVIDER=gemini
 ALLOW_SHARED_SCANNER_KEY=false
 DEFAULT_CURRENCY=EUR
@@ -266,6 +267,7 @@ The **Users** tab is only visible to admin users and only while multi-user mode 
 | `GEMINI_API_KEY` | Initial Gemini key for the admin user; other users configure their own key in Settings | *(empty)* |
 | `GEMINI_MODEL` | Gemini model used by the card scanner. Change this if Google retires the default model for new API keys. | `gemini-flash-latest` |
 | `OPENAI_API_KEY` | Initial OpenAI key for the admin user; other users configure their own key in Settings | *(empty)* |
+| `OPENAI_BASE_URL` | Any OpenAI-compatible chat completions API, so the scanner can use a local model through Ollama, llama.cpp or LM Studio. Needs a vision-capable model. When set away from the default, no API key is required | `https://api.openai.com/v1` |
 | `OPENAI_MODEL` | OpenAI model used by the card scanner | `gpt-4o-mini` |
 | `SCANNER_PROVIDER` | Which vision model reads card photos: `gemini` or `openai`. The admin-set **Card scanner** setting takes precedence. | `gemini` |
 | `ALLOW_SHARED_SCANNER_KEY` | When `true`, accounts without their own key fall back to the installation key above, so one key covers every user. Off by default: consider the billing and isolation implications on a multi-user install. | `false` |
