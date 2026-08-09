@@ -14,6 +14,7 @@ const PAGE_TITLE_KEYS = {
   '/products':   'nav.products',
   '/trades':     'nav.trades',
   '/leaderboard': 'nav.leaderboard',
+  '/social/server': 'serverCollection.title',
   '/achievements': 'nav.achievements',
   '/settings':   'nav.settings',
   '/migration':  'migration.title',

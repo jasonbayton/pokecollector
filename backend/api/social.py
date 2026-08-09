@@ -607,11 +607,18 @@ def get_server_collection(
                 "card": _card_to_dict(card),
                 "quantity": 0,
                 "owners": [],
+                # Which printings exist across every owner. The card tile picks
+                # one foil effect from these, so a card nobody holds in holo
+                # should not shimmer.
+                "variants": [],
                 "total_value": 0.0,
             }
             merged[card.id] = entry
 
         quantity = int(item.quantity or 0)
+        variant = (item.variant or "").strip()
+        if variant and variant not in entry["variants"]:
+            entry["variants"].append(variant)
         price = effective_market_price(card, item.variant, price_field) or 0
         entry["quantity"] += quantity
         entry["total_value"] += float(price) * quantity
@@ -629,6 +636,7 @@ def get_server_collection(
     data = sorted(merged.values(), key=lambda e: (-e["total_value"], e["card"]["name"] or ""))
     for entry in data:
         entry["owners"].sort(key=lambda o: o["username"].lower())
+        entry["variants"].sort(key=str.lower)
         entry["total_value"] = round(entry["total_value"], 2)
         entry["owner_count"] = len(entry["owners"])
 

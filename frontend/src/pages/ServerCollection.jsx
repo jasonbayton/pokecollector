@@ -130,6 +130,7 @@ export default function ServerCollection() {
                   image={resolveCardImageUrl(entry.card)}
                   price={entry.total_value > 0 ? formatPrice(entry.total_value) : null}
                   stateIndicatorProps={{ card: { quantity: entry.quantity }, alwaysShowQuantity: true }}
+                  variantEffectSource={entry.variants || []}
                   captionAccessory={<OwnerSummary owners={entry.owners} />}
                   onClick={() => setSelectedCard(entry)}
                 />
@@ -148,6 +149,7 @@ export default function ServerCollection() {
                   badges={entry.owners.map((o) => ({ label: `${o.username} \u00d7${o.quantity}`, variant: 'purple' }))}
                   value={entry.total_value > 0 ? formatPrice(entry.total_value) : '-'}
                   valueSecondary={`\u00d7${entry.quantity}`}
+                  variantEffectSource={entry.variants || []}
                   onClick={() => setSelectedCard(entry)}
                 />
               ))}

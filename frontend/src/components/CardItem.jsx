@@ -866,7 +866,10 @@ export function CardModal({ card, onClose, onEdit, defaultLang = 'en', ownedItem
               </div>
             )}
             <div className="space-y-3">
-              {activeTab === 'owned' && ownedQuantity > 0 && (
+              {/* Also shown while adding: it is easy to forget you already hold
+                  a card and quietly build up duplicates. Informational only -
+                  the add button stays exactly as it is. */}
+              {(activeTab === 'owned' || activeTab === 'add') && ownedQuantity > 0 && (
                 <div className="rounded-xl border border-green/30 bg-green/10 p-3">
                   <p className="text-sm font-semibold text-green">✓ {t('cardSearch.alreadyOwned')} · {ownedQuantity}x</p>
                   {modalOwnedItems.length > 0 && (

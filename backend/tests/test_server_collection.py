@@ -72,6 +72,18 @@ class SharedViewCannotEditOtherPeoplesCardsTests(unittest.TestCase):
         )
         self.assertIn("!readOnly", line, f"custom image editor not gated: {line.strip()}")
 
+    def test_the_route_has_a_nav_title(self):
+        # AppNav renders the whole top strip - logout included - only when the
+        # path matches PAGE_TITLE_KEYS, so a missing entry silently costs the
+        # page its header rather than just its title.
+        nav = os.path.join(_ROOT, "frontend", "src", "components", "AppNav.jsx")
+        if not os.path.exists(nav):
+            self.skipTest("AppNav.jsx not present")
+        with open(nav, encoding="utf-8") as handle:
+            source = handle.read()
+        titles = source[source.index("PAGE_TITLE_KEYS = {"):source.index("}", source.index("PAGE_TITLE_KEYS = {"))]
+        self.assertIn("'/social/server'", titles)
+
     def test_only_client_import_is_the_read_endpoint(self):
         imports = re.findall(r"from '\.\./api/client'", self.source)
         self.assertEqual(len(imports), 1, "expected exactly one api/client import")
