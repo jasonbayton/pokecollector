@@ -386,6 +386,7 @@ export default function Settings() {
   // Public profile
   const [profilePublic, setProfilePublic] = useState(false)
   const [publicShowValues, setPublicShowValues] = useState(false)
+  const [publicShowCollection, setPublicShowCollection] = useState(false)
   const [profileDirty, setProfileDirty] = useState(false)
   const [publicFeatureSaving, setPublicFeatureSaving] = useState(false)
 
@@ -398,6 +399,7 @@ export default function Settings() {
     if (profileData && !profileDirty) {
       setProfilePublic(!!profileData.is_profile_public)
       setPublicShowValues(!!profileData.public_show_values)
+      setPublicShowCollection(!!profileData.public_show_collection)
     }
   }, [profileData, profileDirty])
 
@@ -524,6 +526,7 @@ export default function Settings() {
       queryClient.invalidateQueries({ queryKey: ['leaderboard'] })
       setProfilePublic(!!data.is_profile_public)
       setPublicShowValues(!!data.public_show_values)
+      setPublicShowCollection(!!data.public_show_collection)
       setProfileDirty(false)
       toast.success(t('settings.saved'))
     },
@@ -534,6 +537,7 @@ export default function Settings() {
     profileMutation.mutate({
       is_profile_public: profilePublic,
       public_show_values: publicShowValues,
+      public_show_collection: publicShowCollection,
     })
   }
 
@@ -879,6 +883,13 @@ export default function Settings() {
                   value={publicShowValues}
                   onChange={(val) => { setPublicShowValues(val); setProfileDirty(true) }}
                   label={t('settings.publicShowValues')}
+                />
+              </SettingsRow>}
+              {publicProfilesEnabled && <SettingsRow label={t('settings.publicShowCollection')} description={t('settings.publicShowCollectionDesc')} last={!(profilePublic && publicHandle)}>
+                <Toggle
+                  value={publicShowCollection}
+                  onChange={(val) => { setPublicShowCollection(val); setProfileDirty(true) }}
+                  label={t('settings.publicShowCollection')}
                 />
               </SettingsRow>}
               {publicProfilesEnabled && profilePublic && publicHandle && (

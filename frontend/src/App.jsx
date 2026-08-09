@@ -33,6 +33,7 @@ const Achievements = lazy(() => import('./pages/Achievements'))
 const UserCollection = lazy(() => import('./pages/UserCollection'))
 const PublicProfile = lazy(() => import('./pages/PublicProfile'))
 const PublicBinderView = lazy(() => import('./pages/PublicBinderView'))
+const PublicCollectionView = lazy(() => import('./pages/PublicCollectionView'))
 const PublicDirectory = lazy(() => import('./pages/PublicDirectory'))
 const CardSystemGallery = import.meta.env.DEV
   ? lazy(() => import('./components/card-system/CardSystemGallery'))
@@ -195,6 +196,7 @@ export default function App() {
               <Route index element={lazyRoute(<PublicDirectory />)} />
               <Route path=":handle" element={lazyRoute(<PublicProfile />)} />
               <Route path=":handle/binder/:binderId" element={lazyRoute(<PublicBinderView />)} />
+              <Route path=":handle/collection" element={lazyRoute(<PublicCollectionView />)} />
             </Route>
             <Route path="/*" element={<ProtectedRoutes />} />
           </Routes>
