@@ -2,7 +2,7 @@ import unittest
 
 try:
     from fastapi import HTTPException
-    from sqlalchemy import create_engine
+    from sqlalchemy import create_engine, text
     from sqlalchemy.orm import sessionmaker
 
     from api.collection import (
@@ -71,6 +71,29 @@ class RecycleBinTests(_Fixture, unittest.TestCase):
         # deleted, but not by whom.
         self._delete_as(self.owner)
         self.assertEqual(self._entry().deleted_by_username, "mika")
+
+    def test_an_account_with_recycle_bin_entries_can_still_be_deleted(self):
+        # The archive keeps a snapshot, not a live reference. A foreign key here
+        # would make deleting the account fail outright, and SQLite hides that
+        # by default, so foreign keys are enforced explicitly.
+        self.db.execute(text("PRAGMA foreign_keys=ON"))
+        self._delete_as(self.owner)
+        self.db.delete(self.owner)
+        self.db.commit()
+        self.assertEqual(self.db.query(DeletedCollectionItem).count(), 1)
+
+    def test_grade_survives_the_round_trip(self):
+        self.db.query(CollectionItem).delete()
+        self.db.add(CollectionItem(
+            card_id=self.card.id, user_id=self.owner.id, quantity=1,
+            condition="Mint", variant="Normal", lang="en", grade="PSA 10",
+        ))
+        self.db.commit()
+        item_id = self.db.query(CollectionItem).one().id
+        remove_from_collection(item_id, current_user=self.owner, db=self.db)
+        self.assertEqual(self._entry().grade, "PSA 10")
+        restore_deleted_collection_item(self._entry().id, current_user=self.owner, db=self.db)
+        self.assertEqual(self.db.query(CollectionItem).one().grade, "PSA 10")
 
     def test_the_actor_is_remembered_even_if_the_account_goes(self):
         self._delete_as(self.owner)
