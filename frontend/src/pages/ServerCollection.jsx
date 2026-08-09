@@ -3,9 +3,19 @@ import { useQuery } from '@tanstack/react-query'
 import { Users, Search, LayoutGrid, List } from 'lucide-react'
 
 import { getServerCollection } from '../api/client'
+import { CardModal } from '../components/CardItem'
+import { CardDisplay, CardRow } from '../components/card-system'
 import { useSettings } from '../contexts/SettingsContext'
 import { resolveCardImageUrl } from '../utils/imageUrl'
-import CardItem from '../components/CardItem'
+
+/** Who holds this card, shown under the artwork. The whole point of the view. */
+function OwnerSummary({ owners }) {
+  return (
+    <span className="block truncate text-[11px] text-blue">
+      {owners.map((o) => `${o.username} ×${o.quantity}`).join(', ')}
+    </span>
+  )
+}
 
 /**
  * Every contributed collection, merged. Deliberately read-only: this answers
@@ -39,14 +49,14 @@ export default function ServerCollection() {
   }, [entries, search, ownerFilter])
 
   if (isLoading) {
-    return <div className="p-4 text-sm text-text-muted">{t('common.loading')}</div>
+    return <div className="py-4 text-sm text-text-muted">{t('common.loading')}</div>
   }
   if (isError) {
-    return <div className="p-4 text-sm text-brand-red">{t('common.error')}</div>
+    return <div className="py-4 text-sm text-brand-red">{t('common.error')}</div>
   }
 
   return (
-    <div className="space-y-4 p-4">
+    <div className="space-y-4 pb-2">
       <div>
         <h1 className="flex items-center gap-2 text-xl font-bold text-text-primary">
           <Users size={20} className="text-blue" />
@@ -114,65 +124,32 @@ export default function ServerCollection() {
           ) : view === 'grid' ? (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
               {visible.map((entry) => (
-                <button
+                <CardDisplay
                   key={entry.id}
-                  type="button"
-                  onClick={() => setSelectedCard(entry.card)}
-                  className="card overflow-hidden p-2 text-left"
-                >
-                  <div className="relative">
-                    <img
-                      src={resolveCardImageUrl(entry.card)}
-                      alt={entry.card.name}
-                      loading="lazy"
-                      className="w-full rounded-lg"
-                    />
-                    <span className="absolute left-1 top-1 rounded-full bg-bg-primary/90 px-2 py-0.5 text-[11px] font-bold">
-                      ×{entry.quantity}
-                    </span>
-                  </div>
-                  <p className="mt-2 truncate text-sm font-semibold text-text-primary">{entry.card.name}</p>
-                  <p className="truncate text-[11px] text-text-muted">
-                    {entry.card.set_abbreviation || entry.card.set_id} {entry.card.number}
-                  </p>
-                  <p className="mt-1 truncate text-[11px] text-blue">
-                    {entry.owners.map((o) => `${o.username} ×${o.quantity}`).join(', ')}
-                  </p>
-                  <p className="text-[11px] font-semibold text-green">{formatPrice(entry.total_value)}</p>
-                </button>
+                  card={entry.card}
+                  image={resolveCardImageUrl(entry.card)}
+                  price={entry.total_value > 0 ? formatPrice(entry.total_value) : null}
+                  stateIndicatorProps={{ card: { quantity: entry.quantity }, alwaysShowQuantity: true }}
+                  captionAccessory={<OwnerSummary owners={entry.owners} />}
+                  onClick={() => setSelectedCard(entry)}
+                />
               ))}
             </div>
           ) : (
-            <div className="card divide-y divide-border">
+            <div className="space-y-2">
               {visible.map((entry) => (
-                <button
+                <CardRow
                   key={entry.id}
-                  type="button"
-                  onClick={() => setSelectedCard(entry.card)}
-                  className="flex w-full items-center gap-3 p-3 text-left"
-                >
-                  <img
-                    src={resolveCardImageUrl(entry.card)}
-                    alt={entry.card.name}
-                    loading="lazy"
-                    className="h-14 w-10 shrink-0 rounded object-cover"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-text-primary">{entry.card.name}</p>
-                    <p className="truncate text-[11px] text-text-muted">
-                      {entry.card.set_name || entry.card.set_id} #{entry.card.number}
-                    </p>
-                  </div>
-                  <div className="hidden min-w-0 flex-1 sm:block">
-                    <p className="truncate text-[11px] text-blue">
-                      {entry.owners.map((o) => `${o.username} ×${o.quantity}`).join(', ')}
-                    </p>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    <p className="text-sm font-semibold">×{entry.quantity}</p>
-                    <p className="text-[11px] text-green">{formatPrice(entry.total_value)}</p>
-                  </div>
-                </button>
+                  card={entry.card}
+                  image={resolveCardImageUrl(entry.card)}
+                  name={entry.card.name}
+                  setNumber={[entry.card.set_ref?.abbreviation || entry.card.set_id, entry.card.number]
+                    .filter(Boolean).join(' ').toUpperCase()}
+                  badges={entry.owners.map((o) => ({ label: `${o.username} \u00d7${o.quantity}`, variant: 'purple' }))}
+                  value={entry.total_value > 0 ? formatPrice(entry.total_value) : '-'}
+                  valueSecondary={`\u00d7${entry.quantity}`}
+                  onClick={() => setSelectedCard(entry)}
+                />
               ))}
             </div>
           )}
@@ -180,7 +157,11 @@ export default function ServerCollection() {
       )}
 
       {selectedCard && (
-        <CardItem card={selectedCard} isModal onClose={() => setSelectedCard(null)} />
+        <CardModal
+          card={selectedCard.card}
+          readOnly
+          onClose={() => setSelectedCard(null)}
+        />
       )}
     </div>
   )

@@ -456,7 +456,7 @@ export const CardItem = memo(function CardItem({ card, showActions = true, onAdd
   )
 })
 
-export function CardModal({ card, onClose, onEdit, defaultLang = 'en', ownedItems = null, initialTab = 'overview' }) {
+export function CardModal({ card, onClose, onEdit, defaultLang = 'en', ownedItems = null, initialTab = 'overview', readOnly = false }) {
   if (!card || !card.id) return null
 
   const [activeTab, setActiveTab] = useState(initialTab)
@@ -492,7 +492,9 @@ export function CardModal({ card, onClose, onEdit, defaultLang = 'en', ownedItem
   const safePriceHistory = Array.isArray(priceHistory) ? priceHistory : []
   const hasApiImage = Boolean(card?.images?.large || card?.images_large || card?.images?.small || card?.images_small || card?.image)
   const customImageCardId = card?.card_id || card?.id
-  const canEditCustomImage = !card.is_custom && !hasApiImage && typeof customImageCardId === 'string'
+  // custom_image_url lives on the Card row, so editing it changes the image for
+  // everyone. Shared views render other people's cards and must not offer it.
+  const canEditCustomImage = !readOnly && !card.is_custom && !hasApiImage && typeof customImageCardId === 'string'
   const customImageProxyUrl = canEditCustomImage && savedCustomImageUrl
     ? `${cardImageUrl(customImageCardId, 'large')}?v=${customImageVersion}`
     : null

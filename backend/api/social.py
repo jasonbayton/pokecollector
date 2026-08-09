@@ -2,9 +2,10 @@ from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from api.auth import get_current_user
+from api.cards import _card_to_dict
 from database import get_db
 from models import Card, CollectionItem, ProductPurchase, Set, User, UserSetting, WishlistItem
 from services.card_values import effective_market_price, normalize_price_field
@@ -587,6 +588,8 @@ def get_server_collection(
     rows = (
         db.query(CollectionItem, Card)
         .join(Card, Card.id == CollectionItem.card_id)
+        # _card_to_dict reads card.set_ref, which would otherwise be a query per row
+        .options(joinedload(Card.set_ref))
         .filter(
             CollectionItem.user_id.in_(user_ids),
             visible_card_filter(db, current_user.id, lang),
@@ -601,7 +604,7 @@ def get_server_collection(
             entry = {
                 "id": card.id,
                 "card_id": card.id,
-                "card": _card_summary(card),
+                "card": _card_to_dict(card),
                 "quantity": 0,
                 "owners": [],
                 "total_value": 0.0,
@@ -613,15 +616,13 @@ def get_server_collection(
         entry["quantity"] += quantity
         entry["total_value"] += float(price) * quantity
 
-        owner = next(
-            (o for o in entry["owners"] if o["user_id"] == item.user_id), None
-        )
+        # Keyed on username, and no user_id is returned: the page filters and
+        # renders by name, so the id would be an identifier disclosed about
+        # other people for no purpose.
+        username = usernames.get(item.user_id, "?")
+        owner = next((o for o in entry["owners"] if o["username"] == username), None)
         if owner is None:
-            entry["owners"].append({
-                "user_id": item.user_id,
-                "username": usernames.get(item.user_id, "?"),
-                "quantity": quantity,
-            })
+            entry["owners"].append({"username": username, "quantity": quantity})
         else:
             owner["quantity"] += quantity
 
@@ -637,25 +638,4 @@ def get_server_collection(
         "unique_cards": len(data),
         "total_value": round(sum(e["total_value"] for e in data), 2),
         "contributors": sorted(usernames.values(), key=str.lower),
-    }
-
-
-def _card_summary(card: Card) -> dict:
-    """The card fields the shared view renders. Deliberately not the full row:
-    this is a read-only view and nothing here should invite an edit."""
-    return {
-        "id": card.id,
-        "name": card.name,
-        "number": card.number,
-        "set_id": card.set_id,
-        "set_name": card.set_ref.name if card.set_ref else None,
-        "set_abbreviation": card.set_ref.abbreviation if card.set_ref else None,
-        "rarity": card.rarity,
-        "images_small": card.images_small,
-        "images_large": card.images_large,
-        "custom_image_url": card.custom_image_url,
-        "price_market": card.price_market,
-        "price_trend": card.price_trend,
-        "lang": card.lang,
-        "is_custom": card.is_custom,
     }
