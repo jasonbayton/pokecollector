@@ -487,3 +487,35 @@ class ImageCache(Base):
     data = Column(LargeBinary, nullable=False)
     content_type = Column(String, default="image/webp")
     cached_at = Column(DateTime, default=func.now())
+
+
+class DeletedCollectionItem(Base):
+    """A collection row that a user deleted by hand, kept so it can be restored.
+
+    Only the manual delete path writes here. Trades, sales and account deletion
+    are not accidents and have their own reversal paths, so putting them in a
+    recycle bin would offer a restore that desynchronises the ledgers.
+
+    The snapshot is deliberately self-contained: deleted_by_username is stored
+    rather than only a user id, because an account can be removed and the point
+    of this table is to still be able to say who deleted the card.
+    """
+
+    __tablename__ = "deleted_collection_items"
+
+    id = Column(Integer, primary_key=True, index=True)
+    original_collection_item_id = Column(Integer, nullable=True, index=True)
+
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    card_id = Column(String, nullable=True, index=True)
+    quantity = Column(Integer, nullable=False)
+    condition = Column(String, nullable=True)
+    variant = Column(String, nullable=False, default="Normal")
+    purchase_price = Column(Float, nullable=True)
+    lang = Column(String, nullable=True)
+    grade = Column(String, nullable=True)
+    added_at = Column(DateTime, nullable=True)
+
+    deleted_at = Column(DateTime, nullable=False, default=func.now(), index=True)
+    deleted_by_user_id = Column(Integer, nullable=True)
+    deleted_by_username = Column(String, nullable=True)

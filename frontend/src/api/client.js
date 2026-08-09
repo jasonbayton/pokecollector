@@ -334,3 +334,9 @@ export const compareUsers = (userId, params = {}) => api.get(`/social/compare/${
 export const getAchievements = (userId, params = {}) => api.get(`/social/achievements/${userId}`, { params })
 
 export default api
+
+export const getDeletedCollectionItems = () =>
+  api.get('/collection/deleted/').then(r => r.data)
+
+export const restoreDeletedCollectionItem = (entryId) =>
+  api.post(`/collection/deleted/${entryId}/restore`).then(r => r.data)

@@ -2,9 +2,10 @@ import { useState, useMemo, useId, useRef, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { createPortal } from 'react-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Trash2, Check, X, Filter, SortAsc, Download, Upload, ChevronUp, ChevronDown, Search, PenLine, Grid2X2, List, Library, BookOpen, Heart, Copy, ArrowLeft, Package } from 'lucide-react'
+import { Trash2, RotateCcw, Check, X, Filter, SortAsc, Download, Upload, ChevronUp, ChevronDown, Search, PenLine, Grid2X2, List, Library, BookOpen, Heart, Copy, ArrowLeft, Package } from 'lucide-react'
 import { getCollection, updateCollectionItem, updateCardCustomImage, removeFromCollection, importCollectionCsv, exportCSV, exportPDF, getSets, addToCollection, getBinders, addCollectionItemToBinder, getWishlist, getApiErrorMessage } from '../api/client'
 import { CustomCardModal } from '../components/CardItem'
+import RecentlyDeletedModal from '../components/RecentlyDeletedModal'
 import { useSettings } from '../contexts/SettingsContext'
 import CardImage from '../components/CardImage'
 import { CardDialog, CardDisplay, CardIdentity, CardLegend, CardRow, withCollectionItemState } from '../components/card-system'
@@ -777,6 +778,7 @@ export default function Collection() {
   const [searchText, setSearchText] = useState('')
   const [showFilters, setShowFilters] = useState(false)
   const [showCsvImportModal, setShowCsvImportModal] = useState(false)
+  const [showDeletedModal, setShowDeletedModal] = useState(false)
   const csvImportInputRef = useRef(null)
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -1105,6 +1107,10 @@ export default function Collection() {
               <X size={14} /> {t('collection.clearFilters')}
             </button>
           )}
+
+          <button onClick={() => setShowDeletedModal(true)} className="btn-ghost text-sm py-1.5">
+            <RotateCcw size={14} /> {t('collection.deleted.title')}
+          </button>
         </div>
 
         {showFilters && (
@@ -1449,6 +1455,8 @@ export default function Collection() {
           onClose={closeCollectionItemModal}
         />
       )}
+
+      <RecentlyDeletedModal isOpen={showDeletedModal} onClose={() => setShowDeletedModal(false)} />
 
       {editCard && (
         <CustomCardModal

@@ -366,6 +366,21 @@ const en = {
     standardLegal: 'Standard',
     searchCards: 'Search cards...',
     clearFilters: 'Clear filters',
+    deleted: {
+      title: 'Recently deleted',
+      subtitle: 'Cards removed by hand can be put back. Trades and sales are not listed here.',
+      empty: 'Nothing has been deleted.',
+      restore: 'Restore',
+      restored: 'Card restored',
+      restoredMerged: 'Card restored and merged with the copies you already had',
+      restoreFailed: 'Could not restore that card',
+      by: 'Deleted by',
+      blocker: {
+        owner_missing: 'The account that owned this card no longer exists',
+        card_missing: 'That card is no longer in the catalogue',
+        invalid_quantity: 'The saved quantity is not valid',
+      },
+    },
     foundIn: 'Found in',
   },
 
