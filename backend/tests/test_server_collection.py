@@ -3,10 +3,44 @@ import re
 import unittest
 
 try:
-    from api.social import _contributing_user_ids
+    from api.social import (
+        _contributing_user_ids,
+        _shared_card_payload,
+        merge_shared_collection_rows,
+    )
     DEPS_AVAILABLE = True
 except ModuleNotFoundError:
     DEPS_AVAILABLE = False
+
+
+class _StubCard:
+    """A Card stand-in. Unset columns read as None rather than being listed
+    here, so this does not need updating every time the serialiser grows."""
+
+    def __init__(self, card_id, name, price=1.0, images_small=None, custom_image_url=None):
+        self.id = card_id
+        self.name = name
+        self.number = "1"
+        self.set_id = "set"
+        self.lang = "en"
+        self.is_custom = False
+        self.is_digital = False
+        self.images_small = images_small
+        self.custom_image_url = custom_image_url
+        self.price_market = price
+        self.price_trend = price
+
+    def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
+        return None
+
+
+class _StubItem:
+    def __init__(self, user_id, quantity, variant=None):
+        self.user_id = user_id
+        self.quantity = quantity
+        self.variant = variant
 
 skip_without_deps = unittest.skipUnless(
     DEPS_AVAILABLE, "FastAPI/SQLAlchemy are not installed in this lightweight test environment"
@@ -135,6 +169,99 @@ class ContributorBoundaryTests(unittest.TestCase):
     def test_inactive_contributors_are_dropped(self):
         db = _Db(opted_in=[7], active=[])
         self.assertEqual(_contributing_user_ids(db), [])
+
+
+@skip_without_deps
+class AggregationTests(unittest.TestCase):
+    """What the shared view actually claims: who holds a card, how many, and
+    which printings exist. Run against the real merge, not its source text."""
+
+    NAMES = {1: "jason", 2: "mika"}
+
+    def merge(self, rows):
+        return merge_shared_collection_rows(rows, self.NAMES, "price_trend")
+
+    def test_one_entry_per_card_with_every_owner(self):
+        card = _StubCard("c1", "Pikachu")
+        data = self.merge([
+            (_StubItem(1, 2), card),
+            (_StubItem(2, 3), card),
+        ])
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["quantity"], 5)
+        self.assertEqual(data[0]["owner_count"], 2)
+        self.assertEqual(
+            [(o["username"], o["quantity"]) for o in data[0]["owners"]],
+            [("jason", 2), ("mika", 3)],
+        )
+
+    def test_a_zero_quantity_row_is_not_a_holding(self):
+        # Zero rows are a supported database state. They must not invent an
+        # owner for a card that person does not actually hold.
+        card = _StubCard("c1", "Pikachu")
+        data = self.merge([(_StubItem(1, 0), card), (_StubItem(2, 1), card)])
+        self.assertEqual([o["username"] for o in data[0]["owners"]], ["mika"])
+        self.assertEqual(data[0]["quantity"], 1)
+
+    def test_a_card_nobody_holds_disappears_entirely(self):
+        card = _StubCard("c1", "Pikachu")
+        self.assertEqual(self.merge([(_StubItem(1, 0), card)]), [])
+
+    def test_a_negative_row_neither_counts_nor_subtracts(self):
+        card = _StubCard("c1", "Pikachu")
+        data = self.merge([(_StubItem(1, -4), card), (_StubItem(2, 2), card)])
+        self.assertEqual(data[0]["quantity"], 2)
+
+    def test_an_empty_row_cannot_contribute_a_foil_effect(self):
+        # The tile picks its foil from these, so a printing nobody holds would
+        # make the card shimmer on the strength of an empty row.
+        card = _StubCard("c1", "Pikachu")
+        data = self.merge([(_StubItem(1, 0, "Holo"), card), (_StubItem(2, 1, "Normal"), card)])
+        self.assertEqual(data[0]["variants"], ["Normal"])
+
+    def test_variants_are_deduplicated_and_stable(self):
+        card = _StubCard("c1", "Pikachu")
+        data = self.merge([
+            (_StubItem(1, 1, "Reverse Holo"), card),
+            (_StubItem(2, 1, "Holo"), card),
+            (_StubItem(1, 1, "Holo"), card),
+        ])
+        self.assertEqual(data[0]["variants"], ["Holo", "Reverse Holo"])
+
+    def test_no_user_id_is_disclosed(self):
+        card = _StubCard("c1", "Pikachu")
+        data = self.merge([(_StubItem(1, 1), card)])
+        self.assertNotIn("user_id", data[0]["owners"][0])
+
+
+@skip_without_deps
+class SharedPayloadTests(unittest.TestCase):
+    def test_the_raw_custom_image_url_is_never_shared(self):
+        # A user-supplied URL on a shared card. The view resolves images
+        # through the card-id proxy, so the raw value has no reason to travel.
+        payload = _shared_card_payload(
+            _StubCard("c1", "Pikachu", custom_image_url="https://example.invalid/secret.png")
+        )
+        self.assertNotIn("custom_image_url", payload)
+        self.assertNotIn("example.invalid", str(payload))
+
+    def test_a_custom_image_fallback_is_still_signalled(self):
+        payload = _shared_card_payload(
+            _StubCard("c1", "Pikachu", custom_image_url="https://example.invalid/a.png")
+        )
+        self.assertTrue(payload["has_custom_image_fallback"])
+
+    def test_no_fallback_when_the_card_has_its_own_art(self):
+        payload = _shared_card_payload(
+            _StubCard("c1", "Pikachu", images_small="x", custom_image_url="https://example.invalid/a.png")
+        )
+        self.assertFalse(payload["has_custom_image_fallback"])
+
+    def test_the_overview_fields_survive(self):
+        # The trimmed payload left the modal's overview blank.
+        payload = _shared_card_payload(_StubCard("c1", "Pikachu"))
+        for field in ("rarity", "hp", "artist", "types", "supertype"):
+            self.assertIn(field, payload)
 
 
 @skip_without_deps

@@ -7,7 +7,9 @@ import { CardModal } from '../components/CardItem'
 import { CardDisplay, CardRow } from '../components/card-system'
 import TcgdexLanguageSelect from '../components/TcgdexLanguageSelect'
 import { useSettings } from '../contexts/SettingsContext'
+import { getCardCategoryLabel, getCardSubtypeLabels, normalizeCardFilterLabelKey } from '../utils/cardFilters'
 import { resolveCardImageUrl } from '../utils/imageUrl'
+import { getEffectiveCardPrice } from '../utils/prices'
 
 /** Who holds this card, shown under the artwork. The whole point of the view. */
 function OwnerSummary({ owners }) {
@@ -18,9 +20,17 @@ function OwnerSummary({ owners }) {
   )
 }
 
-/** The same basis Collection filters on, so a price range means the same thing here. */
-function cardPrice(card) {
-  return card.price_trend ?? card.price_market ?? 0
+/**
+ * The same basis Collection filters on: the configured price field, via the
+ * shared helper that skips non-positive values and handles reverse-holo
+ * pricing. A row can span several printings, so the dearest one anyone holds
+ * is what the range is matched against.
+ */
+function entryPrice(entry, priceField) {
+  const card = entry.card || {}
+  const variants = entry.variants || []
+  if (!variants.length) return getEffectiveCardPrice(card, null, priceField)
+  return Math.max(...variants.map((variant) => getEffectiveCardPrice(card, variant, priceField)))
 }
 
 /**
@@ -33,7 +43,7 @@ function cardPrice(card) {
  * several people's copies in different conditions.
  */
 export default function ServerCollection() {
-  const { t, formatPrice } = useSettings()
+  const { t, formatPrice, pricePrimaryField } = useSettings()
   const [search, setSearch] = useState('')
   const [view, setView] = useState('grid')
   const [selectedCard, setSelectedCard] = useState(null)
@@ -58,7 +68,8 @@ export default function ServerCollection() {
   const entries = data?.data || []
   const contributors = data?.contributors || []
 
-  // Options come from what is actually shared, so no filter can return nothing.
+  // Options come from what is actually shared, so no single filter offers a
+  // choice nothing matches. Combinations can still come back empty.
   const options = useMemo(() => {
     const sets = new Map()
     const rarities = new Set()
@@ -71,8 +82,9 @@ export default function ServerCollection() {
       if (card.set_id) sets.set(card.set_id, card.set_ref?.name || card.set_id)
       if (card.rarity) rarities.add(card.rarity)
       for (const type of card.types || []) types.add(type)
-      if (card.supertype) categories.add(card.supertype)
-      for (const subtype of card.subtypes || []) subtypes.add(subtype)
+      const category = getCardCategoryLabel(card)
+      if (category) categories.add(category)
+      for (const subtype of getCardSubtypeLabels(card)) subtypes.add(subtype)
       if (card.lang) languages.add(card.lang)
     }
     const sorted = (set) => [...set].sort((a, b) => a.localeCompare(b))
@@ -113,11 +125,13 @@ export default function ServerCollection() {
       if (filterSet && card.set_id !== filterSet) return false
       if (filterRarity && card.rarity !== filterRarity) return false
       if (filterType && !(card.types || []).includes(filterType)) return false
-      if (filterCategory && card.supertype !== filterCategory) return false
-      if (filterSubtype && !(card.subtypes || []).includes(filterSubtype)) return false
+      if (filterCategory && getCardCategoryLabel(card) !== filterCategory) return false
+      if (filterSubtype && !getCardSubtypeLabels(card)
+        .map(normalizeCardFilterLabelKey)
+        .includes(normalizeCardFilterLabelKey(filterSubtype))) return false
       if (filterLang && card.lang !== filterLang) return false
 
-      const price = cardPrice(card)
+      const price = entryPrice(entry, pricePrimaryField)
       if (filterMinPrice && price < parseFloat(filterMinPrice)) return false
       if (filterMaxPrice && price > parseFloat(filterMaxPrice)) return false
       // "Duplicates" across the whole server: more than one copy exists,
@@ -131,6 +145,7 @@ export default function ServerCollection() {
   }, [
     entries, search, ownerFilter, filterSet, filterRarity, filterType, filterCategory,
     filterSubtype, filterLang, filterMinPrice, filterMaxPrice, filterDuplicates,
+    pricePrimaryField,
   ])
 
   if (isLoading) {

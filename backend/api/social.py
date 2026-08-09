@@ -542,6 +542,81 @@ def get_achievements(
 SHARE_COLLECTION_SETTING = "share_collection"
 
 
+def merge_shared_collection_rows(rows, usernames, price_field) -> list[dict]:
+    """Merge every contributed copy into one entry per card.
+
+    Pure so the aggregation can be tested without a database: it decides
+    who is shown as holding what, and which printings drive the foil
+    effect.
+    """
+    merged: dict[str, dict] = {}
+    for item, card in rows:
+        # Zero and negative rows are a supported database state and are not
+        # owned - card_state_summaries ignores them for exactly this reason.
+        # Checked before the entry is created, or an empty row would invent an
+        # owner and a printing for a card nobody holds.
+        quantity = int(item.quantity or 0)
+        if quantity <= 0:
+            continue
+
+        entry = merged.get(card.id)
+        if entry is None:
+            entry = {
+                "id": card.id,
+                "card_id": card.id,
+                "card": _shared_card_payload(card),
+                "quantity": 0,
+                "owners": [],
+                # Which printings exist across every owner. The card tile picks
+                # one foil effect from these, so a card nobody holds in holo
+                # should not shimmer.
+                "variants": [],
+                "total_value": 0.0,
+            }
+            merged[card.id] = entry
+
+        variant = (item.variant or "").strip()
+        if variant and variant not in entry["variants"]:
+            entry["variants"].append(variant)
+        price = effective_market_price(card, item.variant, price_field) or 0
+        entry["quantity"] += quantity
+        entry["total_value"] += float(price) * quantity
+
+        # Keyed on username, and no user_id is returned: the page filters and
+        # renders by name, so the id would be an identifier disclosed about
+        # other people for no purpose.
+        username = usernames.get(item.user_id, "?")
+        owner = next((o for o in entry["owners"] if o["username"] == username), None)
+        if owner is None:
+            entry["owners"].append({"username": username, "quantity": quantity})
+        else:
+            owner["quantity"] += quantity
+
+    data = sorted(merged.values(), key=lambda e: (-e["total_value"], e["card"]["name"] or ""))
+    for entry in data:
+        entry["owners"].sort(key=lambda o: o["username"].lower())
+        entry["variants"].sort(key=str.lower)
+        entry["total_value"] = round(entry["total_value"], 2)
+        entry["owner_count"] = len(entry["owners"])
+    return data
+
+
+def _shared_card_payload(card: Card) -> dict:
+    """The catalogue fields, minus anything that should not leave its owner.
+
+    custom_image_url is a raw user-supplied URL. The public profile serialiser
+    deliberately emits a proxied image and a boolean instead, and the shared
+    view resolves images through the same card-id proxy, so the raw value has
+    no reason to be here.
+    """
+    payload = _card_to_dict(card)
+    custom_image_url = payload.pop("custom_image_url", None)
+    payload["has_custom_image_fallback"] = bool(
+        custom_image_url and not (card.images_small or card.images_large)
+    )
+    return payload
+
+
 def _contributing_user_ids(db: Session) -> list[int]:
     """Active users who have opted their collection into the shared view."""
     opted_in = db.query(UserSetting.user_id).filter(
@@ -597,48 +672,7 @@ def get_server_collection(
         .all()
     )
 
-    merged: dict[str, dict] = {}
-    for item, card in rows:
-        entry = merged.get(card.id)
-        if entry is None:
-            entry = {
-                "id": card.id,
-                "card_id": card.id,
-                "card": _card_to_dict(card),
-                "quantity": 0,
-                "owners": [],
-                # Which printings exist across every owner. The card tile picks
-                # one foil effect from these, so a card nobody holds in holo
-                # should not shimmer.
-                "variants": [],
-                "total_value": 0.0,
-            }
-            merged[card.id] = entry
-
-        quantity = int(item.quantity or 0)
-        variant = (item.variant or "").strip()
-        if variant and variant not in entry["variants"]:
-            entry["variants"].append(variant)
-        price = effective_market_price(card, item.variant, price_field) or 0
-        entry["quantity"] += quantity
-        entry["total_value"] += float(price) * quantity
-
-        # Keyed on username, and no user_id is returned: the page filters and
-        # renders by name, so the id would be an identifier disclosed about
-        # other people for no purpose.
-        username = usernames.get(item.user_id, "?")
-        owner = next((o for o in entry["owners"] if o["username"] == username), None)
-        if owner is None:
-            entry["owners"].append({"username": username, "quantity": quantity})
-        else:
-            owner["quantity"] += quantity
-
-    data = sorted(merged.values(), key=lambda e: (-e["total_value"], e["card"]["name"] or ""))
-    for entry in data:
-        entry["owners"].sort(key=lambda o: o["username"].lower())
-        entry["variants"].sort(key=str.lower)
-        entry["total_value"] = round(entry["total_value"], 2)
-        entry["owner_count"] = len(entry["owners"])
+    data = merge_shared_collection_rows(rows, usernames, price_field)
 
     return {
         "data": data,

@@ -13,6 +13,11 @@ import TabNav from '../components/TabNav'
 import toast from 'react-hot-toast'
 import clsx from 'clsx'
 import { cardImageUrl, resolveCardImageUrl } from '../utils/imageUrl'
+import {
+  CARD_CATEGORY_OPTIONS, CARD_SUBTYPE_OPTIONS, normalizeCardFilterValue,
+  normalizeCardFilterLabelKey, getCardCategoryLabel, getCardSubtypeLabels,
+  sortCardFilterLabels,
+} from '../utils/cardFilters'
 import { cardNumberMatches } from '../utils/cardNumbers'
 import { normalizeSearchText, textIncludes } from '../utils/textSearch'
 import { getEffectiveCardPrice } from '../utils/prices'
@@ -37,58 +42,6 @@ const VARIANT_COLORS = {
   'Reverse Holo': 'badge-blue',
   'First Edition': 'badge-green',
   'Normal': 'badge-gray',
-}
-
-const CARD_CATEGORY_OPTIONS = ['Pokémon', 'Trainer', 'Energy']
-const CARD_SUBTYPE_OPTIONS = ['Item', 'Supporter', 'Stadium', 'Pokémon Tool', 'EX', 'ex', 'GX', 'Stage 1', 'Stage 2', 'Basic']
-
-const normalizeCardFilterValue = (value) => String(value || '')
-  .normalize('NFD')
-  .replace(/[\u0300-\u036f]/g, '')
-  .trim()
-  .toLowerCase()
-
-const normalizeCardFilterLabelKey = (value) => String(value || '')
-  .normalize('NFD')
-  .replace(/[\u0300-\u036f]/g, '')
-  .trim()
-
-const CARD_FILTER_DISPLAY_LABELS = new Map(
-  [...CARD_CATEGORY_OPTIONS, ...CARD_SUBTYPE_OPTIONS].map(label => [normalizeCardFilterLabelKey(label), label])
-)
-
-const getPreferredCardFilterLabel = (value) => (
-  CARD_FILTER_DISPLAY_LABELS.get(normalizeCardFilterLabelKey(value)) || String(value || '').trim()
-)
-
-const getCardCategoryLabel = (card) => {
-  const supertype = String(card?.supertype || '').trim()
-  if (normalizeCardFilterValue(supertype) === 'pokemon') return 'Pokémon'
-  if (supertype) return getPreferredCardFilterLabel(supertype)
-  return ''
-}
-
-const getCardSubtypeLabels = (card) => {
-  const labels = new Set()
-  ;(card?.subtypes || []).forEach(subtype => {
-    if (subtype) labels.add(getPreferredCardFilterLabel(subtype))
-  })
-  ;[card?.trainer_type, card?.energy_type, card?.stage].forEach(subtype => {
-    if (subtype) labels.add(getPreferredCardFilterLabel(subtype))
-  })
-  return [...labels].filter(Boolean)
-}
-
-const sortCardFilterLabels = (preferredOrder, labels) => {
-  const preferredIndex = new Map(preferredOrder.map((label, index) => [normalizeCardFilterLabelKey(label), index]))
-  return [...labels].sort((a, b) => {
-    const indexA = preferredIndex.get(normalizeCardFilterLabelKey(a))
-    const indexB = preferredIndex.get(normalizeCardFilterLabelKey(b))
-    if (indexA !== undefined || indexB !== undefined) {
-      return (indexA ?? Number.MAX_SAFE_INTEGER) - (indexB ?? Number.MAX_SAFE_INTEGER)
-    }
-    return a.localeCompare(b)
-  })
 }
 
 const toggleFilterValue = (values, value) => (
