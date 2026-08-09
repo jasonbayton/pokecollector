@@ -65,7 +65,7 @@ export default function AppNav() {
                   <img
                     src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-v/black-white/animated/${user.avatar_id}.gif`}
                     alt={`${user.username} avatar`}
-                    className="h-5 w-5 object-contain pixelated"
+                    className="h-4 w-4 object-contain pixelated"
                   />
                 ) : null}
                 <LogOut size={16} />
