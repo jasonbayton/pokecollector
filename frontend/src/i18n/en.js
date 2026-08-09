@@ -1086,7 +1086,7 @@ const en = {
     nobodySharingHint: 'Each person can opt in from Settings. Nothing is shared until they do.',
     shareSection: 'Server collection',
     shareSetting: 'Share my collection',
-    shareSettingDesc: 'Include my cards in the server collection everyone can browse',
+    shareSettingDesc: 'Show my cards in the server collection, where anyone signed in to this server can browse them. It is not public.',
   },
 
   card: {
