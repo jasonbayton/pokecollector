@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
 from database import get_db
-from models import Card, CollectionItem, ProductPurchase, Set, User, WishlistItem
+from models import Card, CollectionItem, ProductPurchase, Set, User, UserSetting, WishlistItem
 from services.card_values import effective_market_price, normalize_price_field
 from services.card_visibility import visible_card_filter
 from services.digital_sets import digital_sets_enabled
@@ -532,4 +532,130 @@ def get_achievements(
         "earned": sum(1 for achievement in achievements if achievement["unlocked"]),
         "total": len(achievements),
         "achievements": achievements,
+    }
+
+
+#: Per-user opt-in. Nobody's cards appear in the shared view until they choose
+#: to contribute them, and opting in only affects what you contribute - viewing
+#: is available to any signed-in user.
+SHARE_COLLECTION_SETTING = "share_collection"
+
+
+def _contributing_user_ids(db: Session) -> list[int]:
+    """Active users who have opted their collection into the shared view."""
+    opted_in = db.query(UserSetting.user_id).filter(
+        UserSetting.key == SHARE_COLLECTION_SETTING,
+        func.lower(func.trim(UserSetting.value)) == "true",
+    ).all()
+    ids = [row[0] for row in opted_in]
+    if not ids:
+        return []
+    active = db.query(User.id).filter(User.id.in_(ids), User.is_active == True).all()
+    return [row[0] for row in active]
+
+
+@router.get("/server")
+def get_server_collection(
+    price_field: str = Query(default="price_trend"),
+    lang: str | None = Query(default="all"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Every contributed collection, merged into one catalogue.
+
+    One entry per card rather than one per owner: three people holding the same
+    card reads as one card owned by three, which is the question this view
+    exists to answer. Each entry carries who holds it and how many.
+    """
+    price_field = normalize_price_field(price_field)
+    user_ids = _contributing_user_ids(db)
+    empty = {
+        "data": [],
+        "total_cards": 0,
+        "unique_cards": 0,
+        "total_value": 0.0,
+        "contributors": [],
+    }
+    if not user_ids:
+        return empty
+
+    usernames = {
+        user.id: user.username
+        for user in db.query(User).filter(User.id.in_(user_ids)).all()
+    }
+
+    rows = (
+        db.query(CollectionItem, Card)
+        .join(Card, Card.id == CollectionItem.card_id)
+        .filter(
+            CollectionItem.user_id.in_(user_ids),
+            visible_card_filter(db, current_user.id, lang),
+        )
+        .all()
+    )
+
+    merged: dict[str, dict] = {}
+    for item, card in rows:
+        entry = merged.get(card.id)
+        if entry is None:
+            entry = {
+                "id": card.id,
+                "card_id": card.id,
+                "card": _card_summary(card),
+                "quantity": 0,
+                "owners": [],
+                "total_value": 0.0,
+            }
+            merged[card.id] = entry
+
+        quantity = int(item.quantity or 0)
+        price = effective_market_price(card, item.variant, price_field) or 0
+        entry["quantity"] += quantity
+        entry["total_value"] += float(price) * quantity
+
+        owner = next(
+            (o for o in entry["owners"] if o["user_id"] == item.user_id), None
+        )
+        if owner is None:
+            entry["owners"].append({
+                "user_id": item.user_id,
+                "username": usernames.get(item.user_id, "?"),
+                "quantity": quantity,
+            })
+        else:
+            owner["quantity"] += quantity
+
+    data = sorted(merged.values(), key=lambda e: (-e["total_value"], e["card"]["name"] or ""))
+    for entry in data:
+        entry["owners"].sort(key=lambda o: o["username"].lower())
+        entry["total_value"] = round(entry["total_value"], 2)
+        entry["owner_count"] = len(entry["owners"])
+
+    return {
+        "data": data,
+        "total_cards": sum(e["quantity"] for e in data),
+        "unique_cards": len(data),
+        "total_value": round(sum(e["total_value"] for e in data), 2),
+        "contributors": sorted(usernames.values(), key=str.lower),
+    }
+
+
+def _card_summary(card: Card) -> dict:
+    """The card fields the shared view renders. Deliberately not the full row:
+    this is a read-only view and nothing here should invite an edit."""
+    return {
+        "id": card.id,
+        "name": card.name,
+        "number": card.number,
+        "set_id": card.set_id,
+        "set_name": card.set_ref.name if card.set_ref else None,
+        "set_abbreviation": card.set_ref.abbreviation if card.set_ref else None,
+        "rarity": card.rarity,
+        "images_small": card.images_small,
+        "images_large": card.images_large,
+        "custom_image_url": card.custom_image_url,
+        "price_market": card.price_market,
+        "price_trend": card.price_trend,
+        "lang": card.lang,
+        "is_custom": card.is_custom,
     }

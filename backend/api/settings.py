@@ -34,7 +34,7 @@ PER_USER_KEYS = {
     "set_overview_filters", "hidden_set_ids",
     "telegram_bot_token", "telegram_chat_id", "telegram_enabled",
     "price_alerts_enabled", "price_alert_threshold",
-    "gemini_api_key", "openai_api_key", "trainer_name", "portfolio_display_mode",
+    "gemini_api_key", "openai_api_key", "trainer_name", "portfolio_display_mode", "share_collection",
 }
 
 ADMIN_ONLY_KEYS = {
@@ -103,6 +103,8 @@ DEFAULT_SETTINGS = {
     "cross_language_image_fallback": "true",
     "debug_mode": "false",
     "scanner_provider": "gemini",
+    # Opt-in, so nobody is contributed to the shared server view by default.
+    "share_collection": "false",
     PUBLIC_PROFILES_SETTING_KEY: "false",
 }
 
@@ -120,7 +122,7 @@ def _coerce_setting_value(key: str, value) -> str:
     if key in {
         "debug_mode", "cross_language_price_fallback",
         "cross_language_image_fallback", DIGITAL_SETS_SETTING_KEY,
-        PUBLIC_PROFILES_SETTING_KEY,
+        PUBLIC_PROFILES_SETTING_KEY, "share_collection",
     }:
         return "true" if str(value).lower() in {"true", "1", "yes", "on"} else "false"
     if key == "portfolio_display_mode":

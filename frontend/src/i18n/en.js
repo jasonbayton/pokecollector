@@ -12,6 +12,7 @@ const en = {
     binders: 'Binders',
     analytics: 'Analytics',
     leaderboard: 'Leaderboard',
+    serverCollection: 'Server collection',
     achievements: 'Achievements',
     products: 'Products',
     trades: 'Trades',
@@ -1074,6 +1075,19 @@ const en = {
   },
 
   // Card modal
+  serverCollection: {
+    title: 'Server collection',
+    cards: 'cards',
+    uniqueCards: 'unique',
+    contributors: 'Sharing',
+    toggleView: 'Switch between grid and list',
+    searchPlaceholder: 'Search the shared collection...',
+    nobodySharing: 'No one is sharing their collection yet.',
+    nobodySharingHint: 'Each person can opt in from Settings. Nothing is shared until they do.',
+    shareSetting: 'Share my collection',
+    shareSettingDesc: 'Include my cards in the server collection everyone can browse',
+  },
+
   card: {
     printings: 'Printings that exist',
     printing_normal: 'Normal',

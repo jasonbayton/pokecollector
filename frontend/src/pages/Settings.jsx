@@ -338,6 +338,8 @@ export default function Settings() {
 
   // Notification settings
   const [priceAlertsEnabled, setPriceAlertsEnabled] = useState(false)
+  // Opt-in: nothing of this user's is contributed to the shared view until on.
+  const [shareCollection, setShareCollection] = useState(false)
   const [alertThreshold, setAlertThreshold] = useState('10')
 
   // Load individual settings from backend
@@ -349,6 +351,11 @@ export default function Settings() {
   const { data: priceSyncIntervalData } = useQuery({
     queryKey: ['setting', 'price_sync_interval_minutes'],
     queryFn: () => getSetting('price_sync_interval_minutes').catch(() => ({ value: '30' })),
+  })
+
+  const { data: shareCollectionData } = useQuery({
+    queryKey: ['setting', 'share_collection'],
+    queryFn: () => getSetting('share_collection').catch(() => ({ value: 'false' })),
   })
 
   const { data: priceAlertsData } = useQuery({
@@ -440,6 +447,16 @@ export default function Settings() {
   useEffect(() => {
     if (priceAlertsData?.value) setPriceAlertsEnabled(priceAlertsData.value === 'true')
   }, [priceAlertsData])
+
+  useEffect(() => {
+    if (shareCollectionData?.value !== undefined) setShareCollection(shareCollectionData.value === 'true')
+  }, [shareCollectionData])
+
+  const handleShareCollectionToggle = async (val) => {
+    const previous = shareCollection
+    setShareCollection(val)
+    if (!(await saveSetting('share_collection', val ? 'true' : 'false'))) setShareCollection(previous)
+  }
 
   useEffect(() => {
     if (alertThresholdData?.value) setAlertThreshold(alertThresholdData.value)
@@ -1468,6 +1485,12 @@ export default function Settings() {
                 description={t('settings.priceAlertsDesc')}
               >
                 <Toggle value={priceAlertsEnabled} onChange={handlePriceAlertsToggle} label={t('settings.priceAlerts')} />
+              </SettingsRow>
+              <SettingsRow
+                label={t('serverCollection.shareSetting')}
+                description={t('serverCollection.shareSettingDesc')}
+              >
+                <Toggle value={shareCollection} onChange={handleShareCollectionToggle} label={t('serverCollection.shareSetting')} />
               </SettingsRow>
               {priceAlertsEnabled && (
                 <SettingsRow

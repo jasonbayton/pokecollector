@@ -1,10 +1,7 @@
 import { useState, useMemo, useId, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  RefreshCw, TrendingUp, TrendingDown, Layers, Star, Wallet, LogOut,
-  Search, Library, Grid2X2, BarChart3, Settings, Trophy, ArrowRightLeft, ListOrdered, Info,
-} from 'lucide-react'
+import { ArrowRightLeft, BarChart3, Grid2X2, Info, Layers, Library, ListOrdered, LogOut, RefreshCw, Search, Settings, Star, TrendingDown, TrendingUp, Trophy, Users, Wallet } from 'lucide-react'
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from 'recharts'
@@ -243,6 +240,7 @@ export default function HomeScreen() {
     { to: '/analytics',  icon: BarChart3,  label: t('nav.analytics'),   color: '#f5c842' },
     { to: '/trades',     icon: ArrowRightLeft, label: t('nav.trades'),   color: '#ff8a65' },
     ...(multiUser ? [{ to: '/leaderboard', icon: Trophy, label: t('nav.leaderboard'), color: '#ffd54f' }] : []),
+    ...(multiUser ? [{ to: '/social/server', icon: Users, label: t('nav.serverCollection'), color: '#4dd0e1' }] : []),
     { to: '/settings',   icon: Settings,   label: t('nav.settings'),    color: '#b0bec5' },
   ]
 
