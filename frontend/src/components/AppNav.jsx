@@ -1,5 +1,5 @@
 import { useNavigate, useLocation } from 'react-router-dom'
-import { LogOut } from 'lucide-react'
+import { LogOut, Settings } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { useSettings } from '../contexts/SettingsContext'
 
@@ -40,30 +40,37 @@ export default function AppNav() {
     <>
       {/* Page title — subtle top strip with logout */}
       {title && (
-        <div className="sticky top-0 z-40 px-4 pt-5 pb-3 flex items-center justify-between"
+        <div className="sticky top-0 z-40 grid grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(0,1fr)] items-center px-4 pt-5 pb-3"
           style={{ background: 'linear-gradient(to bottom, rgba(6,8,15,0.98) 70%, transparent)' }}>
-          <div className="w-8" />
-          <p className="text-[11px] font-black uppercase tracking-[0.2em] text-text-muted text-center truncate flex-1 min-w-0">
+          <div className="min-w-0" />
+          <p className="min-w-0 truncate text-center text-[11px] font-black uppercase tracking-[0.2em] text-text-muted">
             {title}
           </p>
-          {multiUser ? (
+          <div className="flex min-w-0 items-center justify-end gap-1">
             <button
-              onClick={handleLogout}
+              onClick={() => navigate('/settings')}
               className="flex h-8 min-w-8 items-center justify-center gap-1.5 rounded-lg px-1.5 text-text-muted transition-colors hover:text-brand-red pointer-events-auto"
-              aria-label={t('auth.logout')}
+              aria-label={t('nav.settings')}
             >
-              {user?.avatar_id ? (
-                <img
-                  src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-v/black-white/animated/${user.avatar_id}.gif`}
-                  alt={`${user.username} avatar`}
-                  className="h-5 w-5 pixelated"
-                />
-              ) : null}
-              <LogOut size={16} />
+              <Settings size={16} />
             </button>
-          ) : (
-            <div className="w-8" />
-          )}
+            {multiUser ? (
+              <button
+                onClick={handleLogout}
+                className="flex h-8 min-w-8 items-center justify-center gap-1.5 rounded-lg px-1.5 text-text-muted transition-colors hover:text-brand-red pointer-events-auto"
+                aria-label={t('auth.logout')}
+              >
+                {user?.avatar_id ? (
+                  <img
+                    src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-v/black-white/animated/${user.avatar_id}.gif`}
+                    alt={`${user.username} avatar`}
+                    className="h-5 w-5 pixelated"
+                  />
+                ) : null}
+                <LogOut size={16} />
+              </button>
+            ) : null}
+          </div>
         </div>
       )}
 

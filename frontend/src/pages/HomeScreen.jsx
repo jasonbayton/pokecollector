@@ -241,7 +241,6 @@ export default function HomeScreen() {
     { to: '/trades',     icon: ArrowRightLeft, label: t('nav.trades'),   color: '#ff8a65' },
     ...(multiUser ? [{ to: '/leaderboard', icon: Trophy, label: t('nav.leaderboard'), color: '#ffd54f' }] : []),
     ...(multiUser ? [{ to: '/social/server', icon: Users, label: t('nav.serverCollection'), color: '#4dd0e1' }] : []),
-    { to: '/settings',   icon: Settings,   label: t('nav.settings'),    color: '#b0bec5' },
   ]
 
   const STAT_CARDS = [
@@ -300,21 +299,31 @@ export default function HomeScreen() {
           ) : (
             <div />
           )}
-          {user?.role === 'admin' && (
-          <button
-            onClick={() => syncMutation.mutate()}
-            disabled={isRunning}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
-            style={{
-              background: isRunning ? 'rgba(255,255,255,0.05)' : 'rgba(227,0,11,0.12)',
-              color: isRunning ? '#888' : '#e3000b',
-              border: isRunning ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(227,0,11,0.25)',
-            }}
-          >
-            <RefreshCw size={12} className={isRunning ? 'animate-spin' : ''} />
-            {isRunning ? t('home.syncing') : t('home.sync')}
-          </button>
-          )}
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => navigate('/settings')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-text-muted hover:text-brand-red transition-colors"
+              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
+            >
+              <Settings size={12} />
+              {t('nav.settings')}
+            </button>
+            {user?.role === 'admin' && (
+              <button
+                onClick={() => syncMutation.mutate()}
+                disabled={isRunning}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
+                style={{
+                  background: isRunning ? 'rgba(255,255,255,0.05)' : 'rgba(227,0,11,0.12)',
+                  color: isRunning ? '#888' : '#e3000b',
+                  border: isRunning ? '1px solid rgba(255,255,255,0.08)' : '1px solid rgba(227,0,11,0.25)',
+                }}
+              >
+                <RefreshCw size={12} className={isRunning ? 'animate-spin' : ''} />
+                {isRunning ? t('home.syncing') : t('home.sync')}
+              </button>
+            )}
+          </div>
         </div>
 
         {/* ── PORTFOLIO VALUE (large, prominent) ── */}
