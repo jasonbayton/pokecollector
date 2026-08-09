@@ -92,15 +92,10 @@ export default function PublicCollectionView() {
             {collection.cards.map((card) => (
               <CardDisplay
                 key={`${card.id}-${card.variant || 'normal'}`}
-                card={card}
+                card={{ ...card, set_id: card.set_name }}
                 image={card.image}
                 price={card.market_value != null ? formatEur(card.market_value) : null}
                 variantEffectSource={card.variant}
-                captionAccessory={
-                  <span className="block truncate text-[11px] text-text-muted">
-                    {[card.set_name, card.number ? `#${card.number}` : null].filter(Boolean).join(' · ')}
-                  </span>
-                }
                 stateIndicatorProps={{
                   // getCardState reads owned_variants; a bare quantity renders nothing.
                   card: { owned_variants: [{ variant: card.variant || 'Normal', quantity: card.quantity }] },
