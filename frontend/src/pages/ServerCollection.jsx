@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Users, Search, LayoutGrid, List } from 'lucide-react'
+import { Users, Search, LayoutGrid, List, Filter, X } from 'lucide-react'
 
 import { getServerCollection } from '../api/client'
 import { CardModal } from '../components/CardItem'
 import { CardDisplay, CardRow } from '../components/card-system'
+import TcgdexLanguageSelect from '../components/TcgdexLanguageSelect'
 import { useSettings } from '../contexts/SettingsContext'
 import { resolveCardImageUrl } from '../utils/imageUrl'
 
@@ -17,10 +18,19 @@ function OwnerSummary({ owners }) {
   )
 }
 
+/** The same basis Collection filters on, so a price range means the same thing here. */
+function cardPrice(card) {
+  return card.price_trend ?? card.price_market ?? 0
+}
+
 /**
  * Every contributed collection, merged. Deliberately read-only: this answers
  * "does anyone already have this card" and nothing here should invite an edit,
  * because the cards belong to other people.
+ *
+ * The filters mirror Collection's card-level ones. Condition and variant are
+ * deliberately absent: they describe a single copy, and one row here can span
+ * several people's copies in different conditions.
  */
 export default function ServerCollection() {
   const { t, formatPrice } = useSettings()
@@ -28,6 +38,17 @@ export default function ServerCollection() {
   const [view, setView] = useState('grid')
   const [selectedCard, setSelectedCard] = useState(null)
   const [ownerFilter, setOwnerFilter] = useState('')
+
+  const [showFilters, setShowFilters] = useState(false)
+  const [filterSet, setFilterSet] = useState('')
+  const [filterRarity, setFilterRarity] = useState('')
+  const [filterType, setFilterType] = useState('')
+  const [filterCategory, setFilterCategory] = useState('')
+  const [filterSubtype, setFilterSubtype] = useState('')
+  const [filterLang, setFilterLang] = useState('')
+  const [filterMinPrice, setFilterMinPrice] = useState('')
+  const [filterMaxPrice, setFilterMaxPrice] = useState('')
+  const [filterDuplicates, setFilterDuplicates] = useState(false)
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['server-collection'],
@@ -37,16 +58,80 @@ export default function ServerCollection() {
   const entries = data?.data || []
   const contributors = data?.contributors || []
 
+  // Options come from what is actually shared, so no filter can return nothing.
+  const options = useMemo(() => {
+    const sets = new Map()
+    const rarities = new Set()
+    const types = new Set()
+    const categories = new Set()
+    const subtypes = new Set()
+    const languages = new Set()
+    for (const entry of entries) {
+      const card = entry.card || {}
+      if (card.set_id) sets.set(card.set_id, card.set_ref?.name || card.set_id)
+      if (card.rarity) rarities.add(card.rarity)
+      for (const type of card.types || []) types.add(type)
+      if (card.supertype) categories.add(card.supertype)
+      for (const subtype of card.subtypes || []) subtypes.add(subtype)
+      if (card.lang) languages.add(card.lang)
+    }
+    const sorted = (set) => [...set].sort((a, b) => a.localeCompare(b))
+    return {
+      sets: [...sets.entries()].sort((a, b) => a[1].localeCompare(b[1])),
+      rarities: sorted(rarities),
+      types: sorted(types),
+      categories: sorted(categories),
+      subtypes: sorted(subtypes),
+      // TcgdexLanguageSelect renders option.code, so codes alone render blank.
+      languages: sorted(languages).map((code) => ({ code })),
+    }
+  }, [entries])
+
+  const hasActiveFilters = Boolean(
+    filterSet || filterRarity || filterType || filterCategory || filterSubtype
+    || filterLang || filterMinPrice || filterMaxPrice || filterDuplicates
+  )
+
+  const resetFilters = () => {
+    setFilterSet('')
+    setFilterRarity('')
+    setFilterType('')
+    setFilterCategory('')
+    setFilterSubtype('')
+    setFilterLang('')
+    setFilterMinPrice('')
+    setFilterMaxPrice('')
+    setFilterDuplicates(false)
+  }
+
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase()
     return entries.filter((entry) => {
       if (ownerFilter && !entry.owners.some((o) => o.username === ownerFilter)) return false
-      if (!term) return true
+
       const card = entry.card || {}
-      return [card.name, card.set_name, card.set_abbreviation, card.number]
+      if (filterSet && card.set_id !== filterSet) return false
+      if (filterRarity && card.rarity !== filterRarity) return false
+      if (filterType && !(card.types || []).includes(filterType)) return false
+      if (filterCategory && card.supertype !== filterCategory) return false
+      if (filterSubtype && !(card.subtypes || []).includes(filterSubtype)) return false
+      if (filterLang && card.lang !== filterLang) return false
+
+      const price = cardPrice(card)
+      if (filterMinPrice && price < parseFloat(filterMinPrice)) return false
+      if (filterMaxPrice && price > parseFloat(filterMaxPrice)) return false
+      // "Duplicates" across the whole server: more than one copy exists,
+      // whether that is one person holding two or two people holding one each.
+      if (filterDuplicates && entry.quantity < 2) return false
+
+      if (!term) return true
+      return [card.name, card.set_ref?.name, card.set_ref?.abbreviation, card.number]
         .some((field) => String(field || '').toLowerCase().includes(term))
     })
-  }, [entries, search, ownerFilter])
+  }, [
+    entries, search, ownerFilter, filterSet, filterRarity, filterType, filterCategory,
+    filterSubtype, filterLang, filterMinPrice, filterMaxPrice, filterDuplicates,
+  ])
 
   if (isLoading) {
     return <div className="py-4 text-sm text-text-muted">{t('common.loading')}</div>
@@ -98,8 +183,8 @@ export default function ServerCollection() {
               ))}
             </div>
 
-            <div className="flex items-center gap-2">
-              <div className="relative flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative min-w-[12rem] flex-1">
                 <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
                 <input
                   value={search}
@@ -108,6 +193,24 @@ export default function ServerCollection() {
                   className="input w-full pl-9 text-sm"
                 />
               </div>
+
+              <button
+                type="button"
+                onClick={() => setShowFilters((f) => !f)}
+                className={`btn-ghost text-sm py-1.5 ${showFilters || hasActiveFilters ? 'border-brand-red/30 text-brand-red' : ''}`}
+              >
+                <Filter size={14} /> {t('common.filter')}
+                {hasActiveFilters && (
+                  <span className="ml-1 flex h-4 w-4 items-center justify-center rounded-full bg-brand-red text-xs leading-none text-white">!</span>
+                )}
+              </button>
+
+              {hasActiveFilters && (
+                <button type="button" onClick={resetFilters} className="btn-ghost text-sm py-1.5">
+                  <X size={14} /> {t('collection.clearFilters')}
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => setView(view === 'grid' ? 'list' : 'grid')}
@@ -117,6 +220,87 @@ export default function ServerCollection() {
                 {view === 'grid' ? <List size={16} /> : <LayoutGrid size={16} />}
               </button>
             </div>
+
+            {showFilters && (
+              <div className="grid grid-cols-2 gap-3 border-t border-border pt-3 sm:grid-cols-3">
+                <div>
+                  <label className="mb-1 block text-xs text-text-muted">{t('collection.filterSet')}</label>
+                  <select className="select py-1.5 text-sm" value={filterSet} onChange={(e) => setFilterSet(e.target.value)}>
+                    <option value="">{t('collection.allSets')}</option>
+                    {options.sets.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-text-muted">{t('common.rarity')}</label>
+                  <select className="select py-1.5 text-sm" value={filterRarity} onChange={(e) => setFilterRarity(e.target.value)}>
+                    <option value="">{t('common.allRarities')}</option>
+                    {options.rarities.map((r) => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-text-muted">{t('collection.filterEnergyType')}</label>
+                  <select className="select py-1.5 text-sm" value={filterType} onChange={(e) => setFilterType(e.target.value)}>
+                    <option value="">{t('collection.allEnergyTypes')}</option>
+                    {options.types.map((tp) => <option key={tp} value={tp}>{tp}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-text-muted">{t('collection.filterCardCategory')}</label>
+                  <select className="select py-1.5 text-sm" value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}>
+                    <option value="">{t('common.all')}</option>
+                    {options.categories.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-text-muted">{t('collection.filterSubtype')}</label>
+                  <select className="select py-1.5 text-sm" value={filterSubtype} onChange={(e) => setFilterSubtype(e.target.value)}>
+                    <option value="">{t('common.all')}</option>
+                    {options.subtypes.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-text-muted">{t('lang.filter')}</label>
+                  <TcgdexLanguageSelect
+                    value={filterLang || 'all'}
+                    includeAll
+                    allLabel={t('lang.all')}
+                    compact
+                    languages={options.languages}
+                    onChange={(value) => setFilterLang(value === 'all' ? '' : value)}
+                    className="select py-1.5 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-text-muted">{t('collection.filterMinPrice')}</label>
+                  <input
+                    type="number" min="0" step="0.01" placeholder="0"
+                    value={filterMinPrice}
+                    onChange={(e) => setFilterMinPrice(e.target.value)}
+                    className="input py-1.5 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-text-muted">{t('collection.filterMaxPrice')}</label>
+                  <input
+                    type="number" min="0" step="0.01" placeholder="∞"
+                    value={filterMaxPrice}
+                    onChange={(e) => setFilterMaxPrice(e.target.value)}
+                    className="input py-1.5 text-sm"
+                  />
+                </div>
+                <div className="col-span-2 flex items-center gap-2 sm:col-span-1">
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={filterDuplicates}
+                      onChange={(e) => setFilterDuplicates(e.target.checked)}
+                      className="h-4 w-4 accent-brand-red"
+                    />
+                    <span className="text-xs text-text-secondary">{t('collection.filterDuplicates')}</span>
+                  </label>
+                </div>
+              </div>
+            )}
           </div>
 
           {visible.length === 0 ? (
@@ -146,9 +330,9 @@ export default function ServerCollection() {
                   name={entry.card.name}
                   setNumber={[entry.card.set_ref?.abbreviation || entry.card.set_id, entry.card.number]
                     .filter(Boolean).join(' ').toUpperCase()}
-                  badges={entry.owners.map((o) => ({ label: `${o.username} \u00d7${o.quantity}`, variant: 'purple' }))}
+                  badges={entry.owners.map((o) => ({ label: `${o.username} ×${o.quantity}`, variant: 'purple' }))}
                   value={entry.total_value > 0 ? formatPrice(entry.total_value) : '-'}
-                  valueSecondary={`\u00d7${entry.quantity}`}
+                  valueSecondary={`×${entry.quantity}`}
                   variantEffectSource={entry.variants || []}
                   onClick={() => setSelectedCard(entry)}
                 />
