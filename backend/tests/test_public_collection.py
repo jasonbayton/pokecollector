@@ -98,6 +98,19 @@ class PublicCollectionTests(unittest.TestCase):
         self.assertEqual(out["unique_card_count"], 1)
         self.assertEqual(out["card_count"], 3)
 
+    def test_unique_count_means_distinct_cards_not_variants(self):
+        # A binder counts distinct card ids; the collection must agree, or the
+        # same card in two variants reads as two cards here and one there.
+        self.db.add(CollectionItem(
+            card_id=self.card.id, user_id=self.user.id, quantity=1,
+            condition="Mint", variant="Reverse Holo", lang="en",
+        ))
+        self.db.commit()
+        out = self._fetch()
+        self.assertEqual(out["unique_card_count"], 1)
+        self.assertEqual(out["card_count"], 3)
+        self.assertEqual(len(out["cards"]), 2, "variants still render separately")
+
     def test_another_trainers_cards_are_not_included(self):
         other = User(username="mika", hashed_password="x", role="trainer", is_active=True)
         self.db.add(other)

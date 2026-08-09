@@ -333,6 +333,10 @@ def serialize_public_collection(db, user: User, show_values: bool) -> dict:
     rows = (
         db.query(CollectionItem, Card)
         .join(Card, Card.id == CollectionItem.card_id)
+        # _serialize_card reads card.set_ref. Without this an anonymous request
+        # becomes one query per distinct card, and the rate limit caps how often
+        # that happens, not how much it costs.
+        .options(joinedload(Card.set_ref))
         .filter(CollectionItem.user_id == user.id, CollectionItem.quantity > 0)
         .all()
     )
@@ -356,9 +360,13 @@ def serialize_public_collection(db, user: User, show_values: bool) -> dict:
     if show_values:
         total_value = round(sum((c["market_value"] or 0) * c["quantity"] for c in cards), 2)
 
+    # Distinct cards, not distinct (card, variant) groups, so this means the
+    # same thing here as it does on a binder.
+    unique_cards = {e["card"].id for e in grouped.values()}
+
     return {
         "card_count": sum(c["quantity"] for c in cards),
-        "unique_card_count": len(cards),
+        "unique_card_count": len(unique_cards),
         "total_value": total_value,
         "cards": cards,
     }
