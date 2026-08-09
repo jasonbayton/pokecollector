@@ -36,6 +36,7 @@ def _serialize_owner(db: Session, user: User, feature_enabled: bool) -> dict:
         "public_handle_error": handle_error,
         "is_profile_public": bool(user.is_profile_public),
         "public_show_values": bool(user.public_show_values),
+        "public_show_collection": bool(user.public_show_collection),
         "feature_enabled": feature_enabled,
     }
 
@@ -69,6 +70,8 @@ def update_profile(payload: ProfileUpdate, db: Session = Depends(get_db),
         current_user.public_handle = None
     if payload.public_show_values is not None:
         current_user.public_show_values = payload.public_show_values
+    if payload.public_show_collection is not None:
+        current_user.public_show_collection = payload.public_show_collection
     try:
         db.commit()
     except IntegrityError as exc:
