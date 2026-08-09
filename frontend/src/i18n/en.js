@@ -1084,6 +1084,7 @@ const en = {
     searchPlaceholder: 'Search the shared collection...',
     nobodySharing: 'No one is sharing their collection yet.',
     nobodySharingHint: 'Each person can opt in from Settings. Nothing is shared until they do.',
+    shareSection: 'Server collection',
     shareSetting: 'Share my collection',
     shareSettingDesc: 'Include my cards in the server collection everyone can browse',
   },

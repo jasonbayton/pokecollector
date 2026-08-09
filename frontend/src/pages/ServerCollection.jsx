@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Users, Search, LayoutGrid, List, Filter, X } from 'lucide-react'
+import { Search, LayoutGrid, List, Filter, X } from 'lucide-react'
 
 import { getServerCollection } from '../api/client'
 import { CardModal } from '../components/CardItem'
@@ -160,11 +160,8 @@ export default function ServerCollection() {
   return (
     <div className="space-y-4 pb-2">
       <div>
-        <h1 className="flex items-center gap-2 text-xl font-bold text-text-primary">
-          <Users size={20} className="text-blue" />
-          {t('serverCollection.title')}
-        </h1>
-        <p className="mt-1 text-sm text-text-muted">
+        <h1 className="text-xl font-bold text-text-primary">{t('serverCollection.title')}</h1>
+        <p className="mt-1 text-sm text-text-secondary">
           {data.unique_cards} {t('serverCollection.uniqueCards')} · {data.total_cards} {t('serverCollection.cards')} · {formatPrice(data.total_value)}
         </p>
       </div>
@@ -323,7 +320,7 @@ export default function ServerCollection() {
           {visible.length === 0 ? (
             <p className="p-4 text-center text-sm text-text-muted">{t('common.noResults')}</p>
           ) : view === 'grid' ? (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8">
               {visible.map((entry) => (
                 <CardDisplay
                   key={entry.id}
@@ -338,7 +335,7 @@ export default function ServerCollection() {
               ))}
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="card p-0 overflow-hidden">
               {visible.map((entry) => (
                 <CardRow
                   key={entry.id}

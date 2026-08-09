@@ -905,6 +905,18 @@ export default function Settings() {
             </div>}
           </section>}
 
+          <section className="space-y-1">
+            <SectionHeader title={t('serverCollection.shareSection')} />
+            <SettingsCard>
+              <SettingsRow
+                label={t('serverCollection.shareSetting')}
+                description={t('serverCollection.shareSettingDesc')}
+              >
+                <Toggle value={shareCollection} onChange={handleShareCollectionToggle} label={t('serverCollection.shareSetting')} />
+              </SettingsRow>
+            </SettingsCard>
+          </section>
+
           {/* ── 2. THEME ── */}
           <section className="space-y-1">
             <SectionHeader title={t('settings.sectionTheme')} />
@@ -1485,12 +1497,6 @@ export default function Settings() {
                 description={t('settings.priceAlertsDesc')}
               >
                 <Toggle value={priceAlertsEnabled} onChange={handlePriceAlertsToggle} label={t('settings.priceAlerts')} />
-              </SettingsRow>
-              <SettingsRow
-                label={t('serverCollection.shareSetting')}
-                description={t('serverCollection.shareSettingDesc')}
-              >
-                <Toggle value={shareCollection} onChange={handleShareCollectionToggle} label={t('serverCollection.shareSetting')} />
               </SettingsRow>
               {priceAlertsEnabled && (
                 <SettingsRow
