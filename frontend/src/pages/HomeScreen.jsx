@@ -285,29 +285,17 @@ export default function HomeScreen() {
 
       <div className="relative z-10 flex flex-col gap-6 px-4 pt-6 pb-10">
 
-        {/* ── TOP BAR: Logout + Sync ── */}
+        {/* ── TOP BAR: Settings (left) + Sync/Logout (right) ── */}
         <div className="flex items-center justify-between">
-          {multiUser ? (
-            <button
-              onClick={() => { logout(); navigate('/login') }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-text-muted hover:text-brand-red transition-colors"
-              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
-            >
-              <LogOut size={12} />
-              {t('auth.logout')}
-            </button>
-          ) : (
-            <div />
-          )}
+          <button
+            onClick={() => navigate('/settings')}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-text-muted hover:text-brand-red transition-colors"
+            style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
+          >
+            <Settings size={12} />
+            {t('nav.settings')}
+          </button>
           <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => navigate('/settings')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-text-muted hover:text-brand-red transition-colors"
-              style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
-            >
-              <Settings size={12} />
-              {t('nav.settings')}
-            </button>
             {user?.role === 'admin' && (
               <button
                 onClick={() => syncMutation.mutate()}
@@ -321,6 +309,16 @@ export default function HomeScreen() {
               >
                 <RefreshCw size={12} className={isRunning ? 'animate-spin' : ''} />
                 {isRunning ? t('home.syncing') : t('home.sync')}
+              </button>
+            )}
+            {multiUser && (
+              <button
+                onClick={() => { logout(); navigate('/login') }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-text-muted hover:text-brand-red transition-colors"
+                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
+              >
+                <LogOut size={12} />
+                {t('auth.logout')}
               </button>
             )}
           </div>

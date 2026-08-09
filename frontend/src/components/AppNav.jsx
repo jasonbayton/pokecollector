@@ -42,11 +42,7 @@ export default function AppNav() {
       {title && (
         <div className="sticky top-0 z-40 grid grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(0,1fr)] items-center px-4 pt-5 pb-3"
           style={{ background: 'linear-gradient(to bottom, rgba(6,8,15,0.98) 70%, transparent)' }}>
-          <div className="min-w-0" />
-          <p className="min-w-0 truncate text-center text-[11px] font-black uppercase tracking-[0.2em] text-text-muted">
-            {title}
-          </p>
-          <div className="flex min-w-0 items-center justify-end gap-1">
+          <div className="flex min-w-0 items-center justify-start">
             <button
               onClick={() => navigate('/settings')}
               className="flex h-8 min-w-8 items-center justify-center gap-1.5 rounded-lg px-1.5 text-text-muted transition-colors hover:text-brand-red pointer-events-auto"
@@ -54,6 +50,11 @@ export default function AppNav() {
             >
               <Settings size={16} />
             </button>
+          </div>
+          <p className="min-w-0 truncate text-center text-[11px] font-black uppercase tracking-[0.2em] text-text-muted">
+            {title}
+          </p>
+          <div className="flex min-w-0 items-center justify-end gap-1">
             {multiUser ? (
               <button
                 onClick={handleLogout}
