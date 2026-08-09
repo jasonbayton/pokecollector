@@ -40,7 +40,7 @@ export default function AppNav() {
     <>
       {/* Page title — subtle top strip with logout */}
       {title && (
-        <div className="sticky top-0 z-40 grid grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(0,1fr)] items-center px-4 pt-5 pb-3"
+        <div className="sticky top-0 z-40 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center px-4 pt-5 pb-3"
           style={{ background: 'linear-gradient(to bottom, rgba(6,8,15,0.98) 70%, transparent)' }}>
           <div className="flex min-w-0 items-center justify-start">
             <button
@@ -65,10 +65,10 @@ export default function AppNav() {
                   <img
                     src={`https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-v/black-white/animated/${user.avatar_id}.gif`}
                     alt={`${user.username} avatar`}
-                    className="h-4 w-4 object-contain pixelated"
+                    className="h-4 w-4 shrink-0 object-contain pixelated"
                   />
                 ) : null}
-                <LogOut size={16} />
+                <LogOut size={16} className="shrink-0" />
               </button>
             ) : null}
           </div>
