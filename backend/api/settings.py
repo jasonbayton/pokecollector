@@ -19,7 +19,6 @@ from services.exchange_rates import (
 from services.card_visibility import get_visible_filter_languages
 from services.exchange_rates import SUPPORTED_CURRENCIES
 from services.public_profile_feature import PUBLIC_PROFILES_SETTING_KEY
-from services.scanner_key_sharing import shared_scanner_key_allowed
 from services.tcgdex_languages import (
     DEFAULT_TCGDEX_SYNC_LANGUAGES,
     supported_tcgdex_language_payload,
@@ -227,8 +226,6 @@ def _get_user_settings(db: Session, user_id: int) -> dict:
         # key-resolution path in api/recognize.py still falls through to the
         # environment, and the two disagree about what is actually in use.
         for key, env_name in ENV_BACKED_KEYS.items():
-            if key in SCANNER_KEY_SETTINGS and not shared_scanner_key_allowed():
-                continue
             if not result.get(key):
                 env_value = os.environ.get(env_name, "").strip()
                 if env_value:
@@ -401,10 +398,13 @@ def _setting_source(db: Session, user_id: int, key: str) -> str:
     if row and row.value:
         return "user"
     env_name = ENV_BACKED_KEYS.get(key)
-    if key in SCANNER_KEY_SETTINGS and not shared_scanner_key_allowed():
-        return "default"
-    if env_name and _is_admin(db, user_id) and os.environ.get(env_name, "").strip():
-        return "env"
+    if env_name and os.environ.get(env_name, "").strip():
+        # A scanner key set on the installation is the fallback for every
+        # account, so report it as configured for non-admins too. Telling a user
+        # their key is unset while their scans quietly succeed on the shared one
+        # is worse than saying nothing.
+        if key in SCANNER_KEY_SETTINGS or _is_admin(db, user_id):
+            return "env"
     return "default"
 
 

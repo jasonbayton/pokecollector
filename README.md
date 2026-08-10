@@ -172,7 +172,6 @@ OPENAI_API_KEY=your_openai_key
 OPENAI_MODEL=gpt-4o-mini
 # OPENAI_BASE_URL=http://127.0.0.1:11434/v1   # optional: any OpenAI-compatible API
 SCANNER_PROVIDER=gemini
-ALLOW_SHARED_SCANNER_KEY=false
 DEFAULT_CURRENCY=EUR
 TELEGRAM_BOT_TOKEN=your_bot_token
 TELEGRAM_CHAT_ID=your_chat_id
@@ -277,7 +276,6 @@ The **Users** tab is only visible to admin users and only while multi-user mode 
 | `OPENAI_BASE_URL` | Any OpenAI-compatible chat completions API, so the scanner can use a local model through Ollama, llama.cpp or LM Studio. Needs a vision-capable model. When set away from the default, no API key is required | `https://api.openai.com/v1` |
 | `OPENAI_MODEL` | OpenAI model used by the card scanner | `gpt-4o-mini` |
 | `SCANNER_PROVIDER` | Which vision model reads card photos: `gemini` or `openai`. The admin-set **Card scanner** setting takes precedence. | `gemini` |
-| `ALLOW_SHARED_SCANNER_KEY` | When `true`, accounts without their own key fall back to the installation key above, so one key covers every user. Off by default: consider the billing and isolation implications on a multi-user install. | `false` |
 | `DEFAULT_CURRENCY` | Currency new accounts start on: `EUR`, `USD` or `GBP` | `EUR` |
 | `OPENAI_BASE_URL` | OpenAI-compatible endpoint for the card scanner. Point it at a local server such as Ollama, llama.cpp or LM Studio (for example `http://127.0.0.1:11434/v1`). Deliberately an administrator setting: a user-supplied backend URL would let any account direct the server at an arbitrary host. | `https://api.openai.com/v1` |
 | `OPENAI_MODEL` | Model used when the scanner provider is set to OpenAI. Must be vision capable. | `gpt-4o-mini` |

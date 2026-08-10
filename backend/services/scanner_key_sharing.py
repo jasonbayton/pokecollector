@@ -1,38 +1,23 @@
-"""Whether one installation-wide scanner key may serve every account.
+"""Installation-wide scanner keys, as a fallback behind each user's own.
 
-Kept as its own module, deliberately. This is fork-local policy that upstream
-does not have, and scan_providers.py is shared with the branch offered upstream,
-so putting it there would make every future merge conflict on that file.
+Fork-local: upstream has no cross-user key fallback at all. Kept in its own
+module so scan_providers.py stays identical to the branch offered upstream and
+future merges do not conflict on it.
+
+Resolution order is the user's own key, then the environment. Setting the
+environment variable is itself the operator's decision to provide a key for
+everyone; leaving it unset means each account must supply its own. There is no
+separate opt-in flag, because the presence of the key is the opt-in.
 """
 
 import os
-
-
-def shared_scanner_key_allowed() -> bool:
-    """Whether an installation-wide key may be used for any account.
-
-    Off by default: the key belongs to whoever pays for the deployment, so
-    sharing it with every authenticated account is a billing and isolation
-    decision the operator has to make deliberately. With it off, behaviour
-    matches the per-user model the project documents.
-    """
-    return os.environ.get("ALLOW_SHARED_SCANNER_KEY", "").strip().lower() in {
-        "true", "1", "yes", "on",
-    }
-
 
 # The environment variable holding each provider's installation-wide key.
 SHARED_ENV_KEYS = {"gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY"}
 
 
 def shared_env_key(provider_name: str) -> str:
-    """The installation-wide key for this provider, if sharing is enabled.
-
-    Returns an empty string when sharing is off, which is the default, so the
-    per-user model is unchanged unless the operator opts in.
-    """
-    if not shared_scanner_key_allowed():
-        return ""
+    """The installation-wide key for this provider, or an empty string."""
     env_name = SHARED_ENV_KEYS.get(provider_name)
     if not env_name:
         return ""

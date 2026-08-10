@@ -12,7 +12,6 @@ try:
         _mask_secret,
         _redact_secrets,
     )
-    from services.scanner_key_sharing import shared_scanner_key_allowed
     from services.scan_providers import ScanProvider
     DEPS_AVAILABLE = True
 except ModuleNotFoundError:
@@ -110,12 +109,12 @@ class SettingValidationTests(unittest.TestCase):
 class ProviderKeyPrecedenceTests(unittest.TestCase):
     def test_user_key_wins_over_environment(self):
         db = _FakeDb(_Row("sk-user"))
-        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-env", "ALLOW_SHARED_SCANNER_KEY": "true"}):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-env"}):
             self.assertEqual(ScanProvider("openai").credential(db, 1), "sk-user")
 
     def test_whitespace_only_key_does_not_shadow_the_environment(self):
         db = _FakeDb(_Row("   "))
-        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-env", "ALLOW_SHARED_SCANNER_KEY": "true"}):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-env"}):
             self.assertEqual(ScanProvider("openai").credential(db, 1), "sk-env")
 
     def test_user_key_is_trimmed(self):
@@ -130,7 +129,7 @@ class ProviderKeyPrecedenceTests(unittest.TestCase):
 
     def test_environment_is_used_when_sharing_is_enabled(self):
         db = _FakeDb(None)
-        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-env", "ALLOW_SHARED_SCANNER_KEY": "1"}):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-env"}):
             self.assertEqual(ScanProvider("openai").credential(db, 1), "sk-env")
 
     def test_each_provider_reads_its_own_environment_variable(self):
@@ -138,7 +137,6 @@ class ProviderKeyPrecedenceTests(unittest.TestCase):
         env = {
             "GEMINI_API_KEY": "goog-key",
             "OPENAI_API_KEY": "sk-key",
-            "ALLOW_SHARED_SCANNER_KEY": "true",
         }
         with patch.dict("os.environ", env):
             self.assertEqual(ScanProvider("gemini").credential(db, 1), "goog-key")
@@ -146,7 +144,7 @@ class ProviderKeyPrecedenceTests(unittest.TestCase):
 
     def test_sharing_defaults_to_off(self):
         with patch.dict("os.environ", {}, clear=True):
-            self.assertFalse(shared_scanner_key_allowed())
+            self.assertEqual(ScanProvider("openai").credential(db, 1), "")
 
 
 @skip_without_deps
