@@ -12,7 +12,7 @@ try:
 
     from api.cards import create_custom_card, get_custom_matches, migrate_custom_card
     from database import Base, install_custom_match_uniqueness
-    from models import Card, CustomCardMatch
+    from models import Card, CollectionItem, CustomCardMatch, User
     from schemas import CardCustomCreate
     from services.sync_service import (
         check_custom_card_matches,
@@ -40,11 +40,29 @@ def _memory_db():
     return sessionmaker(bind=engine)()
 
 
+def _owner(db, username="jason"):
+    """Manual cards are owned now, so these paths need a real user.
+
+    Reused per database: minting a new user on every call would leave a card
+    owned by one user and queried by another, which the ownership filters then
+    correctly hide.
+    """
+    existing = db.query(User).filter(User.username == username).first()
+    if existing:
+        return existing
+    user = User(username=username, hashed_password="x", role="admin", is_active=True)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 @skip_without_deps
 class MigrationSafetyTests(unittest.TestCase):
     def test_migration_rejects_a_fetched_card_whose_identity_changed(self):
         db = _memory_db()
         try:
+            owner = _owner(db)
             custom = Card(
                 id="custom-identity",
                 name="Pikachu",
@@ -52,6 +70,7 @@ class MigrationSafetyTests(unittest.TestCase):
                 number="58",
                 lang="en",
                 is_custom=True,
+                custom_owner_id=owner.id,
             )
             match = CustomCardMatch(
                 custom_card_id=custom.id,
@@ -70,7 +89,7 @@ class MigrationSafetyTests(unittest.TestCase):
             with patch("api.cards.pokemon_api.get_card", return_value=fetched), \
                  patch("api.cards.pokemon_api.parse_card_for_db") as parse_card:
                 with self.assertRaises(HTTPException) as ctx:
-                    migrate_custom_card(match.id, db=db, current_user=None)
+                    migrate_custom_card(match.id, db=db, current_user=_owner(db))
 
             self.assertEqual(ctx.exception.status_code, 409)
             parse_card.assert_not_called()
@@ -82,6 +101,7 @@ class MigrationSafetyTests(unittest.TestCase):
     def test_match_preview_falls_back_to_catalogue_when_target_is_not_local(self):
         db = _memory_db()
         try:
+            owner = _owner(db)
             custom = Card(
                 id="custom-preview",
                 name="Charmeleon",
@@ -89,6 +109,7 @@ class MigrationSafetyTests(unittest.TestCase):
                 number="12",
                 lang="en",
                 is_custom=True,
+                custom_owner_id=owner.id,
             )
             match = CustomCardMatch(
                 custom_card_id=custom.id,
@@ -108,7 +129,7 @@ class MigrationSafetyTests(unittest.TestCase):
                 "set": {"id": "me02"},
             }
             with patch("api.cards.pokemon_api.get_card", return_value=remote) as get_card:
-                result = get_custom_matches(db=db, current_user=None)
+                result = get_custom_matches(db=db, current_user=_owner(db))
 
             get_card.assert_called_once_with("me02-012", lang="en")
             self.assertEqual(len(result), 1)
@@ -130,6 +151,7 @@ class MigrationSafetyTests(unittest.TestCase):
     def test_match_preview_returns_none_when_local_and_remote_lookups_miss(self):
         db = _memory_db()
         try:
+            owner = _owner(db)
             custom = Card(
                 id="custom-no-preview",
                 name="Missingno",
@@ -137,6 +159,7 @@ class MigrationSafetyTests(unittest.TestCase):
                 number="0",
                 lang="en",
                 is_custom=True,
+                custom_owner_id=owner.id,
             )
             match = CustomCardMatch(
                 custom_card_id=custom.id,
@@ -147,7 +170,7 @@ class MigrationSafetyTests(unittest.TestCase):
             db.commit()
 
             with patch("api.cards.pokemon_api.get_card", return_value=None) as get_card:
-                result = get_custom_matches(db=db, current_user=None)
+                result = get_custom_matches(db=db, current_user=_owner(db))
 
             get_card.assert_called_once_with("unknown-0", lang="en")
             self.assertEqual(len(result), 1)
@@ -172,10 +195,16 @@ class CreationTimeMatchingTests(unittest.TestCase):
                 "api.cards.match_custom_card_in_background",
                 side_effect=RuntimeError("TCGdex unreachable"),
             ) as matcher:
-                result = create_custom_card(data, tasks, db=db, current_user=None)
+                result = create_custom_card(data, tasks, db=db, current_user=_owner(db))
 
-            self.assertEqual(result["id"], "custom-base1-58")
-            self.assertIsNotNone(db.get(Card, result["id"]))
+            # The id was once derived from set and number. Manual cards are
+            # per-user now, so two users may both own a "base1 58" and the id
+            # is opaque instead. What this test is about is that creation
+            # succeeded and persisted despite the matcher being broken.
+            self.assertTrue(result["id"].startswith("custom-"))
+            stored = db.get(Card, result["id"])
+            self.assertIsNotNone(stored)
+            self.assertEqual((stored.set_id, stored.number), ("base1", "58"))
             matcher.assert_not_called()
             self.assertEqual(len(tasks.tasks), 1)
         finally:
@@ -188,7 +217,7 @@ class CreationTimeMatchingTests(unittest.TestCase):
             data = CardCustomCreate(name="Eevee", number="51", lang="en")
 
             with patch("api.cards.match_custom_card_in_background") as matcher:
-                result = create_custom_card(data, tasks, db=db, current_user=None)
+                result = create_custom_card(data, tasks, db=db, current_user=_owner(db))
 
             self.assertTrue(result["is_custom"])
             matcher.assert_not_called()
@@ -301,6 +330,7 @@ class MatchRecordingTests(unittest.TestCase):
     def test_full_check_logs_each_failure_and_the_failure_count(self):
         db = _memory_db()
         try:
+            owner = _owner(db)
             cards = [
                 Card(
                     id=f"custom-{suffix.lower()}",
@@ -309,6 +339,7 @@ class MatchRecordingTests(unittest.TestCase):
                     number=suffix,
                     lang="en",
                     is_custom=True,
+                    custom_owner_id=owner.id,
                 )
                 for suffix in ("A", "B", "C")
             ]
@@ -436,6 +467,7 @@ class CustomMatchUniquenessTests(unittest.TestCase):
                     db.rollback()
 
             self.assertTrue(install_custom_match_uniqueness(SqliteInstallConnection()))
+            owner = _owner(db)
             first = Card(
                 id="custom-first",
                 name="Pikachu",
@@ -443,6 +475,7 @@ class CustomMatchUniquenessTests(unittest.TestCase):
                 number="58",
                 lang="en",
                 is_custom=True,
+                custom_owner_id=owner.id,
             )
             second = Card(
                 id="custom-second",
@@ -451,6 +484,7 @@ class CustomMatchUniquenessTests(unittest.TestCase):
                 number="58",
                 lang="en",
                 is_custom=True,
+                custom_owner_id=owner.id,
             )
             first_match = CustomCardMatch(
                 custom_card_id=first.id,
@@ -485,8 +519,8 @@ class CustomMatchUniquenessTests(unittest.TestCase):
                      "api.cards.apply_cross_language_fallbacks",
                      side_effect=lambda _db, value: value,
                  ):
-                migrate_custom_card(first_match.id, db=db, current_user=None)
-                migrate_custom_card(second_match.id, db=db, current_user=None)
+                migrate_custom_card(first_match.id, db=db, current_user=_owner(db))
+                migrate_custom_card(second_match.id, db=db, current_user=_owner(db))
 
             migrated = db.query(CustomCardMatch).order_by(CustomCardMatch.id).all()
             self.assertEqual([row.status for row in migrated], ["migrated", "migrated"])
@@ -494,6 +528,126 @@ class CustomMatchUniquenessTests(unittest.TestCase):
                 [row.custom_card_id for row in migrated],
                 ["base1-58_en", "base1-58_en"],
             )
+        finally:
+            db.close()
+
+    def test_promoting_a_shared_template_leaves_every_clone_alone(self):
+        """One logical card is several physical cards after the ownership backfill.
+
+        The backfill gives the first admin the original as a shared template and
+        every other user a private clone. Promotion is scoped to the caller's own
+        card, so this checks that the admin promoting the template moves only the
+        admin's rows: the clone, its owner's collection row and its own pending
+        match all have to survive untouched, and the clone's owner has to still be
+        able to promote afterwards.
+        """
+        db = _memory_db()
+        try:
+            admin = _owner(db, username="admin")
+            trainer = _owner(db, username="mika")
+
+            template = Card(
+                id="custom-legacy", name="Bergmite", set_id="me04", number="24",
+                lang="en", is_custom=True,
+                custom_owner_id=admin.id, is_shared_template=True,
+            )
+            clone = Card(
+                id="custom-clone", name="Bergmite", set_id="me04", number="24",
+                lang="en", is_custom=True,
+                custom_owner_id=trainer.id, is_shared_template=False,
+                custom_source_card_id="custom-legacy",
+            )
+            db.add_all([template, clone])
+            db.commit()
+
+            for card, user in ((template, admin), (clone, trainer)):
+                db.add(CollectionItem(
+                    card_id=card.id, user_id=user.id, quantity=1,
+                    condition="NM", variant="Normal", lang="en",
+                ))
+            db.add_all([
+                CustomCardMatch(custom_card_id="custom-legacy", api_card_id="me04-024", status="pending"),
+                CustomCardMatch(custom_card_id="custom-clone", api_card_id="me04-024", status="pending"),
+            ])
+            db.commit()
+
+            template_match = db.query(CustomCardMatch).filter(
+                CustomCardMatch.custom_card_id == "custom-legacy"
+            ).one()
+            clone_match = db.query(CustomCardMatch).filter(
+                CustomCardMatch.custom_card_id == "custom-clone"
+            ).one()
+
+            fetched = {"id": "me04-024", "name": "Bergmite", "localId": "24"}
+            parsed = {
+                "id": "me04-024_en", "tcg_card_id": "me04-024", "name": "Bergmite",
+                "set_id": None, "number": "24", "lang": "en",
+            }
+            promote = lambda match_id, user: migrate_custom_card(match_id, db=db, current_user=user)
+            with patch("api.cards.pokemon_api.get_card", return_value=fetched), \
+                 patch("api.cards.pokemon_api.parse_card_for_db",
+                       side_effect=lambda *args, **kwargs: dict(parsed)), \
+                 patch("api.cards.apply_cross_language_fallbacks",
+                       side_effect=lambda _db, value: value):
+                promote(template_match.id, admin)
+
+                # The admin's own side moved.
+                self.assertIsNone(db.query(Card).filter(Card.id == "custom-legacy").first())
+                admin_item = db.query(CollectionItem).filter(
+                    CollectionItem.user_id == admin.id
+                ).one()
+                self.assertEqual(admin_item.card_id, "me04-024_en")
+
+                # The clone did not.
+                surviving = db.query(Card).filter(Card.id == "custom-clone").one()
+                self.assertTrue(surviving.is_custom)
+                self.assertEqual(surviving.custom_owner_id, trainer.id)
+                trainer_item = db.query(CollectionItem).filter(
+                    CollectionItem.user_id == trainer.id
+                ).one()
+                self.assertEqual(trainer_item.card_id, "custom-clone")
+                db.refresh(clone_match)
+                self.assertEqual(clone_match.status, "pending")
+
+                # The pointer back to the template now dangles. Nothing reads it
+                # at runtime and there is no foreign key, so this is recorded as
+                # the real state rather than asserted to be tidy.
+                self.assertEqual(surviving.custom_source_card_id, "custom-legacy")
+
+                # The divergence is real until the clone's owner acts, and the
+                # promotion still available to them is what closes it.
+                promote(clone_match.id, trainer)
+
+            self.assertIsNone(db.query(Card).filter(Card.id == "custom-clone").first())
+            self.assertEqual(
+                {item.card_id for item in db.query(CollectionItem).all()},
+                {"me04-024_en"},
+            )
+        finally:
+            db.close()
+
+    def test_a_clone_owner_cannot_promote_someone_elses_match(self):
+        db = _memory_db()
+        try:
+            admin = _owner(db, username="admin")
+            trainer = _owner(db, username="mika")
+            db.add(Card(
+                id="custom-legacy", name="Bergmite", set_id="me04", number="24",
+                lang="en", is_custom=True,
+                custom_owner_id=admin.id, is_shared_template=True,
+            ))
+            db.commit()
+            db.add(CustomCardMatch(
+                custom_card_id="custom-legacy", api_card_id="me04-024", status="pending",
+            ))
+            db.commit()
+            match = db.query(CustomCardMatch).one()
+
+            with self.assertRaises(HTTPException) as caught:
+                migrate_custom_card(match.id, db=db, current_user=trainer)
+            self.assertEqual(caught.exception.status_code, 404)
+            self.assertIsNotNone(db.query(Card).filter(Card.id == "custom-legacy").first())
+            self.assertEqual(db.query(CustomCardMatch).one().status, "pending")
         finally:
             db.close()
 

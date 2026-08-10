@@ -7,6 +7,7 @@ import { getCollection, updateCollectionItem, updateCardCustomImage, removeFromC
 import { CustomCardModal } from '../components/CardItem'
 import RecentlyDeletedModal from '../components/RecentlyDeletedModal'
 import { useSettings } from '../contexts/SettingsContext'
+import { useConfirmDialog } from '../contexts/ConfirmDialogContext'
 import CardImage from '../components/CardImage'
 import { CardDialog, CardDisplay, CardIdentity, CardLegend, CardRow, withCollectionItemState } from '../components/card-system'
 import MoneyInput from '../components/MoneyInput'
@@ -212,6 +213,7 @@ function CsvImportModal({ t, onClose, onChooseFile, onDownloadTemplate, isImport
 // Opens when clicking any card in the collection. Allows editing + deleting.
 function CollectionEditModal({ item, onClose }) {
   const { t, formatPrice, pricePrimaryField, exchangeRate, exchangeRateReady } = useSettings()
+  const confirmDialog = useConfirmDialog()
   const queryClient = useQueryClient()
   const card = item.card
   const itemPriceInput = formatMoneyInputValue(item.purchase_price, exchangeRate)
@@ -377,8 +379,14 @@ function CollectionEditModal({ item, onClose }) {
     },
   })
 
-  const handleDelete = () => {
-    if (confirm(`${card?.name || 'Karte'} ${t('collection.removeConfirm')}`)) {
+  const handleDelete = async () => {
+    const confirmed = await confirmDialog({
+      title: t('common.remove'),
+      message: `${card?.name || t('collection.card')} ${t('collection.removeConfirm')}`,
+      confirmLabel: t('common.remove'),
+      destructive: true,
+    })
+    if (confirmed) {
       deleteMutation.mutate()
     }
   }
@@ -1329,9 +1337,6 @@ export default function Collection() {
                               variantEffectSource={item.variant}
                               details={(
                                 <div className="mt-0.5 flex min-w-0 items-center gap-1">
-                                  {card?.is_custom && (
-                                    <span className="rounded bg-yellow/20 px-1 text-xs text-yellow" title={t('migration.custom')}>✏️</span>
-                                  )}
                                   <ProductSourceBadge item={item} t={t} className="max-w-[180px]" />
                                 </div>
                               )}
@@ -1408,8 +1413,6 @@ export default function Collection() {
                   })
                   const sourceSummary = getProductSourceSummary(item)
                   if (sourceSummary) badges.push({ label: `${t('collection.foundIn')}: ${sourceSummary.label}`, variant: 'gold' })
-                  if (card?.is_custom) badges.push({ label: '✏️', variant: 'yellow' })
-
                   return (
                     <CardRow
                       key={item.id}

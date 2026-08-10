@@ -755,6 +755,9 @@ def record_custom_card_match(db: Session, card, *, notify: bool = True) -> str |
                 f"🔄 Karte '<b>{card.name}</b>' ({card.set_id} #{card.number}) ist jetzt in der API verfügbar! "
                 f"Öffne die App um die Daten zu migrieren.",
                 db=db,
+                # Manual cards are owned, so the alert belongs to the owner's
+                # Telegram settings rather than the installation default.
+                user_id=card.custom_owner_id,
             )
         except Exception as e:
             logger.warning(f"Match recorded but notification failed for {card.id}: {e}")
@@ -783,7 +786,12 @@ def match_custom_card_in_background(card_id: str) -> None:
 
 def check_custom_card_matches(db: Session):
     """Check whether any custom card now has a catalogue equivalent."""
-    custom_cards = db.query(Card).filter(Card.is_custom == True).all()
+    custom_cards = db.query(Card).filter(
+        Card.is_custom == True,
+        # Ownerless custom cards predate the ownership model and are not any
+        # user's to match; upstream skips them and so does this.
+        Card.custom_owner_id.isnot(None),
+    ).all()
     if not custom_cards:
         return
 

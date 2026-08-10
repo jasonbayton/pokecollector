@@ -960,6 +960,7 @@ class ProductLedgerApiTests(unittest.TestCase):
             number="42",
             lang="en",
             is_custom=True,
+            custom_owner_id=self.user.id,
             price_trend=20,
             price_market=20,
             variants_normal=True,
@@ -976,7 +977,7 @@ class ProductLedgerApiTests(unittest.TestCase):
         )
 
         with self.assertRaises(HTTPException) as ctx:
-            delete_custom_card(custom_card.id, current_user=self.admin, db=self.db)
+            delete_custom_card(custom_card.id, current_user=self.user, db=self.db)
 
         product_card = self.db.query(ProductCard).one()
         self.assertEqual(ctx.exception.status_code, 409)

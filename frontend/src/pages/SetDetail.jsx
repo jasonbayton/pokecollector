@@ -1,23 +1,17 @@
-import { useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { useRef, useState } from 'react'
+import { createPortal, flushSync } from 'react-dom'
 import { useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Plus, Trash2, X, Heart, BookMarked, HelpCircle } from 'lucide-react'
-import { getSetChecklist, addToCollection, addToWishlist, updateCollectionItem, removeFromCollection, getBinders, addOwnedSetToBinder, addOwnedSetToAutoBinder } from '../api/client'
+import { ArrowLeft, Plus, X, BookMarked, HelpCircle } from 'lucide-react'
+import { getSetChecklist, getBinders, addOwnedSetToBinder, addOwnedSetToAutoBinder } from '../api/client'
 import { useSettings } from '../contexts/SettingsContext'
 import toast from 'react-hot-toast'
 import clsx from 'clsx'
 import { resolveCardImageUrl, resolveSetImageUrl } from '../utils/imageUrl'
-import { CARD_VARIANTS, getAvailableVariants, getDefaultVariantOrNull } from '../utils/cardVariants'
 import { HOLO_FIELD_MAP } from '../utils/prices'
-import TcgdexLanguageSelect from '../components/TcgdexLanguageSelect'
-import { invalidateCardState, invalidateTcgdexFilterLanguages } from '../utils/queryInvalidation'
-import MoneyInput from '../components/MoneyInput'
-import { parseMoneyInputValue } from '../utils/moneyInput'
 import { useDetailBackNavigation, useScrollToTopOnPush } from '../hooks/useListScrollRestoration'
-import { CardDialog, CardDisplay, CardLegend } from '../components/card-system'
-
-const CONDITIONS = ['Mint', 'NM', 'LP', 'MP', 'HP']
+import { CardDisplay, CardLegend } from '../components/card-system'
+import { CardModal } from '../components/CardItem'
 
 const SET_SORT_OPTIONS = [
   'number',
@@ -321,9 +315,15 @@ export default function SetDetail() {
   const [sortBy, setSortBy] = useState('number')
   const [rarityFilter, setRarityFilter] = useState('all')
   const [selectedCard, setSelectedCard] = useState(null)
-  const [selectedCardTab, setSelectedCardTab] = useState('overview')
+  const [selectedCardTab, setSelectedCardTab] = useState('add')
   const [binderPickerOpen, setBinderPickerOpen] = useState(false)
   const [badgeLegendOpen, setBadgeLegendOpen] = useState(false)
+  const [isReturningToSets, setIsReturningToSets] = useState(false)
+
+  const returnToSets = () => {
+    flushSync(() => setIsReturningToSets(true))
+    goBack()
+  }
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['set-checklist', setId],
@@ -417,6 +417,10 @@ export default function SetDetail() {
     addOwnedMutation.mutate(args)
   }
 
+  if (isReturningToSets) {
+    return <div className="fixed inset-0 z-40 bg-bg" aria-hidden="true" />
+  }
+
   if (isLoading) {
     return (
       <div className="space-y-4">
@@ -433,7 +437,7 @@ export default function SetDetail() {
     return (
       <div className="card text-center py-12">
         <p className="text-brand-red">{t('setDetail.loadFailed')} {error.message}</p>
-        <button onClick={goBack} className="btn-ghost mt-4 mx-auto">
+        <button onClick={returnToSets} className="btn-ghost mt-4 mx-auto">
           <ArrowLeft size={16} /> {t('setDetail.goBack')}
         </button>
       </div>
@@ -458,7 +462,7 @@ export default function SetDetail() {
 
   return (
     <div className="space-y-4 pb-2">
-      <button onClick={goBack} className="btn-ghost text-sm py-1.5">
+      <button onClick={returnToSets} className="btn-ghost text-sm py-1.5">
         <ArrowLeft size={14} /> {t('nav.sets')}
       </button>
 
@@ -605,7 +609,7 @@ export default function SetDetail() {
             price={setSortPrice(card, pricePrimaryField) > 0 ? formatPrice(setSortPrice(card, pricePrimaryField)) : null}
             dimWhenUnowned
             onClick={() => {
-              setSelectedCardTab('overview')
+              setSelectedCardTab('add')
               setSelectedCard(card)
             }}
             onAdd={() => {
@@ -616,21 +620,13 @@ export default function SetDetail() {
         ))}
       </div>
 
-      <SetCardActionModal
+      {selectedCard && <CardModal
+        key={selectedCard.id}
         card={selectedCard}
-        setLang={setLang}
+        defaultLang={setLang}
         initialTab={selectedCardTab}
         onClose={() => setSelectedCard(null)}
-        onAdd={(payload) => addMutation.mutate(payload)}
-        onAddWishlist={(payload) => wishlistMutation.mutate(payload)}
-        onQuantityChange={(item, quantity) => quantityMutation.mutate({ item, quantity })}
-        onRemove={(item) => removeMutation.mutate(item)}
-        isAdding={addMutation.isPending}
-        isAddingWishlist={wishlistMutation.isPending}
-        isUpdatingQuantity={quantityMutation.isPending}
-        isRemoving={removeMutation.isPending}
-        t={t}
-      />
+      />}
 
       {binderPickerOpen && createPortal(
         <div

@@ -56,6 +56,10 @@ class CardBase(BaseModel):
     data_source_lang: Optional[str] = None
     custom_image_url: Optional[str] = None
     is_custom: bool = False
+    custom_owner_id: Optional[int] = None
+    custom_owner_username: Optional[str] = None
+    is_custom_owner: bool = False
+    is_shared_template: bool = False
     is_digital: bool = False
     price_market: Optional[float] = None
     price_low: Optional[float] = None
@@ -111,6 +115,7 @@ class CardCustomCreate(BaseModel):
     variants_reverse: Optional[bool] = None
     variants_holo: Optional[bool] = None
     variants_first_edition: Optional[bool] = None
+    is_shared_template: bool = False
 
 
 class CustomCardUpdate(BaseModel):
@@ -129,6 +134,7 @@ class CustomCardUpdate(BaseModel):
     variants_reverse: Optional[bool] = None
     variants_holo: Optional[bool] = None
     variants_first_edition: Optional[bool] = None
+    is_shared_template: Optional[bool] = None
 
 
 class CardCustomImageUpdate(BaseModel):
