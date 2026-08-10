@@ -909,7 +909,7 @@ const en = {
     openaiApiKey: 'OpenAI API Key',
     openaiApiKeyDesc: 'Leave empty when this server points at a local model that needs no key.',
     visualVerification: 'Visual verification',
-    visualVerificationDesc: 'Spends a second model request comparing your photo against candidate images when the printed details are not conclusive. Recommended for Gemini. Small local models usually pick badly, so it starts off for them.',
+    visualVerificationDesc: 'Spends a second model request comparing your photo against candidate images when the printed details are not conclusive. Recommended for Gemini and the hosted OpenAI API. Small self-hosted models usually pick badly, so it starts off for them.',
     telegramBotToken: 'Telegram Bot Token',
     telegramBotTokenDesc: 'Bot Token from @BotFather',
     telegramChatId: 'Telegram Chat ID',

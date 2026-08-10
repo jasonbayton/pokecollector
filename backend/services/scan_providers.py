@@ -96,10 +96,12 @@ def resolve_provider_name(db: Session, user_id: int | None) -> str:
 def visual_verification_enabled(db: Session, user_id: int | None, provider: str) -> bool:
     """Whether to spend a second model call on picking between candidates.
 
-    Defaults differ by provider on purpose. Gemini handles the multi-image
-    comparison well, so it stays on and nothing changes for existing users. A small
-    local model usually does not, and a wrong pick is worse than no pick, so it
-    starts off there. Either default can be overridden per user.
+    The default follows model capability rather than provider name. Gemini and
+    the hosted OpenAI API both handle the multi-image comparison well, so it
+    stays on for them and nothing changes for existing users. It starts off only
+    when the endpoint has been pointed at a self-hosted model, where the ask is
+    usually beyond what is running and a confident wrong pick is worse than no
+    pick at all. Either default can be overridden per user.
     """
     if user_id is not None:
         row = (
@@ -112,7 +114,9 @@ def visual_verification_enabled(db: Session, user_id: int | None, provider: str)
         )
         if row and row.value:
             return str(row.value).strip().lower() in {"true", "1", "yes", "on"}
-    return provider == GEMINI
+    # openai_requires_key() is true only for the hosted API, which is the same
+    # signal that distinguishes it from a self-hosted endpoint.
+    return provider == GEMINI or openai_requires_key()
 
 
 class ProviderRateLimitError(HTTPException):

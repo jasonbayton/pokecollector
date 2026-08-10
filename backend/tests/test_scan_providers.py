@@ -365,14 +365,22 @@ class VisualVerificationToggleTests(_Fixture, unittest.TestCase):
     def test_gemini_keeps_visual_verification_on_by_default(self):
         self.assertTrue(visual_verification_enabled(self.db, self.user.id, GEMINI))
 
-    def test_a_local_provider_starts_with_it_off(self):
+    def test_a_self_hosted_endpoint_starts_with_it_off(self):
         # The multi-image comparison is beyond most small local models, and a
         # confident wrong pick is worse than no pick.
-        self.assertFalse(visual_verification_enabled(self.db, self.user.id, OPENAI))
+        with patch.dict(os.environ, {"OPENAI_BASE_URL": LOCAL_URL}):
+            self.assertFalse(visual_verification_enabled(self.db, self.user.id, OPENAI))
 
-    def test_a_user_can_turn_it_on_for_openai(self):
+    def test_hosted_openai_keeps_it_on(self):
+        # The default follows capability, not provider name: gpt-4o does this at
+        # least as well as gemini-flash, so defaulting it off would be arbitrary.
+        with patch.dict(os.environ, {"OPENAI_BASE_URL": DEFAULT_OPENAI_BASE_URL}):
+            self.assertTrue(visual_verification_enabled(self.db, self.user.id, OPENAI))
+
+    def test_a_user_can_turn_it_on_for_a_self_hosted_endpoint(self):
         self._set("scanner_visual_verification", "true")
-        self.assertTrue(visual_verification_enabled(self.db, self.user.id, OPENAI))
+        with patch.dict(os.environ, {"OPENAI_BASE_URL": LOCAL_URL}):
+            self.assertTrue(visual_verification_enabled(self.db, self.user.id, OPENAI))
 
     def test_a_user_can_turn_it_off_for_gemini(self):
         self._set("scanner_visual_verification", "false")
@@ -424,8 +432,9 @@ class PerUserResolutionTests(_Fixture, unittest.TestCase):
         self.assertEqual(names, [GEMINI, OPENAI, GEMINI, OPENAI])
 
     def test_each_user_gets_their_own_visual_default(self):
-        self.assertTrue(visual_verification_enabled(self.db, self.user.id, GEMINI))
-        self.assertFalse(visual_verification_enabled(self.db, self.other.id, OPENAI))
+        with patch.dict(os.environ, {"OPENAI_BASE_URL": LOCAL_URL}):
+            self.assertTrue(visual_verification_enabled(self.db, self.user.id, GEMINI))
+            self.assertFalse(visual_verification_enabled(self.db, self.other.id, OPENAI))
 
 
 @unittest.skipUnless(DEPS, "FastAPI/SQLAlchemy are not installed in this environment")
