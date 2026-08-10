@@ -5,7 +5,7 @@ try:
     from fastapi import HTTPException
 
     from api.export import _convert_eur, _normalize_currency
-        from api.settings import (
+    from api.settings import (
         SECRET_KEYS,
         _coerce_setting_value,
         _default_currency,
