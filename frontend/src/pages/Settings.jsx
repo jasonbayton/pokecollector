@@ -1022,6 +1022,63 @@ export default function Settings() {
           <section className="space-y-1">
             <SectionHeader title={t('settings.sectionAI')} />
             <SettingsCard>
+              <SettingsRow
+                label={t('settings.scannerProvider')}
+                description={t('settings.scannerProviderDesc')}
+              >
+                <SelectControl
+                  value={scannerProvider}
+                  onChange={handleScannerProviderChange}
+                  options={[
+                    { value: 'gemini', label: t('settings.scannerProviderGemini') },
+                    { value: 'openai', label: t('settings.scannerProviderOpenai') },
+                  ]}
+                />
+              </SettingsRow>
+              {scannerProvider === 'openai' && (
+                <SettingsRow
+                  label={t('settings.openaiApiKey')}
+                  description={t('settings.openaiApiKeyDesc')}
+                >
+                  <div className="flex items-center gap-2 w-full mt-2">
+                    <input
+                      type={openaiDirty ? "text" : "password"}
+                      value={openaiKey}
+                      onChange={e => { setOpenaiKey(e.target.value); setOpenaiDirty(true) }}
+                      placeholder="sk-..."
+                      className="input flex-1 text-xs font-mono"
+                      style={{ minWidth: 0 }}
+                    />
+                    {openaiKey && !openaiDirty && (
+                      <span className="text-xs text-green flex-shrink-0">✅</span>
+                    )}
+                    {openaiDirty && (
+                      <button
+                        onClick={async () => {
+                          await saveSetting('openai_api_key', openaiKey)
+                          setOpenaiDirty(false)
+                          queryClient.invalidateQueries({ queryKey: ['setting', 'openai_api_key'] })
+                          toast.success(t('settings.apiKeySaved'))
+                        }}
+                        className="btn-primary-sm flex-shrink-0"
+                      >
+                        {t('common.save')}
+                      </button>
+                    )}
+                  </div>
+                </SettingsRow>
+              )}
+              <SettingsRow
+                label={t('settings.visualVerification')}
+                description={t('settings.visualVerificationDesc')}
+              >
+                <Toggle
+                  value={visualVerification}
+                  onChange={handleVisualVerificationToggle}
+                  label={t('settings.visualVerification')}
+                  disabled={visualSaving}
+                />
+              </SettingsRow>
               <SettingsRow label={t('settings.geminiApiKey')} description={t('settings.geminiApiKeyDesc')}>
                 <div className="flex items-center gap-2 w-full mt-2">
                   <input
