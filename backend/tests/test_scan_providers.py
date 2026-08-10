@@ -145,7 +145,7 @@ class RequestShapingTests(unittest.TestCase):
 
     def _run(self, provider, api_key, parts, responses):
         client = _FakeClient(responses)
-        text, usage = asyncio.get_event_loop().run_until_complete(
+        text, usage = asyncio.run(
             provider.generate_text(client, api_key, parts)
         )
         return client, text, usage
@@ -218,7 +218,7 @@ class ErrorMappingTests(unittest.TestCase):
     def _call(self, responses, api_key="sk-x"):
         client = _FakeClient(responses)
         self._last_client = client
-        return asyncio.get_event_loop().run_until_complete(
+        return asyncio.run(
             post_openai_chat(client, "http://x/chat/completions", api_key, {}, max_attempts=2)
         )
 
