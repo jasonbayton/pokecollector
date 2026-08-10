@@ -43,7 +43,11 @@ VISUAL_VERIFICATION_SETTING = "scanner_visual_verification"
 SCANNER_MODEL_SETTING = "scanner_model"
 
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
-DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
+# Measured against gpt-4o-mini on real card scans: same name and number
+# accuracy, roughly a seventh of the cost because it spends ~900 image tokens
+# where 4o-mini spends ~26,000, and it abstains on unreadable fields instead
+# of guessing them.
+DEFAULT_OPENAI_MODEL = "gpt-5.6-luna"
 
 # Retried rather than surfaced: the same classes Gemini already retries.
 OPENAI_TRANSIENT_STATUS_CODES = {502, 503, 504}

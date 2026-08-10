@@ -1084,7 +1084,7 @@ export default function Settings() {
                     type="text"
                     value={scannerModel}
                     onChange={e => { setScannerModel(e.target.value); setScannerModelDirty(true) }}
-                    placeholder={scannerModelDefaultData?.value || 'gpt-4o-mini'}
+                    placeholder={scannerModelDefaultData?.value || 'gpt-5.6-luna'}
                     className="input flex-1 text-xs font-mono"
                     style={{ minWidth: 0 }}
                   />
