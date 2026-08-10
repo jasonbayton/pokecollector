@@ -386,7 +386,7 @@ PokéCollector is self-hosted, but it can call these external sources depending 
 |--------|---------|----------|-------------------|
 | TCGdex | `api.tcgdex.net`, `assets.tcgdex.net` | Set/card catalogue data, images, prices, localized card metadata, Pokédex `dexId`, and Cardmarket product metadata | Initial sync, manual/admin sync, search fallbacks, metadata backfills, and card image display |
 | PokeAPI sprites | `raw.githubusercontent.com/PokeAPI/sprites` | Profile/avatar GIFs, achievement badges, binder icons, National Pokédex sprites, and official artwork cache | Browser image display, Pokédex image cache misses, and `scripts.cache_pokedex_images` |
-| Google Gemini | `generativelanguage.googleapis.com` | AI card scanner recognition | Only when scanner recognition is used and `GEMINI_API_KEY` is configured |
+| Google Gemini | `generativelanguage.googleapis.com` | AI card scanner recognition | Only when a user selects the Gemini provider and a key is available, whether their own or the installation `GEMINI_API_KEY` |
 | OpenAI-compatible endpoint | `OPENAI_BASE_URL`, by default `api.openai.com` | AI card scanner recognition | Only when a user selects the OpenAI provider. Card photos are sent to whichever endpoint the administrator configured, which may be a server on your own network. |
 | Telegram Bot API | `api.telegram.org` | Telegram notifications and alerts | Only when Telegram settings are configured and an alert/notification is sent |
 | Frankfurter | `api.frankfurter.dev` | Currency exchange rates | Currency conversion and Telegram price formatting when non-EUR values are needed |
