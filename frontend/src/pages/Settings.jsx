@@ -572,15 +572,30 @@ export default function Settings() {
   }
 
   const handleScannerProviderChange = async (value) => {
+    const previous = scannerProvider
     setScannerProvider(value)
-    await saveSetting('scanner_provider', value)
+    try {
+      await setSetting('scanner_provider', value)
+      queryClient.invalidateQueries({ queryKey: ['setting', 'scanner_provider'] })
+      toast.success(t('settings.saved'))
+    } catch {
+      // Put the control back, or it shows a provider the server never accepted.
+      setScannerProvider(previous)
+      toast.error(t('settings.saveFailed'))
+    }
   }
 
   const handleVisualVerificationToggle = async (enabled) => {
+    const previous = visualVerification
     setVisualSaving(true)
     setVisualVerification(enabled)
     try {
-      await saveSetting('scanner_visual_verification', enabled ? 'true' : 'false')
+      await setSetting('scanner_visual_verification', enabled ? 'true' : 'false')
+      queryClient.invalidateQueries({ queryKey: ['setting', 'scanner_visual_verification'] })
+      toast.success(t('settings.saved'))
+    } catch {
+      setVisualVerification(previous)
+      toast.error(t('settings.saveFailed'))
     } finally {
       setVisualSaving(false)
     }
@@ -1055,7 +1070,14 @@ export default function Settings() {
                     {openaiDirty && (
                       <button
                         onClick={async () => {
-                          await saveSetting('openai_api_key', openaiKey)
+                          try {
+                            await setSetting('openai_api_key', openaiKey)
+                          } catch {
+                            // Stay dirty, so an unsaved key is never presented
+                            // as saved.
+                            toast.error(t('settings.saveFailed'))
+                            return
+                          }
                           setOpenaiDirty(false)
                           queryClient.invalidateQueries({ queryKey: ['setting', 'openai_api_key'] })
                           toast.success(t('settings.apiKeySaved'))

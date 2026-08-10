@@ -24,7 +24,6 @@ try:
         openai_chat_completions_url,
         openai_requires_key,
         post_openai_chat,
-        safe_upstream_detail,
         resolve_provider_name,
         text_part,
         visual_verification_enabled,
@@ -257,12 +256,33 @@ class ErrorMappingTests(unittest.TestCase):
         self.assertEqual(getattr(caught.exception, "retry_after_seconds", None), 12.0)
         self.assertEqual(getattr(caught.exception, "retry_reason", None), "rate_limit")
 
-    def test_upstream_text_is_redacted_and_bounded(self):
-        resp = _FakeResponse(500, {"error": {"message":
-            "boom sk-proj-abcdefghijklmnopqrstuvwxyz012345 " + "x" * 500}})
-        detail = safe_upstream_detail(resp)
-        self.assertNotIn("sk-proj-abcdefghijklmnopqrstuvwxyz012345", detail)
-        self.assertLessEqual(len(detail), 200)
+    def test_no_upstream_text_reaches_the_detail_on_any_status(self):
+        # Pattern redaction can only catch shapes it knows. An arbitrary
+        # credential is not a shape, so provider text is kept out of the detail
+        # entirely: the detail is returned to callers, persisted as a queue
+        # error and shown in job details.
+        secret = "my-company-secret-value"
+        for status in (429, 404, 500, 502):
+            with self.subTest(status=status):
+                with self.assertRaises(HTTPException) as caught:
+                    self._call([_FakeResponse(status, {"error": {
+                        "message": f"Invalid API key: {secret}"}})])
+                self.assertNotIn(secret, str(caught.exception.detail))
+
+    def test_a_429_without_retry_after_leaves_the_delay_unset(self):
+        # The queue treats any non-None value as authoritative, so 0.0 would
+        # mean "retry immediately" instead of falling back to its own default.
+        with self.assertRaises(HTTPException) as caught:
+            self._call([_FakeResponse(429, {})])
+        self.assertIsNone(getattr(caught.exception, "retry_after_seconds", "missing"))
+
+    def test_a_malformed_success_is_a_502_not_a_500(self):
+        provider = ScanProvider(OPENAI)
+        client = _FakeClient([_FakeResponse(200, {"unexpected": True})])
+        with patch.dict(os.environ, {"OPENAI_BASE_URL": LOCAL_URL}):
+            with self.assertRaises(HTTPException) as caught:
+                asyncio.run(provider.generate_text(client, "", [text_part("hi")]))
+        self.assertEqual(caught.exception.status_code, 502)
 
     def test_a_missing_model_points_at_the_configuration(self):
         with self.assertRaises(HTTPException) as caught:

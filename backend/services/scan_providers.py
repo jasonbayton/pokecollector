@@ -124,25 +124,31 @@ class ProviderRateLimitError(HTTPException):
     """
 
     def __init__(self, *, retry_after_seconds: float | None, detail: str):
-        self.retry_after_seconds = float(retry_after_seconds or 0.0)
+        self.retry_after_seconds = (
+            float(retry_after_seconds) if retry_after_seconds else None
+        )
         self.retry_reason = "rate_limit"
         headers = None
-        if retry_after_seconds:
+        if self.retry_after_seconds:
             headers = {"Retry-After": str(max(1, int(self.retry_after_seconds + 0.999)))}
         super().__init__(status_code=429, detail=detail, headers=headers)
 
 
-def safe_upstream_detail(resp: httpx.Response, *, limit: int = 200) -> str:
-    """Upstream error text, redacted and bounded.
+def log_upstream_detail(resp: httpx.Response, context: str) -> None:
+    """Record the provider's own message at debug level, and nowhere else.
 
-    Provider messages are echoed into API responses, persisted as queue-item
-    errors and logged. A compatible endpoint that reports "Invalid API key:
-    <secret>" would otherwise write that secret to all three.
+    Provider text is never put into HTTPException.detail: that detail is
+    returned to the caller, persisted as a queue-item error and surfaced in job
+    details. A compatible endpoint is free to say "Invalid API key: <secret>",
+    and pattern redaction can only catch credential shapes it already knows, so
+    an arbitrary token would survive it. Operators who need the upstream wording
+    can turn on debug logging.
     """
     from services.scan_trace import redact_sensitive
 
     message = redact_sensitive(openai_error_message(resp)).strip()
-    return message[:limit]
+    if message:
+        logger.debug("Scanner provider %s: %s", context, message[:200])
 
 
 def openai_error_message(resp: httpx.Response) -> str:
@@ -248,10 +254,8 @@ async def post_openai_chat(
             resp = await client.post(url, headers=headers, json=payload)
 
             if resp.status_code == 429:
+                log_upstream_detail(resp, "rate limited")
                 detail = "The scanner provider is rate limited. Please try again shortly."
-                upstream = safe_upstream_detail(resp)
-                if upstream:
-                    detail = f"{detail} Provider reports: {upstream}"
                 raise ProviderRateLimitError(
                     retry_after_seconds=openai_retry_after_seconds(resp),
                     detail=detail,
@@ -266,14 +270,14 @@ async def post_openai_chat(
                     detail = "The scanner endpoint rejected the request."
                 raise HTTPException(status_code=400, detail=detail)
             if resp.status_code == 404:
-                upstream = safe_upstream_detail(resp)
-                detail = (
-                    "The scanner model was not found at this endpoint. "
-                    "Check OPENAI_MODEL and OPENAI_BASE_URL."
+                log_upstream_detail(resp, "model not found")
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        "The scanner model was not found at this endpoint. "
+                        "Check OPENAI_MODEL and OPENAI_BASE_URL."
+                    ),
                 )
-                if upstream:
-                    detail = f"{detail} Provider reports: {upstream}"
-                raise HTTPException(status_code=502, detail=detail)
             if resp.status_code in OPENAI_TRANSIENT_STATUS_CODES:
                 if attempt < max_attempts - 1:
                     await asyncio.sleep(2 ** attempt)
@@ -283,11 +287,11 @@ async def post_openai_chat(
                     detail="The scanner provider is temporarily unavailable. Please try again shortly.",
                 )
             if resp.is_error:
-                upstream = safe_upstream_detail(resp)
-                detail = f"The scanner request failed ({resp.status_code})."
-                if upstream:
-                    detail = f"{detail} Provider reports: {upstream}"
-                raise HTTPException(status_code=502, detail=detail)
+                log_upstream_detail(resp, f"error {resp.status_code}")
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"The scanner request failed ({resp.status_code}).",
+                )
             return resp
         except HTTPException:
             raise
@@ -399,8 +403,16 @@ class ScanProvider:
             },
             max_attempts=max_attempts,
         )
-        payload = response.json()
-        return extract_openai_text(payload), payload.get("usage")
+        try:
+            payload = response.json()
+            return extract_openai_text(payload), payload.get("usage")
+        except (ValueError, TypeError) as exc:
+            # A 200 whose body is not a chat completion is the endpoint's fault,
+            # not the caller's, so it is a 502 rather than a raw 500.
+            raise HTTPException(
+                status_code=502,
+                detail="The scanner endpoint returned an unreadable response.",
+            ) from exc
 
 
 def get_provider(db: Session, user_id: int | None) -> ScanProvider:
