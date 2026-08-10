@@ -192,19 +192,6 @@ export default function App() {
   return (
     <AuthProvider>
       <SettingsProvider>
-        <BrowserRouter>
-          <Routes>
-            {import.meta.env.DEV && <Route path="/__card-system" element={lazyRoute(<CardSystemGallery />)} />}
-            <Route path="/login" element={lazyRoute(<Login />)} />
-            <Route path="/u" element={<PublicRoutes />}>
-              <Route index element={lazyRoute(<PublicDirectory />)} />
-              <Route path=":handle" element={lazyRoute(<PublicProfile />)} />
-              <Route path=":handle/binder/:binderId" element={lazyRoute(<PublicBinderView />)} />
-              <Route path=":handle/collection" element={lazyRoute(<PublicCollectionView />)} />
-            </Route>
-            <Route path="/*" element={<ProtectedRoutes />} />
-          </Routes>
-        </BrowserRouter>
         <ConfirmDialogProvider>
           <BrowserRouter>
             <Routes>
@@ -214,6 +201,7 @@ export default function App() {
                 <Route index element={lazyRoute(<PublicDirectory />)} />
                 <Route path=":handle" element={lazyRoute(<PublicProfile />)} />
                 <Route path=":handle/binder/:binderId" element={lazyRoute(<PublicBinderView />)} />
+                <Route path=":handle/collection" element={lazyRoute(<PublicCollectionView />)} />
               </Route>
               <Route path="/*" element={<ProtectedRoutes />} />
             </Routes>
