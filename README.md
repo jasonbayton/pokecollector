@@ -275,7 +275,7 @@ The **Users** tab is only visible to admin users and only while multi-user mode 
 | `OPENAI_BASE_URL` | OpenAI-compatible endpoint for the card scanner. Point it at a local server such as Ollama, llama.cpp or LM Studio (for example `http://host.docker.internal:11434/v1` when the model runs on the Docker host, or `http://127.0.0.1:11434/v1` for a non-container install). Deliberately an administrator setting: a user-supplied backend URL would let any account direct the server at an arbitrary host. | `https://api.openai.com/v1` |
 | `SCANNER_PROVIDER` | Which vision model reads card photos: `gemini` or `openai`. A user's own choice in Settings takes precedence. | `gemini` |
 | `DEFAULT_CURRENCY` | Currency new accounts start on: `EUR`, `USD` or `GBP` | `EUR` |
-| `OPENAI_MODEL` | Model used when the scanner provider is set to OpenAI. Must be vision capable. | `gpt-4o-mini` |
+| `OPENAI_MODEL` | Model used when the scanner provider is set to OpenAI, for users who have not named one of their own. Must be vision capable. | `gpt-5.6-luna` |
 | `SCAN_TRACE_DIR` | Enables consent-controlled scanner diagnostics when set to a writable container path. With the standard compose volume, use `/app/data/scan-traces`. Each user must still opt in separately in Settings. | *(empty / disabled)* |
 | `SCAN_TRACE_STORAGE_DIR` | Stable cleanup path for previously stored scanner diagnostics. Standard Docker Compose sets this to `/app/data/scan-traces`; custom deployments should keep it pointed at the storage location even when `SCAN_TRACE_DIR` is unset. | `/app/data/scan-traces` with Docker Compose |
 | `TELEGRAM_BOT_TOKEN` | Initial Telegram bot token for the admin user | *(empty)* |

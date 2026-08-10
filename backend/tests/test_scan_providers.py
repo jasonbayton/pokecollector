@@ -25,6 +25,7 @@ try:
         openai_requires_key,
         openai_retry_after_seconds,
         post_openai_chat,
+        resolve_model,
         resolve_provider_name,
         text_part,
         visual_verification_default,
@@ -110,6 +111,50 @@ class ProviderResolutionTests(_Fixture, unittest.TestCase):
         provider = get_provider(self.db, self.user.id)
         self.assertEqual(provider.name, OPENAI)
         self.assertEqual(provider.credential(self.db, self.user.id), "sk-openai-value")
+
+
+@unittest.skipUnless(DEPS, "FastAPI/SQLAlchemy are not installed in this environment")
+class ModelSelectionTests(_Fixture, unittest.TestCase):
+    """Users pick their own model; the installation setting is the fallback."""
+
+    def test_no_choice_means_the_installation_model(self):
+        self._set("scanner_provider", "openai")
+        with patch.dict(os.environ, {"OPENAI_MODEL": "gpt-5.6-luna"}):
+            self.assertEqual(get_provider(self.db, self.user.id).model(), "gpt-5.6-luna")
+
+    def test_a_users_own_model_is_used(self):
+        self._set("scanner_provider", "openai")
+        self._set("scanner_model", "gpt-5.6-luna")
+        with patch.dict(os.environ, {"OPENAI_MODEL": "gpt-5.6-luna"}):
+            self.assertEqual(get_provider(self.db, self.user.id).model(), "gpt-5.6-luna")
+
+    def test_a_users_model_applies_to_gemini_too(self):
+        self._set("scanner_model", "gemini-3-pro")
+        self.assertEqual(get_provider(self.db, self.user.id).model(), "gemini-3-pro")
+
+    def test_whitespace_is_not_a_model(self):
+        # Otherwise it would be sent upstream as the model name.
+        self._set("scanner_provider", "openai")
+        self._set("scanner_model", "   ")
+        with patch.dict(os.environ, {"OPENAI_MODEL": "gpt-5.6-luna"}):
+            self.assertEqual(get_provider(self.db, self.user.id).model(), "gpt-5.6-luna")
+
+    def test_the_chosen_model_reaches_the_request(self):
+        self._set("scanner_provider", "openai")
+        self._set("scanner_model", "gpt-5.6-luna")
+        provider = get_provider(self.db, self.user.id)
+        client = _FakeClient([_FakeResponse(200, {"choices": [{"message": {"content": "ok"}}]})])
+        with patch.dict(os.environ, {"OPENAI_BASE_URL": LOCAL_URL}):
+            asyncio.run(provider.generate_text(client, "", [text_part("hi")]))
+        self.assertEqual(client.calls[0]["json"]["model"], "gpt-5.6-luna")
+
+    def test_the_installation_model_is_reported_separately(self):
+        self._set("scanner_provider", "openai")
+        self._set("scanner_model", "gpt-5.6-luna")
+        with patch.dict(os.environ, {"OPENAI_MODEL": "gpt-5.6-luna"}):
+            provider = get_provider(self.db, self.user.id)
+            self.assertEqual(provider.model(), "gpt-5.6-luna")
+            self.assertEqual(provider.installation_model(), "gpt-5.6-luna")
 
 
 @unittest.skipUnless(DEPS, "FastAPI/SQLAlchemy are not installed in this environment")

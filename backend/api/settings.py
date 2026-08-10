@@ -33,6 +33,7 @@ from services.scan_trace import (
 
 from services.scan_providers import (
     PROVIDERS,
+    SCANNER_MODEL_SETTING,
     ScanProvider,
     resolve_provider_name,
     visual_verification_default,
@@ -50,7 +51,7 @@ PER_USER_KEYS = {
     "price_alerts_enabled", "price_alert_threshold",
     "gemini_api_key", "trainer_name", "portfolio_display_mode",
     "openai_api_key", "share_collection",
-    SCANNER_PROVIDER_SETTING, VISUAL_VERIFICATION_SETTING,
+    SCANNER_PROVIDER_SETTING, VISUAL_VERIFICATION_SETTING, SCANNER_MODEL_SETTING,
     SCAN_DIAGNOSTICS_SETTING_KEY,
 }
 
@@ -156,6 +157,15 @@ def _coerce_setting_value(key: str, value) -> str:
                 detail=f"Unsupported scanner provider. Choose one of: {', '.join(sorted(PROVIDERS))}.",
             )
         return provider
+    if key == SCANNER_MODEL_SETTING:
+        # Free text, because provider model names change constantly. Trimmed so a
+        # value of spaces means "use the installation default" rather than being
+        # sent upstream as a model name, and bounded so it cannot be used to
+        # stuff arbitrary content into the request.
+        model = str(value).strip()
+        if len(model) > 100:
+            raise HTTPException(status_code=422, detail="Model name is too long.")
+        return model
     if key == VISUAL_VERIFICATION_SETTING:
         return "true" if str(value).strip().lower() in {"true", "1", "yes", "on"} else "false"
     if key == "portfolio_display_mode":
@@ -250,6 +260,10 @@ def _get_user_settings(db: Session, user_id: int) -> dict:
     result["scanner_key_required"] = (
         "true" if ScanProvider(resolve_provider_name(db, user_id)).requires_credential() else "false"
     )
+    # Published so the field can show what a blank value will actually use.
+    result["scanner_model_default"] = ScanProvider(
+        resolve_provider_name(db, user_id)
+    ).installation_model()
     result["scanner_visual_verification_default"] = (
         "true" if visual_verification_default(resolve_provider_name(db, user_id)) else "false"
     )

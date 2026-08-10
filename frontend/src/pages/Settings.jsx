@@ -329,6 +329,8 @@ export default function Settings() {
   const [scannerProvider, setScannerProvider] = useState('gemini')
   const [openaiKey, setOpenaiKey] = useState('')
   const [openaiDirty, setOpenaiDirty] = useState(false)
+  const [scannerModel, setScannerModel] = useState('')
+  const [scannerModelDirty, setScannerModelDirty] = useState(false)
   const [visualVerification, setVisualVerification] = useState(true)
   const [visualSaving, setVisualSaving] = useState(false)
   const [backupOptions, setBackupOptions] = useState(['full'])
@@ -394,6 +396,14 @@ export default function Settings() {
   // A self-hosted endpoint needs no credential, so "scanning will fail" would be
   // wrong there. The backend knows; the browser cannot see OPENAI_BASE_URL.
   const scannerKeyRequired = keyRequiredData?.value !== 'false'
+  const { data: scannerModelData } = useQuery({
+    queryKey: ['setting', 'scanner_model'],
+    queryFn: () => getSetting('scanner_model').catch(() => ({ value: '' })),
+  })
+  const { data: scannerModelDefaultData } = useQuery({
+    queryKey: ['setting', 'scanner_model_default'],
+    queryFn: () => getSetting('scanner_model_default').catch(() => ({ value: '' })),
+  })
 
   const { data: visualDefaultData } = useQuery({
     queryKey: ['setting', 'scanner_visual_verification_default'],
@@ -498,6 +508,12 @@ export default function Settings() {
   useEffect(() => {
     if (scannerProviderData?.value) setScannerProvider(scannerProviderData.value)
   }, [scannerProviderData])
+
+  useEffect(() => {
+    if (scannerModelData?.value !== undefined && !scannerModelDirty) {
+      setScannerModel(scannerModelData.value)
+    }
+  }, [scannerModelData])
 
   useEffect(() => {
     // Absent means "use the provider's default". That rule depends on
@@ -1135,6 +1151,33 @@ export default function Settings() {
                 {scannerKeyRequired && !activeProviderHasKey && (
                   <p className="mt-2 text-xs opacity-80">⚠️ {t('settings.scannerNoKey')}</p>
                 )}
+              </SettingsRow>
+              <SettingsRow
+                label={t('settings.scannerModel')}
+                description={t('settings.scannerModelDesc')}
+              >
+                <div className="mt-2 flex w-full items-center gap-2">
+                  <input
+                    type="text"
+                    value={scannerModel}
+                    onChange={e => { setScannerModel(e.target.value); setScannerModelDirty(true) }}
+                    placeholder={scannerModelDefaultData?.value || 'gpt-5.6-luna'}
+                    className="input flex-1 text-xs font-mono"
+                    style={{ minWidth: 0 }}
+                  />
+                  {scannerModelDirty && (
+                    <button
+                      onClick={async () => {
+                        if (!(await saveSetting('scanner_model', scannerModel))) return
+                        setScannerModelDirty(false)
+                        queryClient.invalidateQueries({ queryKey: ['setting', 'scanner_model'] })
+                      }}
+                      className="btn-primary-sm flex-shrink-0"
+                    >
+                      {t('common.save')}
+                    </button>
+                  )}
+                </div>
               </SettingsRow>
               {scannerProvider === 'openai' && (
                 <SettingsRow
