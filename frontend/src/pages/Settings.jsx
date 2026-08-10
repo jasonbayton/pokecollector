@@ -1139,8 +1139,8 @@ export default function Settings() {
                       className="input flex-1 text-xs font-mono"
                       style={{ minWidth: 0 }}
                     />
-                    {openaiKey && !openaiDirty && (
-                      <span className="text-xs text-green flex-shrink-0">✅</span>
+                    {openaiKeyData?.configured && !openaiDirty && (
+                      <span className="text-xs text-green flex-shrink-0 whitespace-nowrap">✅ {openaiKeyData?.hint}</span>
                     )}
                     {openaiDirty && (
                       <button
@@ -1176,13 +1176,16 @@ export default function Settings() {
                       className="input flex-1 text-xs font-mono"
                       style={{ minWidth: 0 }}
                     />
-                    {geminiKey && !geminiDirty && (
-                      <span className="text-xs text-green flex-shrink-0">✅</span>
+                    {geminiKeyData?.configured && !geminiDirty && (
+                      <span className="text-xs text-green flex-shrink-0 whitespace-nowrap">✅ {geminiKeyData?.hint}</span>
                     )}
                     {geminiDirty && (
                       <button
                         onClick={async () => {
-                          await saveSetting('gemini_api_key', geminiKey)
+                          // Keep the draft on failure: saveSetting has already
+                          // reported the error, so claiming success here would
+                          // contradict it and then discard the unsaved value.
+                          if (!(await saveSetting('gemini_api_key', geminiKey))) return
                           setGeminiDirty(false)
                           queryClient.invalidateQueries({ queryKey: ['setting', 'gemini_api_key'] })
                           toast.success(t('settings.apiKeySaved'))
@@ -1194,6 +1197,12 @@ export default function Settings() {
                     )}
                   </div>
                 </SettingsRow>
+              )}
+              {!activeProviderHasKey && (
+                <SettingsRow
+                  label={t('settings.scannerProvider')}
+                  description={t('settings.scannerNoKey')}
+                />
               )}
               <SettingsRow
                 label={t('settings.visualVerification')}

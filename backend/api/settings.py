@@ -220,17 +220,21 @@ def _get_user_settings(db: Session, user_id: int) -> dict:
     for row in db.query(UserSetting).filter(UserSetting.user_id == user_id).all():
         result[row.key] = row.value
 
-    # Env var fallback ONLY for admin — other users get empty defaults
-    if _is_admin(db, user_id):
-        # A cleared override leaves an empty user row behind. Treat empty as
-        # absent, otherwise it shadows the environment value here while the
-        # key-resolution path in api/recognize.py still falls through to the
-        # environment, and the two disagree about what is actually in use.
-        for key, env_name in ENV_BACKED_KEYS.items():
-            if not result.get(key):
-                env_value = os.environ.get(env_name, "").strip()
-                if env_value:
-                    result[key] = env_value.lower() if key == "scanner_provider" else env_value
+    # A cleared override leaves an empty user row behind. Treat empty as absent,
+    # otherwise it shadows the environment value here while key resolution still
+    # falls through to it, and the two disagree about what is actually in use.
+    is_admin = _is_admin(db, user_id)
+    for key, env_name in ENV_BACKED_KEYS.items():
+        if result.get(key):
+            continue
+        # Scanner keys fall back to the installation key for every account, so
+        # every account is told one is configured. Other environment-backed
+        # settings stay admin-only, as before.
+        if key not in SCANNER_KEY_SETTINGS and not is_admin:
+            continue
+        env_value = os.environ.get(env_name, "").strip()
+        if env_value:
+            result[key] = env_value.lower() if key == "scanner_provider" else env_value
 
     for key, value in DEFAULT_SETTINGS.items():
         result.setdefault(key, value)

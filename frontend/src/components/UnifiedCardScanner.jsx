@@ -95,7 +95,16 @@ export default function UnifiedCardScanner({ isOpen, onClose }) {
     setStagedFiles([])
   }
 
+  // Bumped on every open and close. A submission that resolves after the scanner
+  // was closed and reopened belongs to an older generation, and must not close
+  // the scanner the user is now using or navigate them away from it.
+  const generationRef = useRef(0)
+  useEffect(() => {
+    generationRef.current += 1
+  }, [isOpen])
+
   const finishClose = () => {
+    generationRef.current += 1
     clearFiles()
     setPhotoGuidePinned(false)
     setPhotoGuideHovered(false)
@@ -134,6 +143,7 @@ export default function UnifiedCardScanner({ isOpen, onClose }) {
 
   const startScanning = async () => {
     if (!stagedFiles.length || submitting) return
+    const generation = generationRef.current
     setSubmitting(true)
     try {
       const individualPositions = stagedFiles
@@ -143,6 +153,12 @@ export default function UnifiedCardScanner({ isOpen, onClose }) {
         stagedFiles.map(item => item.file),
         individualPositions,
       )
+      if (generationRef.current !== generation) {
+        // Abandoned while in flight. The job was still created, so say so rather
+        // than vanishing silently, but leave the reopened scanner alone.
+        toast.success(t('scanner.batchQueuedInBackground'))
+        return
+      }
       clearFiles()
       onClose?.()
       navigate(`/scans/${job.id}`)
