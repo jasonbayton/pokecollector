@@ -899,7 +899,7 @@ def migrate_global_scanner_provider():
     """
     db = SessionLocal()
     try:
-        from models import UserSetting
+        from models import Setting, User, UserSetting
 
         global_row = db.query(Setting).filter(Setting.key == "scanner_provider").first()
         if global_row and (global_row.value or "").strip():
