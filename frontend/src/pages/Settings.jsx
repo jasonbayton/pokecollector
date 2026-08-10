@@ -1090,6 +1090,36 @@ export default function Settings() {
                   </div>
                 </SettingsRow>
               )}
+              {scannerProvider === 'gemini' && (
+                <SettingsRow label={t('settings.geminiApiKey')} description={t('settings.geminiApiKeyDesc')}>
+                  <div className="flex items-center gap-2 w-full mt-2">
+                    <input
+                      type={geminiDirty ? "text" : "password"}
+                      value={geminiKey}
+                      onChange={e => { setGeminiKey(e.target.value); setGeminiDirty(true) }}
+                      placeholder="AIza..."
+                      className="input flex-1 text-xs font-mono"
+                      style={{ minWidth: 0 }}
+                    />
+                    {geminiKey && !geminiDirty && (
+                      <span className="text-xs text-green flex-shrink-0">✅</span>
+                    )}
+                    {geminiDirty && (
+                      <button
+                        onClick={async () => {
+                          await saveSetting('gemini_api_key', geminiKey)
+                          setGeminiDirty(false)
+                          queryClient.invalidateQueries({ queryKey: ['setting', 'gemini_api_key'] })
+                          toast.success(t('settings.apiKeySaved'))
+                        }}
+                        className="btn-primary-sm flex-shrink-0"
+                      >
+                        {t('common.save')}
+                      </button>
+                    )}
+                  </div>
+                </SettingsRow>
+              )}
               <SettingsRow
                 label={t('settings.visualVerification')}
                 description={t('settings.visualVerificationDesc')}
@@ -1100,34 +1130,6 @@ export default function Settings() {
                   label={t('settings.visualVerification')}
                   disabled={visualSaving}
                 />
-              </SettingsRow>
-              <SettingsRow label={t('settings.geminiApiKey')} description={t('settings.geminiApiKeyDesc')}>
-                <div className="flex items-center gap-2 w-full mt-2">
-                  <input
-                    type={geminiDirty ? "text" : "password"}
-                    value={geminiKey}
-                    onChange={e => { setGeminiKey(e.target.value); setGeminiDirty(true) }}
-                    placeholder="AIza..."
-                    className="input flex-1 text-xs font-mono"
-                    style={{ minWidth: 0 }}
-                  />
-                  {geminiKey && !geminiDirty && (
-                    <span className="text-xs text-green flex-shrink-0">✅</span>
-                  )}
-                  {geminiDirty && (
-                    <button
-                      onClick={async () => {
-                        await saveSetting('gemini_api_key', geminiKey)
-                        setGeminiDirty(false)
-                        queryClient.invalidateQueries({ queryKey: ['setting', 'gemini_api_key'] })
-                        toast.success(t('settings.apiKeySaved'))
-                      }}
-                      className="btn-primary-sm flex-shrink-0"
-                    >
-                      {t('common.save')}
-                    </button>
-                  )}
-                </div>
               </SettingsRow>
               <SettingsRow
                 label={t('settings.scanDiagnostics')}
