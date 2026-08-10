@@ -1120,6 +1120,7 @@ export default function Settings() {
                 onClose={() => setShowMultiUserModal(false)}
                 title={t('settings.multiUserEnableTitle')}
                 size="sm"
+                mobileSheet={false}
               >
                 <div className="space-y-4 p-4">
                   <p className="text-sm text-text-primary">
