@@ -76,6 +76,9 @@ class PromotionReferenceTests(unittest.TestCase):
         self.card = Card(
             id="custom-legacy", name="Bergmite", set_id="me04", number="24",
             lang="en", is_custom=True,
+            # Manual cards are owned since 1.35, and promotion is scoped to the
+            # caller's own card, so an ownerless fixture is simply invisible.
+            custom_owner_id=self.user.id,
         )
         self.db.add(self.card)
         self.db.commit()

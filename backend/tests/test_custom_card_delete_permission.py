@@ -16,9 +16,14 @@ except ModuleNotFoundError:
 
 @unittest.skipUnless(API_TEST_DEPS_AVAILABLE, "FastAPI/SQLAlchemy are not installed in this lightweight test environment")
 class DeleteCustomCardPermissionTests(unittest.TestCase):
-    """Custom cards are global. Deleting one removes it from every user's
-    collection, wishlist and binders, so it must not be something an ordinary
-    trainer can do to other people's data."""
+    """Deleting a manual card removes it from its owner's collection, wishlist
+    and binders, so only its owner may do it.
+
+    These previously asserted an admin-only gate, which was an interim fix while
+    manual cards were global and unowned. Ownership replaced that, and ownership
+    is deliberately independent of account role: an admin who does not own a
+    card cannot delete it either.
+    """
 
     def setUp(self):
         engine = create_engine("sqlite:///:memory:")
@@ -26,9 +31,9 @@ class DeleteCustomCardPermissionTests(unittest.TestCase):
         self.db = sessionmaker(bind=engine)()
 
         self.admin = User(username="admin", hashed_password="x", role="admin", is_active=True)
-        self.trainer = User(username="mika", hashed_password="x", role="trainer", is_active=True)
         self.owner = User(username="jason", hashed_password="x", role="trainer", is_active=True)
-        self.db.add_all([self.admin, self.trainer, self.owner])
+        self.other = User(username="mika", hashed_password="x", role="trainer", is_active=True)
+        self.db.add_all([self.admin, self.owner, self.other])
         self.db.commit()
 
         self.card = Card(
@@ -38,11 +43,11 @@ class DeleteCustomCardPermissionTests(unittest.TestCase):
             number="067",
             lang="en",
             is_custom=True,
+            custom_owner_id=self.owner.id,
         )
         self.db.add(self.card)
         self.db.commit()
 
-        # Someone else's copy - the data at risk.
         self.db.add(CollectionItem(
             card_id=self.card.id, user_id=self.owner.id, quantity=1,
             condition="Mint", variant="Normal", lang="en",
@@ -56,27 +61,35 @@ class DeleteCustomCardPermissionTests(unittest.TestCase):
             self.db.query(WishlistItem).filter(WishlistItem.card_id == self.card.id).count(),
         )
 
-    def test_a_trainer_cannot_delete_a_custom_card(self):
+    def test_someone_elses_private_card_is_not_even_acknowledged(self):
+        # 404 rather than 403, so card ids cannot be probed.
         with self.assertRaises(HTTPException) as caught:
-            delete_custom_card(self.card.id, db=self.db, current_user=self.trainer)
+            delete_custom_card(self.card.id, db=self.db, current_user=self.other)
+        self.assertEqual(caught.exception.status_code, 404)
+
+    def test_a_shared_template_is_refused_but_acknowledged(self):
+        self.card.is_shared_template = True
+        self.db.commit()
+        with self.assertRaises(HTTPException) as caught:
+            delete_custom_card(self.card.id, db=self.db, current_user=self.other)
         self.assertEqual(caught.exception.status_code, 403)
 
-    def test_a_refused_delete_leaves_everyone_elses_data_alone(self):
-        # The point of the gate: not just a 403, but nothing destroyed.
+    def test_an_admin_who_does_not_own_it_cannot_delete_it(self):
+        # The behaviour that changed: being an admin is no longer sufficient.
+        with self.assertRaises(HTTPException) as caught:
+            delete_custom_card(self.card.id, db=self.db, current_user=self.admin)
+        self.assertIn(caught.exception.status_code, (403, 404))
+        self.assertIsNotNone(self.db.query(Card).filter(Card.id == self.card.id).first())
+
+    def test_a_refused_delete_leaves_the_owners_data_alone(self):
+        # Not just a refusal, but nothing destroyed on the way out.
         with self.assertRaises(HTTPException):
-            delete_custom_card(self.card.id, db=self.db, current_user=self.trainer)
+            delete_custom_card(self.card.id, db=self.db, current_user=self.other)
         self.assertEqual(self._owner_rows(), (1, 1))
         self.assertIsNotNone(self.db.query(Card).filter(Card.id == self.card.id).first())
 
-    def test_the_gate_is_checked_before_the_card_is_looked_up(self):
-        # A trainer must not be able to probe which card ids exist by comparing
-        # 404 against 403.
-        with self.assertRaises(HTTPException) as caught:
-            delete_custom_card("custom-does-not-exist", db=self.db, current_user=self.trainer)
-        self.assertEqual(caught.exception.status_code, 403)
-
-    def test_an_admin_can_still_delete(self):
-        delete_custom_card(self.card.id, db=self.db, current_user=self.admin)
+    def test_the_owner_can_delete_their_own_card(self):
+        delete_custom_card(self.card.id, db=self.db, current_user=self.owner)
         self.assertIsNone(self.db.query(Card).filter(Card.id == self.card.id).first())
         self.assertEqual(self._owner_rows(), (0, 0))
 
