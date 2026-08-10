@@ -924,7 +924,10 @@ async def match_card_info(
         allow_visual_verification
         and not confident
         and can_compare
-        and bool(api_key)
+        # A credential is required only where the provider requires one. A local
+        # endpoint has no key by design, so testing the key here would silently
+        # disable this for exactly the setups the toggle exists for.
+        and (bool(api_key) or not provider.requires_credential())
         and bool(image_b64)
         and bool(mime_type)
     )

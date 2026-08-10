@@ -32,6 +32,8 @@ from services.scan_trace import (
 
 from services.scan_providers import (
     PROVIDERS,
+    resolve_provider_name,
+    visual_verification_default,
     SCANNER_PROVIDER_SETTING,
     VISUAL_VERIFICATION_SETTING,
 )
@@ -173,6 +175,11 @@ def _get_user_settings(db: Session, user_id: int) -> dict:
     for key, value in DEFAULT_SETTINGS.items():
         result.setdefault(key, value)
     result["scan_diagnostics_available"] = "true" if trace_available() else "false"
+    # Published so the UI shows the state the scanner will actually use. The
+    # rule depends on OPENAI_BASE_URL, which the browser cannot see.
+    result["scanner_visual_verification_default"] = (
+        "true" if visual_verification_default(resolve_provider_name(db, user_id)) else "false"
+    )
     result["scan_diagnostics_deletion_available"] = (
         "true" if trace_deletion_available() else "false"
     )
