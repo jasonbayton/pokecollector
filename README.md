@@ -273,7 +273,6 @@ The **Users** tab is only visible to admin users and only while multi-user mode 
 | `GEMINI_MODEL` | Gemini model used by the card scanner. Change this if Google retires the default model for new API keys. | `gemini-flash-latest` |
 | `OPENAI_API_KEY` | Installation-wide OpenAI key, used for any account that has not set its own in Settings. Leave empty to require a per-user key. | *(empty)* |
 | `OPENAI_BASE_URL` | OpenAI-compatible endpoint for the card scanner. Point it at a local server such as Ollama, llama.cpp or LM Studio (for example `http://host.docker.internal:11434/v1` when the model runs on the Docker host, or `http://127.0.0.1:11434/v1` for a non-container install). Deliberately an administrator setting: a user-supplied backend URL would let any account direct the server at an arbitrary host. | `https://api.openai.com/v1` |
-| `OPENAI_MODEL` | OpenAI model used by the card scanner. Must be vision capable. | `gpt-4o-mini` |
 | `SCANNER_PROVIDER` | Which vision model reads card photos: `gemini` or `openai`. A user's own choice in Settings takes precedence. | `gemini` |
 | `DEFAULT_CURRENCY` | Currency new accounts start on: `EUR`, `USD` or `GBP` | `EUR` |
 | `OPENAI_MODEL` | Model used when the scanner provider is set to OpenAI. Must be vision capable. | `gpt-4o-mini` |
