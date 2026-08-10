@@ -1124,6 +1124,9 @@ export default function Settings() {
                     { value: 'openai', label: t('settings.scannerProviderOpenai') },
                   ]}
                 />
+                {!activeProviderHasKey && (
+                  <p className="mt-2 text-xs opacity-80">⚠️ {t('settings.scannerNoKey')}</p>
+                )}
               </SettingsRow>
               {scannerProvider === 'openai' && (
                 <SettingsRow
@@ -1197,12 +1200,6 @@ export default function Settings() {
                     )}
                   </div>
                 </SettingsRow>
-              )}
-              {!activeProviderHasKey && (
-                <SettingsRow
-                  label={t('settings.scannerProvider')}
-                  description={t('settings.scannerNoKey')}
-                />
               )}
               <SettingsRow
                 label={t('settings.visualVerification')}
