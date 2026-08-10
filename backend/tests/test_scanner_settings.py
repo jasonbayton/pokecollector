@@ -152,6 +152,29 @@ class ProviderKeyPrecedenceTests(unittest.TestCase):
 
 
 @skip_without_deps
+class SettingScopeTests(unittest.TestCase):
+    """A key belongs to exactly one scope.
+
+    ADMIN_ONLY_KEYS writes go to the global settings table and PER_USER_KEYS
+    writes go to user_settings. A key in both is written to one table and read
+    from the other, so the setting appears to save and is then ignored.
+    """
+
+    def test_the_two_scopes_do_not_overlap(self):
+        from api.settings import ADMIN_ONLY_KEYS, PER_USER_KEYS
+
+        overlap = ADMIN_ONLY_KEYS & PER_USER_KEYS
+        self.assertEqual(overlap, set(), f"keys in both scopes: {sorted(overlap)}")
+
+    def test_the_scanner_provider_is_per_user(self):
+        from api.settings import ADMIN_ONLY_KEYS, PER_USER_KEYS
+        from services.scan_providers import SCANNER_PROVIDER_SETTING
+
+        self.assertIn(SCANNER_PROVIDER_SETTING, PER_USER_KEYS)
+        self.assertNotIn(SCANNER_PROVIDER_SETTING, ADMIN_ONLY_KEYS)
+
+
+@skip_without_deps
 class ExportCurrencyTests(unittest.TestCase):
     def test_gbp_is_recognised_with_its_own_symbol(self):
         self.assertEqual(_normalize_currency("gbp"), ("GBP", "£"))

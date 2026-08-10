@@ -55,7 +55,6 @@ PER_USER_KEYS = {
 
 ADMIN_ONLY_KEYS = {
     "full_sync_interval_days", "price_sync_interval_minutes", "multi_user_mode",
-    "scanner_provider",
     "tcgdex_sync_languages", "debug_mode",
     "cross_language_price_fallback", "cross_language_image_fallback",
     DIGITAL_SETS_SETTING_KEY,
