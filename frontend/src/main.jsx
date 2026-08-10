@@ -13,6 +13,20 @@ if (savedTheme && savedTheme !== 'default') {
   document.documentElement.setAttribute('data-theme', savedTheme)
 }
 
+// A deploy replaces every hashed chunk and deletes the previous ones. A tab
+// that is still running the older build asks for a chunk that has gone, the
+// lazy route fails to load, and the screen stays blank. Reloading picks up the
+// current build. The timestamp guard means a chunk that is genuinely missing
+// costs one reload rather than an endless loop.
+window.addEventListener('vite:preloadError', (event) => {
+  const KEY = 'pc:chunk-reload-at'
+  const last = Number(sessionStorage.getItem(KEY) || 0)
+  if (Date.now() - last < 10000) return
+  sessionStorage.setItem(KEY, String(Date.now()))
+  event.preventDefault()
+  window.location.reload()
+})
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
