@@ -122,15 +122,17 @@ class ProviderKeyPrecedenceTests(unittest.TestCase):
         with patch.dict("os.environ", {}, clear=True):
             self.assertEqual(ScanProvider("openai").credential(db, 1), "sk-user")
 
-    def test_environment_is_ignored_unless_sharing_is_enabled(self):
+    def test_the_installation_key_is_used_when_the_user_has_none(self):
+        # Setting the environment key is the operator's decision to provide one
+        # for everybody; there is no separate opt-in.
         db = _FakeDb(None)
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-env"}, clear=True):
-            self.assertEqual(ScanProvider("openai").credential(db, 1), "")
-
-    def test_environment_is_used_when_sharing_is_enabled(self):
-        db = _FakeDb(None)
-        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-env"}):
             self.assertEqual(ScanProvider("openai").credential(db, 1), "sk-env")
+
+    def test_a_users_own_key_wins_over_the_installation_key(self):
+        db = _FakeDb("sk-user")
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-env"}, clear=True):
+            self.assertEqual(ScanProvider("openai").credential(db, 1), "sk-user")
 
     def test_each_provider_reads_its_own_environment_variable(self):
         db = _FakeDb(None)
@@ -142,7 +144,9 @@ class ProviderKeyPrecedenceTests(unittest.TestCase):
             self.assertEqual(ScanProvider("gemini").credential(db, 1), "goog-key")
             self.assertEqual(ScanProvider("openai").credential(db, 1), "sk-key")
 
-    def test_sharing_defaults_to_off(self):
+    def test_no_installation_key_means_no_fallback(self):
+        # The operator provides for everyone or for no one, and this is no one.
+        db = _FakeDb(None)
         with patch.dict("os.environ", {}, clear=True):
             self.assertEqual(ScanProvider("openai").credential(db, 1), "")
 
