@@ -217,6 +217,7 @@ class ErrorMappingTests(unittest.TestCase):
 
     def _call(self, responses, api_key="sk-x"):
         client = _FakeClient(responses)
+        self._last_client = client
         return asyncio.get_event_loop().run_until_complete(
             post_openai_chat(client, "http://x/chat/completions", api_key, {}, max_attempts=2)
         )
@@ -243,9 +244,16 @@ class ErrorMappingTests(unittest.TestCase):
 
     def test_a_transient_error_is_retried_and_can_succeed(self):
         good = _FakeResponse(200, {"choices": [{"message": {"content": "ok"}}]})
-        with patch("asyncio.sleep", new=lambda *_: asyncio.sleep(0)):
+
+        async def _no_backoff(*_args, **_kwargs):
+            return None
+
+        # Patched to a real coroutine, not a lambda delegating back to the
+        # patched name, which would recurse.
+        with patch("asyncio.sleep", new=_no_backoff):
             resp = self._call([_FakeResponse(503), good])
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(self._last_client.calls), 2)
 
     def test_an_unparseable_response_is_reported_not_swallowed(self):
         with self.assertRaises(ValueError):
