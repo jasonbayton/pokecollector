@@ -23,9 +23,11 @@ try:
         openai_base_url,
         openai_chat_completions_url,
         openai_requires_key,
+        openai_retry_after_seconds,
         post_openai_chat,
         resolve_provider_name,
         text_part,
+        visual_verification_default,
         visual_verification_enabled,
     )
     DEPS = True
@@ -435,6 +437,72 @@ class PerUserResolutionTests(_Fixture, unittest.TestCase):
         with patch.dict(os.environ, {"OPENAI_BASE_URL": LOCAL_URL}):
             self.assertTrue(visual_verification_enabled(self.db, self.user.id, GEMINI))
             self.assertFalse(visual_verification_enabled(self.db, self.other.id, OPENAI))
+
+
+@unittest.skipUnless(DEPS, "FastAPI/SQLAlchemy are not installed in this environment")
+class RetryAfterBoundsTests(unittest.TestCase):
+    """A hostile or broken endpoint must not be able to stall the queue."""
+
+    def _retry_after(self, value):
+        return openai_retry_after_seconds(_FakeResponse(429, {}, {"retry-after": value}))
+
+    def test_an_infinite_value_is_rejected(self):
+        # float("1e309") is inf; int() on it raises, which surfaced as a 500
+        # while building the 429 response.
+        self.assertIsNone(self._retry_after("1e309"))
+
+    def test_an_enormous_finite_value_is_capped(self):
+        # 1e308 is finite, so it passed through and then overflowed timedelta in
+        # the queue, leaving the item leased and aborting the drain pass.
+        capped = self._retry_after("1e308")
+        self.assertIsNotNone(capped)
+        self.assertLessEqual(capped, 24 * 60 * 60)
+
+    def test_a_normal_value_is_untouched(self):
+        self.assertEqual(self._retry_after("30"), 30.0)
+
+    def test_a_capped_value_still_builds_a_valid_429(self):
+        client = _FakeClient([_FakeResponse(429, {}, {"retry-after": "1e308"})])
+        with self.assertRaises(HTTPException) as caught:
+            asyncio.run(post_openai_chat(client, "http://x/chat/completions", "", {}, max_attempts=1))
+        self.assertEqual(caught.exception.status_code, 429)
+        self.assertLessEqual(caught.exception.retry_after_seconds, 24 * 60 * 60)
+
+
+@unittest.skipUnless(DEPS, "FastAPI/SQLAlchemy are not installed in this environment")
+class RequestRejectionTests(unittest.TestCase):
+
+    def test_a_400_is_not_reported_as_a_credential_problem(self):
+        # A rejected image must not send a user with a valid key after their key.
+        client = _FakeClient([_FakeResponse(400, {"error": {"message": "bad image"}})])
+        with self.assertRaises(HTTPException) as caught:
+            asyncio.run(post_openai_chat(client, "http://x/chat/completions", "sk-x", {}, max_attempts=1))
+        self.assertEqual(caught.exception.status_code, 400)
+        self.assertNotIn("key", str(caught.exception.detail).lower())
+
+    def test_a_401_still_points_at_the_key(self):
+        with patch.dict(os.environ, {"OPENAI_BASE_URL": DEFAULT_OPENAI_BASE_URL}):
+            client = _FakeClient([_FakeResponse(401, {})])
+            with self.assertRaises(HTTPException) as caught:
+                asyncio.run(post_openai_chat(client, "http://x/chat/completions", "sk-x", {}, max_attempts=1))
+        self.assertIn("key", str(caught.exception.detail).lower())
+
+
+@unittest.skipUnless(DEPS, "FastAPI/SQLAlchemy are not installed in this environment")
+class VisualDefaultPublicationTests(unittest.TestCase):
+    """The UI must be able to show the state the scanner will actually use."""
+
+    def test_hosted_openai_defaults_on(self):
+        with patch.dict(os.environ, {"OPENAI_BASE_URL": DEFAULT_OPENAI_BASE_URL}):
+            self.assertTrue(visual_verification_default(OPENAI))
+
+    def test_a_self_hosted_endpoint_defaults_off(self):
+        with patch.dict(os.environ, {"OPENAI_BASE_URL": LOCAL_URL}):
+            self.assertFalse(visual_verification_default(OPENAI))
+
+    def test_gemini_defaults_on_whatever_the_base_url_is(self):
+        with patch.dict(os.environ, {"OPENAI_BASE_URL": LOCAL_URL}):
+            self.assertTrue(visual_verification_default(GEMINI))
 
 
 @unittest.skipUnless(DEPS, "FastAPI/SQLAlchemy are not installed in this environment")
