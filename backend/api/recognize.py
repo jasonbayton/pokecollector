@@ -1060,6 +1060,7 @@ async def recognize_sanitized_card(
                 api_key,
                 [text_part(RECOGNIZE_PROMPT), image_part(content_type, image_b64)],
             )
+        response_text = response_text.strip()
         if trace:
             trace.record_extraction(
                 prompt=RECOGNIZE_PROMPT,
@@ -1189,6 +1190,7 @@ async def recognize_composite_card_info(
                     image_part("image/jpeg", image_b64),
                 ],
             )
+        response_text = response_text.strip()
         for trace in traces or []:
             trace.record_extraction(
                 prompt=COMPOSITE_PROMPT.format(count=count),

@@ -167,6 +167,7 @@ class RequestShapingTests(unittest.TestCase):
         self.assertEqual(content[1]["type"], "image_url")
         self.assertEqual(content[1]["image_url"]["url"], "data:image/jpeg;base64,QUJD")
         self.assertEqual(text, '{"name": "Quaxly"}')
+        self.assertEqual(extract_openai_text(payload), '{"name": "Quaxly"}')
         self.assertEqual(usage, {"total_tokens": 12})
 
     def test_no_authorization_header_when_there_is_no_key(self):
@@ -209,7 +210,9 @@ class RequestShapingTests(unittest.TestCase):
         self.assertEqual(parts[0], {"text": "Describe"})
         self.assertEqual(parts[1]["inline_data"]["mime_type"], "image/png")
         self.assertEqual(parts[1]["inline_data"]["data"], "QUJD")
-        self.assertEqual(text, "hello")
+        # Passthrough: visual verification records this text unstripped upstream,
+        # so the adapter must not quietly trim it.
+        self.assertEqual(text, "  hello  ")
         self.assertEqual(usage, {"totalTokenCount": 3})
 
 

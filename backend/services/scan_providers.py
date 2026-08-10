@@ -307,7 +307,8 @@ async def post_openai_chat(
 def extract_openai_text(payload: dict) -> str:
     """Pull the assistant message out of a chat-completions response."""
     try:
-        return (payload["choices"][0]["message"]["content"] or "").strip()
+        # Not stripped here, to match the Gemini adapter: call sites decide.
+        return payload["choices"][0]["message"]["content"] or ""
     except (KeyError, IndexError, TypeError) as exc:
         raise ValueError("No message content in the scanner response") from exc
 
@@ -381,7 +382,11 @@ class ScanProvider:
                 max_attempts=max_attempts,
             )
             payload = response.json()
-            text = payload["candidates"][0]["content"]["parts"][0]["text"].strip()
+            # Returned exactly as received. Upstream stripped at the extraction
+            # and composite call sites but recorded visual verification
+            # unstripped, so stripping here would change what Gemini writes into
+            # diagnostics. Call sites strip where they always did.
+            text = payload["candidates"][0]["content"]["parts"][0]["text"]
             return text, payload.get("usageMetadata")
 
         response = await post_openai_chat(
