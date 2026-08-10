@@ -8,7 +8,7 @@ import {
   getSetting, setSetting, getTelegramStatus, saveSettings, setAuthMode,
   getUsers, createUser, updateUser, deleteUser, changePassword, changeAvatar, changeUsername,
   getContributors, getSupporters, getRescueDonations, getCustomMatches, downloadDebugLog,
-  getProfile, updateProfile,
+  getProfile, updateProfile, deleteScanDiagnostics,
 } from '../api/client'
 import api from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
@@ -326,11 +326,15 @@ export default function Settings() {
 
   const [geminiKey, setGeminiKey] = useState('')
   const [geminiDirty, setGeminiDirty] = useState(false)
+  const [scannerProvider, setScannerProvider] = useState('gemini')
   const [openaiKey, setOpenaiKey] = useState('')
   const [openaiDirty, setOpenaiDirty] = useState(false)
-  const [scannerProvider, setScannerProvider] = useState('gemini')
+  const [visualVerification, setVisualVerification] = useState(true)
+  const [visualSaving, setVisualSaving] = useState(false)
   const [backupOptions, setBackupOptions] = useState(['full'])
   const [debugModeEnabled, setDebugModeEnabled] = useState(false)
+  const [scanDiagnosticsSaving, setScanDiagnosticsSaving] = useState(false)
+  const [scanDiagnosticsDeleting, setScanDiagnosticsDeleting] = useState(false)
 
   // Recurring automatic full sync interval (days) and small price sync interval (minutes).
   const [fullSyncIntervalDays, setFullSyncIntervalDays] = useState('5')
@@ -381,6 +385,11 @@ export default function Settings() {
   const { data: scannerProviderData } = useQuery({
     queryKey: ['setting', 'scanner_provider'],
     queryFn: () => getSetting('scanner_provider').catch(() => ({ value: 'gemini' })),
+  })
+
+  const { data: visualVerificationData } = useQuery({
+    queryKey: ['setting', 'scanner_visual_verification'],
+    queryFn: () => getSetting('scanner_visual_verification').catch(() => ({ value: '' })),
   })
 
   // Public profile
@@ -475,6 +484,15 @@ export default function Settings() {
   useEffect(() => {
     if (scannerProviderData?.value) setScannerProvider(scannerProviderData.value)
   }, [scannerProviderData])
+
+  useEffect(() => {
+    // Absent means "use the provider's default", which is on for Gemini and off
+    // for a local model that usually cannot do the multi-image comparison.
+    const stored = visualVerificationData?.value
+    if (stored === undefined) return
+    if (stored === '') setVisualVerification(scannerProvider === 'gemini')
+    else setVisualVerification(stored === 'true')
+  }, [visualVerificationData, scannerProvider])
 
   useEffect(() => {
     setDebugModeEnabled(settings.debug_mode === 'true')
@@ -590,6 +608,36 @@ export default function Settings() {
     }
   }
 
+  const handleScannerProviderChange = async (value) => {
+    const previous = scannerProvider
+    setScannerProvider(value)
+    try {
+      await setSetting('scanner_provider', value)
+      queryClient.invalidateQueries({ queryKey: ['setting', 'scanner_provider'] })
+      toast.success(t('settings.saved'))
+    } catch {
+      // Put the control back, or it shows a provider the server never accepted.
+      setScannerProvider(previous)
+      toast.error(t('settings.saveFailed'))
+    }
+  }
+
+  const handleVisualVerificationToggle = async (enabled) => {
+    const previous = visualVerification
+    setVisualSaving(true)
+    setVisualVerification(enabled)
+    try {
+      await setSetting('scanner_visual_verification', enabled ? 'true' : 'false')
+      queryClient.invalidateQueries({ queryKey: ['setting', 'scanner_visual_verification'] })
+      toast.success(t('settings.saved'))
+    } catch {
+      setVisualVerification(previous)
+      toast.error(t('settings.saveFailed'))
+    } finally {
+      setVisualSaving(false)
+    }
+  }
+
   const handlePriceSyncIntervalChange = async (val) => {
     setPriceSyncIntervalMinutes(val)
     await saveSetting('price_sync_interval_minutes', val)
@@ -660,6 +708,31 @@ export default function Settings() {
     }
   }
 
+  const handleScanDiagnosticsToggle = async (enabled) => {
+    setScanDiagnosticsSaving(true)
+    try {
+      await updateSettings({ scan_diagnostics_enabled: enabled ? 'true' : 'false' })
+      toast.success(t('settings.saved'))
+    } catch {
+      toast.error(t('settings.saveFailed'))
+    } finally {
+      setScanDiagnosticsSaving(false)
+    }
+  }
+
+  const handleDeleteScanDiagnostics = async () => {
+    if (!window.confirm(t('settings.scanDiagnosticsDeleteConfirm'))) return
+    setScanDiagnosticsDeleting(true)
+    try {
+      await deleteScanDiagnostics()
+      toast.success(t('settings.scanDiagnosticsDeleted'))
+    } catch {
+      toast.error(t('settings.scanDiagnosticsDeleteFailed'))
+    } finally {
+      setScanDiagnosticsDeleting(false)
+    }
+  }
+
   const handleAdminBooleanSettingToggle = async (key, enabled) => {
     try {
       await updateSettings({ [key]: enabled ? 'true' : 'false' })
@@ -720,6 +793,9 @@ export default function Settings() {
   const digitalSetsEnabled = settings.tcgdex_digital_sets_enabled === 'true'
   const crossLanguagePriceFallback = settings.cross_language_price_fallback !== 'false'
   const crossLanguageImageFallback = settings.cross_language_image_fallback !== 'false'
+  const scanDiagnosticsEnabled = settings.scan_diagnostics_enabled === 'true'
+  const scanDiagnosticsAvailable = settings.scan_diagnostics_available === 'true'
+  const scanDiagnosticsDeletionAvailable = settings.scan_diagnostics_deletion_available === 'true'
 
   const usernameMutation = useMutation({
     mutationFn: (username) => changeUsername(username),
@@ -1028,37 +1104,125 @@ export default function Settings() {
           <section className="space-y-1">
             <SectionHeader title={t('settings.sectionAI')} />
             <SettingsCard>
-              {/* scanner_provider is a global, admin-only setting: the API returns
-                  403 for anyone else, so do not offer the control to them. */}
-              {user?.role === 'admin' && (
-              <SettingsRow label={t('settings.scannerProvider')} description={t('settings.scannerProviderDesc')}>
-                <div className="w-full">
-                  <SelectControl
-                    value={scannerProvider}
-                    options={[
-                      { value: 'gemini', label: t('settings.scannerProviderGemini') },
-                      { value: 'openai', label: t('settings.scannerProviderOpenai') },
-                    ]}
-                    onChange={async (val) => {
-                      const previous = scannerProvider
-                      setScannerProvider(val)
-                      const saved = await saveSetting('scanner_provider', val)
-                      if (saved) {
-                        queryClient.invalidateQueries({ queryKey: ['setting', 'scanner_provider'] })
-                      } else {
-                        // The API rejects this for non-admins; do not leave the
-                        // control showing a value the server did not accept.
-                        setScannerProvider(previous)
-                      }
-                    }}
+              <SettingsRow
+                label={t('settings.scannerProvider')}
+                description={t('settings.scannerProviderDesc')}
+              >
+                <SelectControl
+                  value={scannerProvider}
+                  onChange={handleScannerProviderChange}
+                  options={[
+                    { value: 'gemini', label: t('settings.scannerProviderGemini') },
+                    { value: 'openai', label: t('settings.scannerProviderOpenai') },
+                  ]}
+                />
+              </SettingsRow>
+              {scannerProvider === 'openai' && (
+                <SettingsRow
+                  label={t('settings.openaiApiKey')}
+                  description={t('settings.openaiApiKeyDesc')}
+                >
+                  <div className="flex items-center gap-2 w-full mt-2">
+                    <input
+                      type={openaiDirty ? "text" : "password"}
+                      value={openaiKey}
+                      onChange={e => { setOpenaiKey(e.target.value); setOpenaiDirty(true) }}
+                      placeholder="sk-..."
+                      className="input flex-1 text-xs font-mono"
+                      style={{ minWidth: 0 }}
+                    />
+                    {openaiKey && !openaiDirty && (
+                      <span className="text-xs text-green flex-shrink-0">✅</span>
+                    )}
+                    {openaiDirty && (
+                      <button
+                        onClick={async () => {
+                          try {
+                            await setSetting('openai_api_key', openaiKey)
+                          } catch {
+                            // Stay dirty, so an unsaved key is never presented
+                            // as saved.
+                            toast.error(t('settings.saveFailed'))
+                            return
+                          }
+                          setOpenaiDirty(false)
+                          queryClient.invalidateQueries({ queryKey: ['setting', 'openai_api_key'] })
+                          toast.success(t('settings.apiKeySaved'))
+                        }}
+                        className="btn-primary-sm flex-shrink-0"
+                      >
+                        {t('common.save')}
+                      </button>
+                    )}
+                  </div>
+                </SettingsRow>
+              )}
+              {scannerProvider === 'gemini' && (
+                <SettingsRow label={t('settings.geminiApiKey')} description={t('settings.geminiApiKeyDesc')}>
+                  <div className="flex items-center gap-2 w-full mt-2">
+                    <input
+                      type={geminiDirty ? "text" : "password"}
+                      value={geminiKey}
+                      onChange={e => { setGeminiKey(e.target.value); setGeminiDirty(true) }}
+                      placeholder="AIza..."
+                      className="input flex-1 text-xs font-mono"
+                      style={{ minWidth: 0 }}
+                    />
+                    {geminiKey && !geminiDirty && (
+                      <span className="text-xs text-green flex-shrink-0">✅</span>
+                    )}
+                    {geminiDirty && (
+                      <button
+                        onClick={async () => {
+                          await saveSetting('gemini_api_key', geminiKey)
+                          setGeminiDirty(false)
+                          queryClient.invalidateQueries({ queryKey: ['setting', 'gemini_api_key'] })
+                          toast.success(t('settings.apiKeySaved'))
+                        }}
+                        className="btn-primary-sm flex-shrink-0"
+                      >
+                        {t('common.save')}
+                      </button>
+                    )}
+                  </div>
+                </SettingsRow>
+              )}
+              <SettingsRow
+                label={t('settings.visualVerification')}
+                description={t('settings.visualVerificationDesc')}
+              >
+                <Toggle
+                  value={visualVerification}
+                  onChange={handleVisualVerificationToggle}
+                  label={t('settings.visualVerification')}
+                  disabled={visualSaving}
+                />
+              </SettingsRow>
+              <SettingsRow
+                label={t('settings.scanDiagnostics')}
+                description={scanDiagnosticsAvailable
+                  ? t('settings.scanDiagnosticsDesc')
+                  : t('settings.scanDiagnosticsUnavailable')}
+                last
+              >
+                <div className="flex items-center gap-2">
+                  <Toggle
+                    value={scanDiagnosticsEnabled}
+                    label={t('settings.scanDiagnostics')}
+                    onChange={handleScanDiagnosticsToggle}
+                    disabled={!scanDiagnosticsAvailable || scanDiagnosticsSaving}
                   />
-                  {/* Selecting a provider with no key succeeds here and then
-                      fails at scan time, so say so at the point of choosing. */}
-                  {!activeProviderHasKey && (
-                    <p className="text-xs mt-2 opacity-80">
-                      ⚠️ {t('settings.scannerNoKey')}
-                    </p>
-                  )}
+                  <button
+                    type="button"
+                    onClick={handleDeleteScanDiagnostics}
+                    disabled={!scanDiagnosticsDeletionAvailable || scanDiagnosticsDeleting}
+                    className="btn-ghost flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-brand-red disabled:opacity-50"
+                  >
+                    <Trash2 size={13} />
+                    {scanDiagnosticsDeleting
+                      ? t('settings.scanDiagnosticsDeleting')
+                      : t('settings.scanDiagnosticsDelete')}
+                  </button>
                 </div>
               </SettingsRow>
               )}

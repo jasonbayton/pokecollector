@@ -18,9 +18,9 @@ Be kind. Be clear. Assume good intent. Keep feedback constructive.
 - 👤 **Creator:** [Gilles Romer](https://romerg.de/)
 - ✉️ **Contact:** [info@romerg.de](mailto:info@romerg.de)
 
-![Version](https://img.shields.io/badge/version-v1.33.2-e3000b?style=flat-square) ![Dark Theme](https://img.shields.io/badge/theme-dark-1a1a2e?style=flat-square) ![TCGdex](https://img.shields.io/badge/card%20data-TCGdex-e3000b?style=flat-square) ![Docker](https://img.shields.io/badge/deploy-Docker-2496ed?style=flat-square) ![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688?style=flat-square) ![React](https://img.shields.io/badge/frontend-React%2018-61dafb?style=flat-square) [![Ko-fi](https://img.shields.io/badge/support-Ko--fi-ff5e5b?style=flat-square&logo=ko-fi&logoColor=white)](https://ko-fi.com/gillesromer)
+![Version](https://img.shields.io/badge/version-v1.34.0-e3000b?style=flat-square) ![Dark Theme](https://img.shields.io/badge/theme-dark-1a1a2e?style=flat-square) ![TCGdex](https://img.shields.io/badge/card%20data-TCGdex-e3000b?style=flat-square) ![Docker](https://img.shields.io/badge/deploy-Docker-2496ed?style=flat-square) ![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688?style=flat-square) ![React](https://img.shields.io/badge/frontend-React%2018-61dafb?style=flat-square) [![Ko-fi](https://img.shields.io/badge/support-Ko--fi-ff5e5b?style=flat-square&logo=ko-fi&logoColor=white)](https://ko-fi.com/gillesromer)
 
-**Current version:** `v1.33.2` · Releases are tracked on the [GitHub Releases page](https://github.com/Git-Romer/pokecollector/releases).
+**Current version:** `v1.34.0` · Releases are tracked on the [GitHub Releases page](https://github.com/Git-Romer/pokecollector/releases).
 
 ![WebApp Preview](preview-homescreen.png)
 
@@ -62,7 +62,14 @@ Be kind. Be clear. Assume good intent. Keep feedback constructive.
 - Smart scanner with AI recognition, via Google Gemini or OpenAI
 - Scanner retries transient provider capacity errors and shows clearer rate-limit / temporary-unavailable messages
 - Two-step scanner matching: number ranking first, visual verification second when useful
+- Unified persistent scanner with Gemini-powered individual and composite batch recognition
+- Persistent, restart-safe scan queue with a review inbox, 14-day expiry, and automatic retries that do not consume recognition attempts for rate limits
+- Shared per-key Gemini quota handling distinguishes daily quotas from short-term limits, honors provider retry delays, and blocks concurrent requests using the same key
+- Deterministic matching ranks local number, printed total, set code, regulation mark, artist, and HP before optional visual verification
+- Conservative local pHash matching can resolve exceptionally clear candidates without a second Gemini request and safely abstains on ambiguous photos
+- Native camera and gallery capture with an optional positioning guide; queued photos are sanitized and deleted after confirmation or dismissal
 - Scanner strips suffixes like `ex` / `GX` / `VSTAR` for broader matching
+- Optional consent-controlled scanner diagnostics for installations that enable `SCAN_TRACE_DIR`; disabled per user by default with a separate delete action
 - Card modal auto-preselects a likely variant from TCGdex variant flags
 
 ### 🗂️ Sets, Binders & Wishlist
@@ -272,6 +279,10 @@ The **Users** tab is only visible to admin users and only while multi-user mode 
 | `SCANNER_PROVIDER` | Which vision model reads card photos: `gemini` or `openai`. The admin-set **Card scanner** setting takes precedence. | `gemini` |
 | `ALLOW_SHARED_SCANNER_KEY` | When `true`, accounts without their own key fall back to the installation key above, so one key covers every user. Off by default: consider the billing and isolation implications on a multi-user install. | `false` |
 | `DEFAULT_CURRENCY` | Currency new accounts start on: `EUR`, `USD` or `GBP` | `EUR` |
+| `OPENAI_BASE_URL` | OpenAI-compatible endpoint for the card scanner. Point it at a local server such as Ollama, llama.cpp or LM Studio (for example `http://127.0.0.1:11434/v1`). Deliberately an administrator setting: a user-supplied backend URL would let any account direct the server at an arbitrary host. | `https://api.openai.com/v1` |
+| `OPENAI_MODEL` | Model used when the scanner provider is set to OpenAI. Must be vision capable. | `gpt-4o-mini` |
+| `SCAN_TRACE_DIR` | Enables consent-controlled scanner diagnostics when set to a writable container path. With the standard compose volume, use `/app/data/scan-traces`. Each user must still opt in separately in Settings. | *(empty / disabled)* |
+| `SCAN_TRACE_STORAGE_DIR` | Stable cleanup path for previously stored scanner diagnostics. Standard Docker Compose sets this to `/app/data/scan-traces`; custom deployments should keep it pointed at the storage location even when `SCAN_TRACE_DIR` is unset. | `/app/data/scan-traces` with Docker Compose |
 | `TELEGRAM_BOT_TOKEN` | Initial Telegram bot token for the admin user | *(empty)* |
 | `TELEGRAM_CHAT_ID` | Initial Telegram chat ID for the admin user | *(empty)* |
 | `TCGDEX_SYNC_LANGUAGES` | Initial admin default for TCGdex set/card sync languages on first launch only. After bootstrap, the DB setting in Settings is authoritative. Comma-separated TCGdex language codes, or `all` to enable every supported TCGdex language. Empty or invalid values safely fall back to `en,de`. Extra languages increase sync time, API calls, and database size. | `en,de` |
@@ -286,6 +297,23 @@ The **Users** tab is only visible to admin users and only while multi-user mode 
 | `PRE_UPGRADE_BACKUP_KEEP` | Number of automatic pre-upgrade backups to retain in `/app/backups`; minimum `1` | `10` |
 
 Supported `TCGDEX_SYNC_LANGUAGES` codes: `en`, `fr`, `es`, `es-mx`, `it`, `pt`, `pt-br`, `pt-pt`, `de`, `nl`, `pl`, `ru`, `ja`, `ko`, `zh-tw`, `id`, `th`, `zh-cn`. The env value `all` expands to the full supported language list during first bootstrap.
+
+### Optional scanner diagnostics
+
+Scanner diagnostics require both server and user consent:
+
+1. The administrator sets `SCAN_TRACE_DIR=/app/data/scan-traces` and restarts the backend.
+2. A user enables **Settings → AI / Card Scanner → Share scanner diagnostics**. The toggle is off by default for every user.
+
+Only that user's subsequent scan attempts are stored. Each trace contains the sanitized card photo, generic Gemini prompt and raw text response, parsed fields and token usage, TCGdex searches, ranked candidates, pHash/visual decisions, and errors. API keys and authentication credentials are never recorded.
+
+Turning the toggle off stops future collection but deliberately retains existing diagnostics. There is no automatic expiry: files remain until the user presses the adjacent **Delete data** button or the account is deleted. Both actions remove only that user's stored trace JSON and photos. The stable `SCAN_TRACE_STORAGE_DIR` cleanup path keeps deletion available even while new collection is disabled. Files are created with private `0700` directory and `0600` file permissions and are not part of SQL backups.
+
+To analyse consented traces inside the backend container:
+
+```bash
+docker compose exec backend python scripts/analyse_scan_traces.py /app/data/scan-traces --field-nulls --failures
+```
 
 English is used as the preferred fallback source for missing synced data, images, and prices when the same TCGdex card or set ID exists in English. Regional-only cards that do not exist in English are kept in their native language data instead of being guessed by name.
 
@@ -350,6 +378,7 @@ The old nested `pokemon-tcg-collection/` layout is no longer used.
 | Database | PostgreSQL 18 |
 | Card Data | [TCGdex](https://tcgdex.dev/) |
 | AI Scanner | Google Gemini (`GEMINI_MODEL`) or OpenAI (`OPENAI_MODEL`), selected with `SCANNER_PROVIDER` |
+| AI Scanner | Google Gemini (default) or any OpenAI-compatible vision endpoint, including local Ollama, llama.cpp and LM Studio. Each user picks a provider in Settings; the endpoint is configured by the administrator. |
 | Deploy | Docker + Docker Compose |
 
 ---
