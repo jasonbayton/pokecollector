@@ -311,10 +311,25 @@ async def post_openai_chat(
 def extract_openai_text(payload: dict) -> str:
     """Pull the assistant message out of a chat-completions response."""
     try:
-        # Not stripped here, to match the Gemini adapter: call sites decide.
-        return payload["choices"][0]["message"]["content"] or ""
+        content = payload["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
         raise ValueError("No message content in the scanner response") from exc
+
+    if content is None:
+        return ""
+    # Not stripped here, to match the Gemini adapter: call sites decide.
+    if isinstance(content, str):
+        return content
+    # Newer OpenAI-compatible servers may answer with a list of content parts
+    # rather than a bare string. Returning that unchecked would fail later on
+    # .strip() and surface as a 500.
+    if isinstance(content, list):
+        return "".join(
+            part.get("text", "")
+            for part in content
+            if isinstance(part, dict)
+        )
+    raise ValueError(f"Unexpected message content type: {type(content).__name__}")
 
 
 class ScanProvider:

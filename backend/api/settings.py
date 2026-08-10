@@ -169,12 +169,6 @@ def _get_user_settings(db: Session, user_id: int) -> dict:
             env_gemini = os.environ.get("GEMINI_API_KEY", "")
             if env_gemini:
                 result["gemini_api_key"] = env_gemini
-        # Same seeding as Gemini above, so the documented OPENAI_API_KEY is
-        # actually reachable rather than passed into the container and ignored.
-        if "openai_api_key" not in result:
-            env_openai = os.environ.get("OPENAI_API_KEY", "")
-            if env_openai:
-                result["openai_api_key"] = env_openai
 
     for key, value in DEFAULT_SETTINGS.items():
         result.setdefault(key, value)

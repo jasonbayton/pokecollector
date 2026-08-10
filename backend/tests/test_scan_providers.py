@@ -281,6 +281,24 @@ class ErrorMappingTests(unittest.TestCase):
             self._call([_FakeResponse(429, {})])
         self.assertIsNone(getattr(caught.exception, "retry_after_seconds", "missing"))
 
+    def test_list_content_is_joined_rather_than_returned_raw(self):
+        # Some OpenAI-compatible servers answer with content parts. Returned raw
+        # it would pass here and fail later on .strip() as a 500.
+        text = extract_openai_text({"choices": [{"message": {"content": [
+            {"type": "text", "text": "{\"name\": "},
+            {"type": "text", "text": "\"Quaxly\"}"},
+        ]}}]})
+        self.assertEqual(text, '{"name": "Quaxly"}')
+
+    def test_an_unexpected_content_type_is_rejected(self):
+        with self.assertRaises(ValueError):
+            extract_openai_text({"choices": [{"message": {"content": 42}}]})
+
+    def test_null_content_is_an_empty_string(self):
+        self.assertEqual(
+            extract_openai_text({"choices": [{"message": {"content": None}}]}), ""
+        )
+
     def test_a_malformed_success_is_a_502_not_a_500(self):
         provider = ScanProvider(OPENAI)
         client = _FakeClient([_FakeResponse(200, {"unexpected": True})])
