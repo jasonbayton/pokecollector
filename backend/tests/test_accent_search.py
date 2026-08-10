@@ -7,7 +7,7 @@ try:
     from api.cards import search_cards
     from database import Base
     from models import Card, Setting, User
-    from services.text_search import strip_diacritics
+    from services.text_search import accent_insensitive_contains, strip_diacritics
     API_TEST_DEPS_AVAILABLE = True
 except ModuleNotFoundError:
     API_TEST_DEPS_AVAILABLE = False
@@ -105,7 +105,41 @@ class AccentInsensitiveSearchTests(unittest.TestCase):
         self.assertEqual(self._search_names(subtype="Supporter"), ["Professor's Research"])
 
     def test_accent_search_still_respects_language_visibility(self):
+        # French is not an enabled catalogue language, so the French card stays
+        # hidden even though the unaccented term describes it.
         self.assertEqual(self._search_names(name="Flabebe"), [])
+
+        # Enabling French must reveal it for the very same unaccented term.
+        # Without this half, the empty result above would look identical to the
+        # result of accent handling being broken outright.
+        setting = self.db.query(Setting).filter(
+            Setting.key == "tcgdex_sync_languages"
+        ).first()
+        setting.value = "en,de,fr"
+        self.db.commit()
+        self.assertEqual(self._search_names(name="Flabebe"), ["Flabébé"])
+
+    def test_portable_expression_stays_shallow_enough_for_older_sqlite(self):
+        """Structural guard, not a behaviour test.
+
+        The portable fallback used to nest one replace() per accented
+        character. That expression is deeper than the parser stack of older
+        SQLite builds, which rejected every accent-insensitive search with
+        "parser stack overflow", so none of the tests above could run on those
+        hosts. Assert the depth stays constant so a reintroduction of the chain
+        fails on every SQLite rather than only on old ones.
+        """
+        predicate = accent_insensitive_contains(self.db, Card.name, "Pokegear")
+        compiled = str(predicate.compile(self.db.get_bind()))
+        depth = 0
+        deepest = 0
+        for char in compiled:
+            if char == "(":
+                depth += 1
+                deepest = max(deepest, depth)
+            elif char == ")":
+                depth -= 1
+        self.assertLessEqual(deepest, 8, compiled)
 
 
 if __name__ == "__main__":
