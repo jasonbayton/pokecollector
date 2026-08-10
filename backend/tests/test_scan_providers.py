@@ -411,11 +411,18 @@ class ErrorMappingTests(unittest.TestCase):
                 asyncio.run(provider.generate_text(client, "", [text_part("hi")]))
         self.assertEqual(caught.exception.status_code, 502)
 
-    def test_a_missing_model_points_at_the_configuration(self):
+    def test_a_missing_model_names_the_model_and_points_at_settings(self):
+        # A user who set their own model must be told which one failed and where
+        # to change it, not sent after an env var they cannot see.
+        client = _FakeClient([_FakeResponse(404, {"error": {"message": "no such model"}})])
         with self.assertRaises(HTTPException) as caught:
-            self._call([_FakeResponse(404, {"error": {"message": "no such model"}})])
+            asyncio.run(post_openai_chat(
+                client, "http://x/chat/completions", "", {"model": "made-up-model"},
+                max_attempts=1,
+            ))
         self.assertEqual(caught.exception.status_code, 502)
-        self.assertIn("OPENAI_MODEL", caught.exception.detail)
+        self.assertIn("made-up-model", caught.exception.detail)
+        self.assertIn("Settings", caught.exception.detail)
 
     def test_a_transient_error_is_retried_and_can_succeed(self):
         good = _FakeResponse(200, {"choices": [{"message": {"content": "ok"}}]})

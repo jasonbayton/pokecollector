@@ -343,9 +343,9 @@ async def post_openai_chat(
                 raise HTTPException(
                     status_code=502,
                     detail=(
-                        f"The scanner model \"{self.model()}\" was not found at this "
-                        "endpoint. Change it in Settings, or ask an administrator to "
-                        "check the configured model and endpoint."
+                        f"The scanner model \"{payload.get('model', '')}\" was not "
+                        "found at this endpoint. Change it in Settings, or ask an "
+                        "administrator to check the configured model and endpoint."
                     ),
                 )
             if resp.status_code in OPENAI_TRANSIENT_STATUS_CODES:
