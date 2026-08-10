@@ -21,6 +21,7 @@ Two rules shape the design:
 import base64
 import json
 import logging
+import math
 import os
 import re
 from contextlib import nullcontext
@@ -96,6 +97,19 @@ def resolve_provider_name(db: Session, user_id: int | None) -> str:
     return value if value in PROVIDERS else GEMINI
 
 
+def visual_verification_default(provider: str) -> bool:
+    """The default for a provider, with no user preference stored.
+
+    The single source of truth for this rule: the settings API publishes it so
+    the UI can show the same state the scanner will actually use, rather than
+    reimplementing the condition in the frontend where OPENAI_BASE_URL is not
+    visible.
+    """
+    # openai_requires_key() is true only for the hosted API, which is the same
+    # signal that distinguishes it from a self-hosted endpoint.
+    return provider == GEMINI or openai_requires_key()
+
+
 def visual_verification_enabled(db: Session, user_id: int | None, provider: str) -> bool:
     """Whether to spend a second model call on picking between candidates.
 
@@ -117,9 +131,7 @@ def visual_verification_enabled(db: Session, user_id: int | None, provider: str)
         )
         if row and row.value:
             return str(row.value).strip().lower() in {"true", "1", "yes", "on"}
-    # openai_requires_key() is true only for the hosted API, which is the same
-    # signal that distinguishes it from a self-hosted endpoint.
-    return provider == GEMINI or openai_requires_key()
+    return visual_verification_default(provider)
 
 
 class ProviderRateLimitError(HTTPException):
@@ -175,6 +187,13 @@ def openai_error_message(resp: httpx.Response) -> str:
     return ""
 
 
+# A day is longer than any retry worth honouring in-process, and it keeps the
+# value inside what timedelta and the Retry-After header can represent. Without
+# a bound, 1e309 parses to infinity and overflows building the 429, while 1e308
+# survives that only to overflow timedelta in the queue and abort the drain.
+MAX_RETRY_AFTER_SECONDS = 24 * 60 * 60
+
+
 def openai_retry_after_seconds(resp: httpx.Response) -> float | None:
     raw = resp.headers.get("retry-after")
     if not raw:
@@ -183,7 +202,9 @@ def openai_retry_after_seconds(resp: httpx.Response) -> float | None:
         value = float(raw)
     except (TypeError, ValueError):
         return None
-    return value if value > 0 else None
+    if not math.isfinite(value) or value <= 0:
+        return None
+    return min(value, MAX_RETRY_AFTER_SECONDS)
 
 
 def _openai_content(parts: list[dict]) -> list[dict]:
@@ -267,15 +288,28 @@ async def post_openai_chat(
                     retry_after_seconds=openai_retry_after_seconds(resp),
                     detail=detail,
                 )
-            if resp.status_code in {400, 401, 403}:
+            if resp.status_code in {401, 403}:
                 # Deliberately no upstream text on the authentication classes.
                 # This is exactly where endpoints quote the offending credential
                 # back, and this detail is persisted and logged downstream.
+                log_upstream_detail(resp, "credentials rejected")
                 if openai_requires_key():
                     detail = "The OpenAI API key was rejected. Please check it in Settings."
                 else:
                     detail = "The scanner endpoint rejected the request."
                 raise HTTPException(status_code=400, detail=detail)
+            if resp.status_code == 400:
+                # Not an authentication failure: a rejected image, an oversized
+                # request or an unsupported option. Telling a user with a valid
+                # key to replace it sends them after the wrong thing.
+                log_upstream_detail(resp, "request rejected")
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "The scanner provider rejected this request. The image or "
+                        "model options may not be supported."
+                    ),
+                )
             if resp.status_code == 404:
                 log_upstream_detail(resp, "model not found")
                 raise HTTPException(

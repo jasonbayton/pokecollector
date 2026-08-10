@@ -873,7 +873,7 @@ const ko = {
     uploadImage: '이미지 업로드',
     aiHint: 'AI 인식 - 지원되는 TCGdex 언어를 자동 감지',
     recognizing: '카드 인식 중…',
-    analyzing: '이미지를 분석하는 중',
+    analyzing: '이미지를 분석 중입니다',
     detected: '감지됨',
     detectedLanguage: '언어:',
     matches: '일치 항목',

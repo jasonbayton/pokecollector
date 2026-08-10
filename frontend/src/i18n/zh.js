@@ -870,7 +870,7 @@ const zh = {
     alignCard: '摆正卡牌，光线充足',
     takePhoto: '拍照',
     uploadImage: '上传图片',
-    aiHint: 'AI 识别 - 自动检测支持的 TCGdex 语言',
+    aiHint: '通过 AI 识别 - 自动检测受支持的 TCGdex 语言',
     recognizing: '识别卡牌中…',
     analyzing: '正在分析图片',
     detected: '已检测',

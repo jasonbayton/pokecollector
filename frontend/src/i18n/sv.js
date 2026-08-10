@@ -861,7 +861,7 @@ const sv = {
     alignCard: 'Rikta kortet rakt, välbelyst',
     takePhoto: 'Ta foto',
     uploadImage: 'Ladda upp bild',
-    aiHint: 'AI-igenkänning - identifierar automatiskt stödda TCGdex-språk',
+    aiHint: 'AI-igenkänning - identifierar automatiskt TCGdex-språk som stöds',
     recognizing: 'Identifierar kort…',
     analyzing: 'Bilden analyseras',
     detected: 'Identifierat',

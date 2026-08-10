@@ -868,7 +868,7 @@ const fr = {
     alignCard: 'Alignez la carte droite et bien éclairée',
     takePhoto: 'Prendre une photo',
     uploadImage: 'Uploader une image',
-    aiHint: 'Reconnaissance par IA - détecte automatiquement les langues TCGdex prises en charge',
+    aiHint: 'Reconnaissance par IA - détecte automatiquement l\'allemand et l\'anglais',
     recognizing: 'Reconnaissance de la carte...',
     analyzing: 'Analyse de l\'image en cours',
     detected: 'Détecté',

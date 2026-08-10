@@ -387,6 +387,12 @@ export default function Settings() {
     queryFn: () => getSetting('scanner_provider').catch(() => ({ value: 'gemini' })),
   })
 
+  const { data: visualDefaultData } = useQuery({
+    queryKey: ['setting', 'scanner_visual_verification_default'],
+    queryFn: () => getSetting('scanner_visual_verification_default').catch(() => ({ value: 'true' })),
+  })
+  const visualDefault = visualDefaultData?.value !== 'false'
+
   const { data: visualVerificationData } = useQuery({
     queryKey: ['setting', 'scanner_visual_verification'],
     queryFn: () => getSetting('scanner_visual_verification').catch(() => ({ value: '' })),
@@ -486,13 +492,15 @@ export default function Settings() {
   }, [scannerProviderData])
 
   useEffect(() => {
-    // Absent means "use the provider's default", which is on for Gemini and off
-    // for a local model that usually cannot do the multi-image comparison.
+    // Absent means "use the provider's default". That rule depends on
+    // OPENAI_BASE_URL, which is server-side, so take it from the API rather
+    // than guessing here: showing off while the scanner runs it on would cost
+    // an unexpected second paid call.
     const stored = visualVerificationData?.value
     if (stored === undefined) return
-    if (stored === '') setVisualVerification(scannerProvider === 'gemini')
+    if (stored === '') setVisualVerification(visualDefault)
     else setVisualVerification(stored === 'true')
-  }, [visualVerificationData, scannerProvider])
+  }, [visualVerificationData, visualDefault])
 
   useEffect(() => {
     setDebugModeEnabled(settings.debug_mode === 'true')

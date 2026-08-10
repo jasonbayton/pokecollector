@@ -871,7 +871,7 @@ const it = {
     alignCard: 'Allinea la carta dritta, ben illuminata',
     takePhoto: 'Scatta foto',
     uploadImage: 'Carica immagine',
-    aiHint: 'Riconoscimento con IA - rileva automaticamente le lingue TCGdex supportate',
+    aiHint: 'Riconoscimento tramite IA - rileva automaticamente le lingue TCGdex supportate',
     recognizing: 'Riconoscimento carta…',
     analyzing: 'Analisi dell\'immagine in corso',
     detected: 'Rilevata',

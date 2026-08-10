@@ -873,7 +873,7 @@ const id = {
     uploadImage: 'Unggah gambar',
     aiHint: 'Pengenalan AI - otomatis mendeteksi bahasa TCGdex yang didukung',
     recognizing: 'Mengenali kartu…',
-    analyzing: 'Menganalisis gambar',
+    analyzing: 'Sedang menganalisis gambar',
     detected: 'Terdeteksi',
     detectedLanguage: 'Bahasa:',
     matches: 'Cocok',

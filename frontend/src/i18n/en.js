@@ -922,7 +922,7 @@ const en = {
     geminiApiKey: 'Gemini API Key',
     geminiApiKeyDesc: 'For camera card recognition (free at Google AI Studio)',
     scanDiagnostics: 'Share scanner diagnostics',
-    scanDiagnosticsDesc: 'Off by default. When enabled, sanitized card photos, Gemini responses, extracted fields, candidates, and matching decisions are stored for accuracy analysis. Turning this off stops future collection but keeps existing diagnostics.',
+    scanDiagnosticsDesc: 'Off by default. When enabled, sanitized card photos, model responses, extracted fields, candidates, and matching decisions are stored for accuracy analysis. Turning this off stops future collection but keeps existing diagnostics.',
     scanDiagnosticsUnavailable: 'New diagnostics collection is not enabled on this installation. You can still delete previously stored data.',
     scanDiagnosticsDelete: 'Delete data',
     scanDiagnosticsDeleting: 'Deleting…',

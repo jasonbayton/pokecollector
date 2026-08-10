@@ -903,7 +903,7 @@ const de = {
     geminiApiKey: 'Gemini API Key',
     geminiApiKeyDesc: 'Für die Kameraerkennung von Karten (kostenlos bei Google AI Studio)',
     scanDiagnostics: 'Scanner-Diagnosen teilen',
-    scanDiagnosticsDesc: 'Standardmäßig deaktiviert. Wenn aktiviert, werden bereinigte Kartenfotos, Gemini-Antworten, erkannte Felder, Kandidaten und Matching-Entscheidungen zur Genauigkeitsanalyse gespeichert. Das Deaktivieren stoppt künftige Aufzeichnungen, behält aber vorhandene Diagnosen.',
+    scanDiagnosticsDesc: 'Standardmäßig deaktiviert. Wenn aktiviert, werden bereinigte Kartenfotos, Modellantworten, erkannte Felder, Kandidaten und Matching-Entscheidungen zur Genauigkeitsanalyse gespeichert. Das Deaktivieren stoppt künftige Aufzeichnungen, behält aber vorhandene Diagnosen.',
     scanDiagnosticsUnavailable: 'Neue Scanner-Diagnosen werden auf dieser Installation nicht aufgezeichnet. Bereits gespeicherte Daten können weiterhin gelöscht werden.',
     scanDiagnosticsDelete: 'Daten löschen',
     scanDiagnosticsDeleting: 'Wird gelöscht…',
