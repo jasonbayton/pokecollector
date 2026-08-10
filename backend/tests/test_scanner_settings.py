@@ -130,7 +130,7 @@ class ProviderKeyPrecedenceTests(unittest.TestCase):
             self.assertEqual(ScanProvider("openai").credential(db, 1), "sk-env")
 
     def test_a_users_own_key_wins_over_the_installation_key(self):
-        db = _FakeDb("sk-user")
+        db = _FakeDb(_Row("sk-user"))
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-env"}, clear=True):
             self.assertEqual(ScanProvider("openai").credential(db, 1), "sk-user")
 
