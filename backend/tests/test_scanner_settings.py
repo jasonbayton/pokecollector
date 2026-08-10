@@ -152,6 +152,40 @@ class ProviderKeyPrecedenceTests(unittest.TestCase):
 
 
 @skip_without_deps
+class InstallationProviderTests(unittest.TestCase):
+    """SCANNER_PROVIDER is displayed as configured, so it has to be the one that
+    actually runs for accounts that have not chosen."""
+
+    def test_the_installation_provider_is_used_when_the_user_has_not_chosen(self):
+        from services.scan_providers import resolve_provider_name
+
+        db = _FakeDb(None)
+        with patch.dict("os.environ", {"SCANNER_PROVIDER": "openai"}, clear=True):
+            self.assertEqual(resolve_provider_name(db, 1), "openai")
+
+    def test_a_users_own_choice_wins(self):
+        from services.scan_providers import resolve_provider_name
+
+        db = _FakeDb(_Row("gemini"))
+        with patch.dict("os.environ", {"SCANNER_PROVIDER": "openai"}, clear=True):
+            self.assertEqual(resolve_provider_name(db, 1), "gemini")
+
+    def test_an_unset_installation_provider_still_defaults_to_gemini(self):
+        from services.scan_providers import resolve_provider_name
+
+        db = _FakeDb(None)
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(resolve_provider_name(db, 1), "gemini")
+
+    def test_an_invalid_installation_provider_is_ignored(self):
+        from services.scan_providers import resolve_provider_name
+
+        db = _FakeDb(None)
+        with patch.dict("os.environ", {"SCANNER_PROVIDER": "nonsense"}, clear=True):
+            self.assertEqual(resolve_provider_name(db, 1), "gemini")
+
+
+@skip_without_deps
 class SettingScopeTests(unittest.TestCase):
     """A key belongs to exactly one scope.
 

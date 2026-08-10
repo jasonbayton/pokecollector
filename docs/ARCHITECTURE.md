@@ -238,8 +238,8 @@ Current frontend state layers:
 - Gemini model is configurable through `GEMINI_MODEL` and defaults to `gemini-flash-latest`
 - OpenAI model is configurable through `OPENAI_MODEL` and defaults to `gpt-4o-mini`
 - The OpenAI endpoint is configurable through `OPENAI_BASE_URL`, so any OpenAI-compatible API works, including a local model served by Ollama, llama.cpp or LM Studio. Such endpoints usually have no credential, so the API key requirement is lifted when the base URL is not the hosted default
-- Keys are read per user; the installation key is used as a fallback only when `ALLOW_SHARED_SCANNER_KEY` is enabled
-- Provider wire formats live behind `services/vision_provider.py`; callers pass provider-neutral text/image parts
+- Keys are read per user, falling back to the installation key whenever one is set, so the operator provides a key for everyone or for no one.
+- Provider wire formats live behind `services/scan_providers.py`; callers pass provider-neutral text/image parts and each provider serialises them.
 - Scanner calls use the API-key header rather than putting the key in the request URL
 - Transient capacity failures are retried; rate limits, invalid keys, and unavailable models are reported separately
 

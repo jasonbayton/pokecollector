@@ -22,3 +22,13 @@ def shared_env_key(provider_name: str) -> str:
     if not env_name:
         return ""
     return os.environ.get(env_name, "").strip()
+
+
+def installation_provider() -> str:
+    """The provider an account uses when it has not chosen one.
+
+    Same principle as the key fallback: the operator sets it or does not. Without
+    this, SCANNER_PROVIDER is displayed as configured while every account that
+    has not chosen explicitly scans with the built-in default instead.
+    """
+    return (os.environ.get("SCANNER_PROVIDER") or "").strip().lower()

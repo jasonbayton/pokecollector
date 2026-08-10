@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 from models import UserSetting
 # Fork-local: upstream has no installation-wide key sharing. Kept in its own
 # module so the rest of this file stays identical to the branch offered upstream.
-from services.scanner_key_sharing import shared_env_key
+from services.scanner_key_sharing import installation_provider, shared_env_key
 
 logger = logging.getLogger(__name__)
 
@@ -92,9 +92,15 @@ def resolve_provider_name(db: Session, user_id: int | None) -> str:
         .filter(UserSetting.user_id == user_id, UserSetting.key == SCANNER_PROVIDER_SETTING)
         .first()
     )
-    value = (row.value if row else "") or ""
-    value = value.strip().lower()
-    return value if value in PROVIDERS else GEMINI
+    value = ((row.value if row else "") or "").strip().lower()
+    if value in PROVIDERS:
+        return value
+    # Fork-local: fall back to the installation setting before the built-in
+    # default, so what the operator configured is what actually runs.
+    installation = installation_provider()
+    if installation in PROVIDERS:
+        return installation
+    return GEMINI
 
 
 def visual_verification_default(provider: str) -> bool:
