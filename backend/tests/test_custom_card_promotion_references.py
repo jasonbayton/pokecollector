@@ -183,6 +183,34 @@ class PromotionReferenceTests(unittest.TestCase):
         item = self.db.query(TradeItem).one()
         self.assertEqual(item.card_id, "me04-024_en")
 
+    def test_an_earlier_dismissed_match_does_not_block_promotion(self):
+        """A card can carry more than one match row, and promotion updated one.
+
+        Dismissing a match leaves the row with status "dismissed", and the
+        matcher only declines to record a new one while a pending or migrated
+        match exists. So dismiss, wait for the catalogue to be re-checked, and
+        the card now has two matches. Promoting the live one re-pointed only
+        itself, leaving the dismissed row referencing a card about to be
+        deleted. custom_card_id is NOT NULL with no cascade, so that is the
+        price_history failure again from a different direction.
+        """
+        self.db.add(CustomCardMatch(
+            custom_card_id=self.card.id, api_card_id="me04-024", status="dismissed",
+        ))
+        self.db.commit()
+
+        result = self._promote()
+
+        self.assertEqual(result["api_card_id"], "me04-024_en")
+        self.assertIsNone(self.db.query(Card).filter(Card.id == "custom-legacy").first())
+        # Nothing may still point at the deleted card, whatever its status.
+        self.assertEqual(
+            self.db.query(CustomCardMatch).filter(
+                CustomCardMatch.custom_card_id == "custom-legacy"
+            ).count(),
+            0,
+        )
+
     def test_every_reference_survives_a_promotion_together(self):
         # All of them at once, because they share one transaction and a failure
         # in any rolls back the rest.

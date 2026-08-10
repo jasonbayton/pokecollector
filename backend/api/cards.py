@@ -852,6 +852,19 @@ def migrate_custom_card(
     match.api_card_id = api_card_id
     match.status = "migrated"
 
+    # A card can carry more than one match. Dismissing one leaves the row
+    # behind, and the matcher only declines to record another while a pending
+    # or migrated match exists, so a dismissal followed by a re-check leaves
+    # two. Only the promoted one has just been re-pointed; the rest still name
+    # a card that is about to be deleted, and custom_card_id is NOT NULL with
+    # no cascade. They describe a manual card that no longer exists, so they go
+    # the same way deleting the card would take them. Matched on id rather than
+    # relying on the re-point above, which has not been flushed yet.
+    db.query(CustomCardMatch).filter(
+        CustomCardMatch.custom_card_id == custom_card_id,
+        CustomCardMatch.id != match.id,
+    ).delete(synchronize_session=False)
+
     # 8. Delete the old custom card
     old_card = db.query(Card).filter(Card.id == custom_card_id).first()
     if old_card:
