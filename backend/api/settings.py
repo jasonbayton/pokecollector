@@ -19,7 +19,7 @@ from services.exchange_rates import (
 from services.card_visibility import get_visible_filter_languages
 from services.exchange_rates import SUPPORTED_CURRENCIES
 from services.public_profile_feature import PUBLIC_PROFILES_SETTING_KEY
-from services.vision_provider import PROVIDERS, shared_scanner_key_allowed
+from services.scanner_key_sharing import shared_scanner_key_allowed
 from services.tcgdex_languages import (
     DEFAULT_TCGDEX_SYNC_LANGUAGES,
     supported_tcgdex_language_payload,

@@ -30,6 +30,9 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from models import UserSetting
+# Fork-local: upstream has no installation-wide key sharing. Kept in its own
+# module so the rest of this file stays identical to the branch offered upstream.
+from services.scanner_key_sharing import shared_env_key
 
 logger = logging.getLogger(__name__)
 
@@ -355,7 +358,7 @@ class ScanProvider:
         from api.recognize import get_gemini_key
 
         if self.is_gemini:
-            return get_gemini_key(db, user_id=user_id)
+            return (get_gemini_key(db, user_id=user_id) or "").strip() or shared_env_key(self.name)
         if user_id is None:
             return ""
         row = (
@@ -363,7 +366,10 @@ class ScanProvider:
             .filter(UserSetting.user_id == user_id, UserSetting.key == "openai_api_key")
             .first()
         )
-        return (row.value if row else "") or ""
+        # Whitespace is not a key: a blank override must not look configured,
+        # shadow the shared key, or be sent upstream as a credential.
+        value = ((row.value if row else "") or "").strip()
+        return value or shared_env_key(self.name)
 
     def requires_credential(self) -> bool:
         return True if self.is_gemini else openai_requires_key()

@@ -5,19 +5,15 @@ try:
     from fastapi import HTTPException
 
     from api.export import _convert_eur, _normalize_currency
-    from api.recognize import get_provider_key
-    from api.settings import (
+        from api.settings import (
         SECRET_KEYS,
         _coerce_setting_value,
         _default_currency,
         _mask_secret,
         _redact_secrets,
     )
-    from services.vision_provider import (
-        GeminiVisionProvider,
-        OpenAIVisionProvider,
-        shared_scanner_key_allowed,
-    )
+    from services.scanner_key_sharing import shared_scanner_key_allowed
+    from services.scan_providers import ScanProvider
     DEPS_AVAILABLE = True
 except ModuleNotFoundError:
     HTTPException = Exception
@@ -115,27 +111,27 @@ class ProviderKeyPrecedenceTests(unittest.TestCase):
     def test_user_key_wins_over_environment(self):
         db = _FakeDb(_Row("sk-user"))
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-env", "ALLOW_SHARED_SCANNER_KEY": "true"}):
-            self.assertEqual(get_provider_key(db, OpenAIVisionProvider(), user_id=1), "sk-user")
+            self.assertEqual(ScanProvider("openai").credential(db, 1), "sk-user")
 
     def test_whitespace_only_key_does_not_shadow_the_environment(self):
         db = _FakeDb(_Row("   "))
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-env", "ALLOW_SHARED_SCANNER_KEY": "true"}):
-            self.assertEqual(get_provider_key(db, OpenAIVisionProvider(), user_id=1), "sk-env")
+            self.assertEqual(ScanProvider("openai").credential(db, 1), "sk-env")
 
     def test_user_key_is_trimmed(self):
         db = _FakeDb(_Row("  sk-user  "))
         with patch.dict("os.environ", {}, clear=True):
-            self.assertEqual(get_provider_key(db, OpenAIVisionProvider(), user_id=1), "sk-user")
+            self.assertEqual(ScanProvider("openai").credential(db, 1), "sk-user")
 
     def test_environment_is_ignored_unless_sharing_is_enabled(self):
         db = _FakeDb(None)
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-env"}, clear=True):
-            self.assertEqual(get_provider_key(db, OpenAIVisionProvider(), user_id=1), "")
+            self.assertEqual(ScanProvider("openai").credential(db, 1), "")
 
     def test_environment_is_used_when_sharing_is_enabled(self):
         db = _FakeDb(None)
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-env", "ALLOW_SHARED_SCANNER_KEY": "1"}):
-            self.assertEqual(get_provider_key(db, OpenAIVisionProvider(), user_id=1), "sk-env")
+            self.assertEqual(ScanProvider("openai").credential(db, 1), "sk-env")
 
     def test_each_provider_reads_its_own_environment_variable(self):
         db = _FakeDb(None)
@@ -145,8 +141,8 @@ class ProviderKeyPrecedenceTests(unittest.TestCase):
             "ALLOW_SHARED_SCANNER_KEY": "true",
         }
         with patch.dict("os.environ", env):
-            self.assertEqual(get_provider_key(db, GeminiVisionProvider(), user_id=1), "goog-key")
-            self.assertEqual(get_provider_key(db, OpenAIVisionProvider(), user_id=1), "sk-key")
+            self.assertEqual(ScanProvider("gemini").credential(db, 1), "goog-key")
+            self.assertEqual(ScanProvider("openai").credential(db, 1), "sk-key")
 
     def test_sharing_defaults_to_off(self):
         with patch.dict("os.environ", {}, clear=True):
