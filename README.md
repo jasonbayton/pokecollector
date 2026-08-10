@@ -264,6 +264,9 @@ The **Users** tab is only visible to admin users and only while multi-user mode 
 | `ADMIN_PASSWORD` | Password for the bootstrap admin account | Random, optionally logged |
 | `GEMINI_API_KEY` | Initial Gemini key for the admin user; other users configure their own key in Settings | *(empty)* |
 | `GEMINI_MODEL` | Gemini model used by the card scanner. Change this if Google retires the default model for new API keys. | `gemini-flash-latest` |
+| `OPENAI_API_KEY` | Initial OpenAI key for the admin user; other users configure their own key in Settings. Leave empty for a local endpoint that needs no authentication. | *(empty)* |
+| `OPENAI_BASE_URL` | OpenAI-compatible endpoint for the card scanner. Point it at a local server such as Ollama, llama.cpp or LM Studio (for example `http://127.0.0.1:11434/v1`). Deliberately an administrator setting: a user-supplied backend URL would let any account direct the server at an arbitrary host. | `https://api.openai.com/v1` |
+| `OPENAI_MODEL` | Model used when the scanner provider is set to OpenAI. Must be vision capable. | `gpt-4o-mini` |
 | `SCAN_TRACE_DIR` | Enables consent-controlled scanner diagnostics when set to a writable container path. With the standard compose volume, use `/app/data/scan-traces`. Each user must still opt in separately in Settings. | *(empty / disabled)* |
 | `SCAN_TRACE_STORAGE_DIR` | Stable cleanup path for previously stored scanner diagnostics. Standard Docker Compose sets this to `/app/data/scan-traces`; custom deployments should keep it pointed at the storage location even when `SCAN_TRACE_DIR` is unset. | `/app/data/scan-traces` with Docker Compose |
 | `TELEGRAM_BOT_TOKEN` | Initial Telegram bot token for the admin user | *(empty)* |
@@ -360,7 +363,7 @@ The old nested `pokemon-tcg-collection/` layout is no longer used.
 | Backend | Python 3.11, FastAPI, SQLAlchemy, APScheduler, Pydantic |
 | Database | PostgreSQL 18 |
 | Card Data | [TCGdex](https://tcgdex.dev/) |
-| AI Scanner | Google Gemini, configurable via `GEMINI_MODEL` |
+| AI Scanner | Google Gemini (default) or any OpenAI-compatible vision endpoint, including local Ollama, llama.cpp and LM Studio. Each user picks a provider in Settings; the endpoint is configured by the administrator. |
 | Deploy | Docker + Docker Compose |
 
 ---
