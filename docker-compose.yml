@@ -60,6 +60,10 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # Lets OPENAI_BASE_URL reach a model running on the Docker host. Automatic on
+    # Docker Desktop, but Linux Docker Engine needs it stated.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./backups:/app/backups
       - ./data/pokedex-images:/app/data/pokedex-images
