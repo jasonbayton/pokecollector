@@ -28,6 +28,10 @@ SCAN_TRACE_STORAGE_ENV = "SCAN_TRACE_STORAGE_DIR"
 
 _SENSITIVE_ERROR_PATTERNS = (
     (re.compile(r"AIza[0-9A-Za-z_-]{20,}"), "[REDACTED_API_KEY]"),
+    # OpenAI-style keys. Upstream error text is passed through to the user and
+    # recorded here, and some endpoints echo the offending key back in it, so the
+    # bare form has to be caught and not only the Authorization header below.
+    (re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{16,}"), "[REDACTED_API_KEY]"),
     (
         re.compile(r"(?i)((?:authorization|x-goog-api-key)\s*[:=]\s*)(?:bearer\s+)?[^\s,;]+"),
         r"\1[REDACTED]",
