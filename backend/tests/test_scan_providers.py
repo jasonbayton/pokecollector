@@ -328,5 +328,25 @@ class CredentialGateTests(_Fixture, unittest.TestCase):
         self.assertTrue(ScanProvider(GEMINI).requires_credential())
 
 
+@unittest.skipUnless(DEPS, "FastAPI/SQLAlchemy are not installed in this environment")
+class TraceRedactionTests(unittest.TestCase):
+    """Upstream error text is echoed into the detail and recorded to disk, and
+    some endpoints quote the offending key back at you."""
+
+    def test_an_openai_key_is_redacted_from_a_recorded_error(self):
+        from services.scan_trace import _redact_error
+
+        message = "Incorrect API key provided: sk-proj-abcdefghijklmnopqrstuvwxyz012345"
+        redacted = _redact_error(message)
+        self.assertNotIn("sk-proj-abcdefghijklmnopqrstuvwxyz012345", redacted)
+        self.assertIn("[REDACTED_API_KEY]", redacted)
+
+    def test_a_gemini_key_is_still_redacted(self):
+        from services.scan_trace import _redact_error
+
+        redacted = _redact_error("key AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZ0123 failed")
+        self.assertNotIn("AIzaSyABCDEFGHIJKLMNOPQRSTUVWXYZ0123", redacted)
+
+
 if __name__ == "__main__":
     unittest.main()
