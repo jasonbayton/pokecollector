@@ -387,6 +387,14 @@ export default function Settings() {
     queryFn: () => getSetting('scanner_provider').catch(() => ({ value: 'gemini' })),
   })
 
+  const { data: keyRequiredData } = useQuery({
+    queryKey: ['setting', 'scanner_key_required'],
+    queryFn: () => getSetting('scanner_key_required').catch(() => ({ value: 'true' })),
+  })
+  // A self-hosted endpoint needs no credential, so "scanning will fail" would be
+  // wrong there. The backend knows; the browser cannot see OPENAI_BASE_URL.
+  const scannerKeyRequired = keyRequiredData?.value !== 'false'
+
   const { data: visualDefaultData } = useQuery({
     queryKey: ['setting', 'scanner_visual_verification_default'],
     queryFn: () => getSetting('scanner_visual_verification_default').catch(() => ({ value: 'true' })),
@@ -1124,7 +1132,7 @@ export default function Settings() {
                     { value: 'openai', label: t('settings.scannerProviderOpenai') },
                   ]}
                 />
-                {!activeProviderHasKey && (
+                {scannerKeyRequired && !activeProviderHasKey && (
                   <p className="mt-2 text-xs opacity-80">⚠️ {t('settings.scannerNoKey')}</p>
                 )}
               </SettingsRow>
