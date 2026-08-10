@@ -269,7 +269,7 @@ The **Users** tab is only visible to admin users and only while multi-user mode 
 |----------|-------------|---------|
 | `ADMIN_USERNAME` | Username for the bootstrap admin account | `admin` |
 | `ADMIN_PASSWORD` | Password for the bootstrap admin account | Random, optionally logged |
-| `GEMINI_API_KEY` | Initial Gemini key for the admin user; other users configure their own key in Settings | *(empty)* |
+| `GEMINI_API_KEY` | Installation-wide Gemini key, used for any account that has not set its own in Settings. Leave empty to require a per-user key. | *(empty)* |
 | `GEMINI_MODEL` | Gemini model used by the card scanner. Change this if Google retires the default model for new API keys. | `gemini-flash-latest` |
 | `OPENAI_API_KEY` | Installation-wide OpenAI key, used for any account that has not set its own in Settings. Leave empty to require a per-user key. | *(empty)* |
 | `OPENAI_BASE_URL` | OpenAI-compatible endpoint for the card scanner. Point it at a local server such as Ollama, llama.cpp or LM Studio (for example `http://host.docker.internal:11434/v1` when the model runs on the Docker host, or `http://127.0.0.1:11434/v1` for a non-container install). Deliberately an administrator setting: a user-supplied backend URL would let any account direct the server at an arbitrary host. | `https://api.openai.com/v1` |

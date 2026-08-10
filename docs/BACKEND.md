@@ -226,7 +226,7 @@ Important behavior:
 - Supported TCGdex sync language codes are centralized in `services/tcgdex_languages.py`. Optional extra languages are `fr`, `es`, `es-mx`, `it`, `pt`, `pt-br`, `pt-pt`, `nl`, `pl`, `ru`, `ja`, `ko`, `zh-tw`, `id`, `th`, and `zh-cn` in addition to the default `en,de`.
 - English is the preferred cross-language fallback source for missing data, images, and prices by exact TCGdex ID. The backend does not guess English replacements by card name for regional-only cards.
 - Admin users can receive initial fallback values from env vars for Telegram and Gemini
-- `recognize.py` intentionally reads Gemini only from the current user's `UserSetting`; there is no cross-user fallback
+- Scanner keys are read from the current user's `UserSetting` first, then the installation environment key when one is set, so an operator provides a key for everyone or for no one.
 - `scan_diagnostics_enabled` is off by default and is effective only when the server configures `SCAN_TRACE_DIR`
 
 ## Sync & Backup Behavior

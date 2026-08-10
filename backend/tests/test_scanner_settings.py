@@ -152,6 +152,43 @@ class ProviderKeyPrecedenceTests(unittest.TestCase):
 
 
 @skip_without_deps
+class ProviderMigrationTests(unittest.TestCase):
+    """The provider used to be one global choice. On upgrade every account must
+    keep the choice that was in force, or an installation on OpenAI silently
+    reverts to Gemini."""
+
+    def test_the_global_choice_becomes_every_users_choice(self):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from database import Base, migrate_global_scanner_provider
+        from models import Setting, User, UserSetting
+        import database as database_module
+
+        engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(engine)
+        Session = sessionmaker(bind=engine)
+        original = database_module.SessionLocal
+        database_module.SessionLocal = Session
+        try:
+            db = Session()
+            db.add(User(username="jason", hashed_password="x", role="admin", is_active=True))
+            db.add(User(username="mika", hashed_password="x", role="trainer", is_active=True))
+            db.add(Setting(key="scanner_provider", value="openai"))
+            db.commit()
+            db.close()
+
+            migrate_global_scanner_provider()
+
+            db = Session()
+            rows = db.query(UserSetting).filter(UserSetting.key == "scanner_provider").all()
+            self.assertEqual(len(rows), 2, "every account keeps the choice in force")
+            self.assertTrue(all(r.value == "openai" for r in rows))
+            db.close()
+        finally:
+            database_module.SessionLocal = original
+
+
+@skip_without_deps
 class InstallationProviderTests(unittest.TestCase):
     """SCANNER_PROVIDER is displayed as configured, so it has to be the one that
     actually runs for accounts that have not chosen."""

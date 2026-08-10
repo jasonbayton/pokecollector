@@ -231,7 +231,10 @@ def _get_user_settings(db: Session, user_id: int) -> dict:
         # Scanner keys fall back to the installation key for every account, so
         # every account is told one is configured. Other environment-backed
         # settings stay admin-only, as before.
-        if key not in SCANNER_KEY_SETTINGS and not is_admin:
+        # Scanner keys and the scanner provider are installation-wide fallbacks
+        # that apply to every account, so every account is shown what it will
+        # actually use. Other environment-backed settings stay admin-only.
+        if key not in SCANNER_KEY_SETTINGS and key != SCANNER_PROVIDER_SETTING and not is_admin:
             continue
         env_value = os.environ.get(env_name, "").strip()
         if env_value:

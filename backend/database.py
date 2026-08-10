@@ -887,6 +887,41 @@ def init_db():
     finally:
         db.close()
 
+    migrate_global_scanner_provider()
+
+
+def migrate_global_scanner_provider():
+    """Give every account the provider choice that was in force before upgrade.
+
+    The scanner provider used to be one global, admin-set choice. It is now per
+    user, and the resolver reads user_settings then the environment, so an
+    installation that had chosen OpenAI would silently revert to Gemini.
+    """
+    db = SessionLocal()
+    try:
+        from models import UserSetting
+
+        global_row = db.query(Setting).filter(Setting.key == "scanner_provider").first()
+        if global_row and (global_row.value or "").strip():
+            value = global_row.value.strip().lower()
+            for user in db.query(User).all():
+                already = db.query(UserSetting).filter(
+                    UserSetting.user_id == user.id,
+                    UserSetting.key == "scanner_provider",
+                ).first()
+                if already:
+                    continue
+                db.add(UserSetting(user_id=user.id, key="scanner_provider", value=value))
+            # The global row is left in place: harmless once unread, and keeping
+            # it means a rollback to the previous release still finds it.
+            db.commit()
+            logger.info("Migrated global scanner_provider=%s to per-user settings", value)
+    except Exception as e:
+        db.rollback()
+        logger.warning("Scanner provider migration: %s", e)
+    finally:
+        db.close()
+
 
 def get_setting(key: str, default=None):
     """Get a single setting value from the database."""

@@ -234,7 +234,7 @@ Current frontend state layers:
 
 - Used for smart scanner recognition
 - Key is read per user from `user_settings`
-- Provider is chosen by the admin-only `scanner_provider` setting, then `SCANNER_PROVIDER`, then Gemini
+- Provider is chosen per user in Settings, then the installation `SCANNER_PROVIDER`, then Gemini.
 - Gemini model is configurable through `GEMINI_MODEL` and defaults to `gemini-flash-latest`
 - OpenAI model is configurable through `OPENAI_MODEL` and defaults to `gpt-4o-mini`
 - The OpenAI endpoint is configurable through `OPENAI_BASE_URL`, so any OpenAI-compatible API works, including a local model served by Ollama, llama.cpp or LM Studio. Such endpoints usually have no credential, so the API key requirement is lifted when the base URL is not the hosted default
