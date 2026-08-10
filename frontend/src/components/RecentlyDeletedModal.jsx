@@ -46,12 +46,13 @@ export default function RecentlyDeletedModal({ isOpen, onClose }) {
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={t('collection.deleted.title')} size="lg">
-      <p className="mb-3 text-sm text-text-secondary">{t('collection.deleted.subtitle')}</p>
+      <div className="p-4 sm:p-5 space-y-4">
+      <p className="text-sm text-text-secondary">{t('collection.deleted.subtitle')}</p>
 
-      {isLoading && <p className="py-6 text-center text-sm text-text-muted">{t('common.loading')}</p>}
+      {isLoading && <p className="text-center text-sm text-text-muted">{t('common.loading')}</p>}
 
       {isError && (
-        <div className="py-6 text-center">
+        <div className="text-center">
           <p className="text-sm text-brand-red">{t('common.error')}</p>
           <button type="button" onClick={() => refetch()} className="btn-ghost mt-2 text-sm">
             {t('common.retry')}
@@ -60,7 +61,7 @@ export default function RecentlyDeletedModal({ isOpen, onClose }) {
       )}
 
       {!isLoading && !isError && entries.length === 0 && (
-        <p className="py-6 text-center text-sm text-text-muted">{t('collection.deleted.empty')}</p>
+        <p className="text-center text-sm text-text-muted">{t('collection.deleted.empty')}</p>
       )}
 
       <div className="space-y-2">
@@ -108,6 +109,7 @@ export default function RecentlyDeletedModal({ isOpen, onClose }) {
             </div>
           )
         })}
+      </div>
       </div>
     </Modal>
   )
