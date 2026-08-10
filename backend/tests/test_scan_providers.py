@@ -118,6 +118,7 @@ class ModelSelectionTests(_Fixture, unittest.TestCase):
     """Users pick their own model; the installation setting is the fallback."""
 
     def test_no_choice_means_the_installation_model(self):
+        self._set("scanner_provider", "openai")
         with patch.dict(os.environ, {"OPENAI_MODEL": "gpt-4o-mini"}):
             self.assertEqual(get_provider(self.db, self.user.id).model(), "gpt-4o-mini")
 
@@ -133,6 +134,7 @@ class ModelSelectionTests(_Fixture, unittest.TestCase):
 
     def test_whitespace_is_not_a_model(self):
         # Otherwise it would be sent upstream as the model name.
+        self._set("scanner_provider", "openai")
         self._set("scanner_model", "   ")
         with patch.dict(os.environ, {"OPENAI_MODEL": "gpt-4o-mini"}):
             self.assertEqual(get_provider(self.db, self.user.id).model(), "gpt-4o-mini")
@@ -147,6 +149,7 @@ class ModelSelectionTests(_Fixture, unittest.TestCase):
         self.assertEqual(client.calls[0]["json"]["model"], "gpt-5.6-luna")
 
     def test_the_installation_model_is_reported_separately(self):
+        self._set("scanner_provider", "openai")
         self._set("scanner_model", "gpt-5.6-luna")
         with patch.dict(os.environ, {"OPENAI_MODEL": "gpt-4o-mini"}):
             provider = get_provider(self.db, self.user.id)
