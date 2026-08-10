@@ -824,12 +824,35 @@ def migrate_custom_card(
             binder_card.card_id = composite_api_card_id
     db.flush()
 
-    # 5. Update the match before deleting the old custom card so the FK no longer points at it
+    # 5. Follow the card into the records that reference it but are not part of
+    # a collection: product links, their ledger and trade history. Deleting a
+    # manual card nulls these, because the card is gone and only the snapshot
+    # survives. Migration is the opposite case: the card is not gone, it has
+    # become the catalogue card, so the reference should follow it. Leaving
+    # them behind meant an ON DELETE SET NULL silently cut a product or a
+    # recorded trade loose from the card it was about, with nothing raised.
+    for model in (ProductCard, ProductLedgerEntry, TradeItem):
+        db.query(model).filter(
+            model.card_id == custom_card_id
+        ).update({"card_id": composite_api_card_id}, synchronize_session=False)
+
+    # 6. Drop the manual card's price history rather than carrying it over. The
+    # catalogue card has properly sourced history of its own, and the two
+    # cannot be merged anyway: price_history is unique on (card_id, date), so
+    # re-pointing a manual row onto a date the catalogue already covers would
+    # fail the constraint. Its card_id is also NOT NULL with no cascade, so
+    # leaving these rows in place made the delete below fail outright.
+    db.query(PriceHistory).filter(
+        PriceHistory.card_id == custom_card_id
+    ).delete(synchronize_session=False)
+    db.flush()
+
+    # 7. Update the match before deleting the old custom card so the FK no longer points at it
     match.custom_card_id = composite_api_card_id
     match.api_card_id = api_card_id
     match.status = "migrated"
 
-    # 6. Delete the old custom card
+    # 8. Delete the old custom card
     old_card = db.query(Card).filter(Card.id == custom_card_id).first()
     if old_card:
         db.delete(old_card)
