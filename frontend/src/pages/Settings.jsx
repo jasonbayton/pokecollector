@@ -315,6 +315,11 @@ export default function Settings() {
 
   const [geminiKey, setGeminiKey] = useState('')
   const [geminiDirty, setGeminiDirty] = useState(false)
+  const [scannerProvider, setScannerProvider] = useState('gemini')
+  const [openaiKey, setOpenaiKey] = useState('')
+  const [openaiDirty, setOpenaiDirty] = useState(false)
+  const [visualVerification, setVisualVerification] = useState(true)
+  const [visualSaving, setVisualSaving] = useState(false)
   const [backupOptions, setBackupOptions] = useState(['full'])
   const [debugModeEnabled, setDebugModeEnabled] = useState(false)
   const [scanDiagnosticsSaving, setScanDiagnosticsSaving] = useState(false)
@@ -352,6 +357,21 @@ export default function Settings() {
   const { data: geminiKeyData } = useQuery({
     queryKey: ['setting', 'gemini_api_key'],
     queryFn: () => getSetting('gemini_api_key').catch(() => ({ value: '' })),
+  })
+
+  const { data: openaiKeyData } = useQuery({
+    queryKey: ['setting', 'openai_api_key'],
+    queryFn: () => getSetting('openai_api_key').catch(() => ({ value: '' })),
+  })
+
+  const { data: scannerProviderData } = useQuery({
+    queryKey: ['setting', 'scanner_provider'],
+    queryFn: () => getSetting('scanner_provider').catch(() => ({ value: 'gemini' })),
+  })
+
+  const { data: visualVerificationData } = useQuery({
+    queryKey: ['setting', 'scanner_visual_verification'],
+    queryFn: () => getSetting('scanner_visual_verification').catch(() => ({ value: '' })),
   })
 
   // Public profile
@@ -426,6 +446,23 @@ export default function Settings() {
   useEffect(() => {
     if (geminiKeyData?.value !== undefined && !geminiDirty) setGeminiKey(geminiKeyData.value)
   }, [geminiKeyData])
+
+  useEffect(() => {
+    if (openaiKeyData?.value !== undefined && !openaiDirty) setOpenaiKey(openaiKeyData.value)
+  }, [openaiKeyData])
+
+  useEffect(() => {
+    if (scannerProviderData?.value) setScannerProvider(scannerProviderData.value)
+  }, [scannerProviderData])
+
+  useEffect(() => {
+    // Absent means "use the provider's default", which is on for Gemini and off
+    // for a local model that usually cannot do the multi-image comparison.
+    const stored = visualVerificationData?.value
+    if (stored === undefined) return
+    if (stored === '') setVisualVerification(scannerProvider === 'gemini')
+    else setVisualVerification(stored === 'true')
+  }, [visualVerificationData, scannerProvider])
 
   useEffect(() => {
     setDebugModeEnabled(settings.debug_mode === 'true')
@@ -531,6 +568,21 @@ export default function Settings() {
       toast.success(t('settings.saved'))
     } catch {
       toast.error(t('settings.saveFailed'))
+    }
+  }
+
+  const handleScannerProviderChange = async (value) => {
+    setScannerProvider(value)
+    await saveSetting('scanner_provider', value)
+  }
+
+  const handleVisualVerificationToggle = async (enabled) => {
+    setVisualSaving(true)
+    setVisualVerification(enabled)
+    try {
+      await saveSetting('scanner_visual_verification', enabled ? 'true' : 'false')
+    } finally {
+      setVisualSaving(false)
     }
   }
 

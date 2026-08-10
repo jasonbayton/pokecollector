@@ -24,6 +24,7 @@ try:
         openai_chat_completions_url,
         openai_requires_key,
         post_openai_chat,
+        safe_upstream_detail,
         resolve_provider_name,
         text_part,
         visual_verification_enabled,
@@ -235,6 +236,30 @@ class ErrorMappingTests(unittest.TestCase):
             with self.assertRaises(HTTPException) as caught:
                 self._call([_FakeResponse(401, {"error": {"message": "bad key"}})])
         self.assertEqual(caught.exception.status_code, 400)
+
+    def test_an_auth_error_never_echoes_the_upstream_text(self):
+        # This is the class where endpoints quote the offending credential back,
+        # and the detail is persisted as a queue error and logged.
+        with patch.dict(os.environ, {"OPENAI_BASE_URL": DEFAULT_OPENAI_BASE_URL}):
+            with self.assertRaises(HTTPException) as caught:
+                self._call([_FakeResponse(401, {"error": {
+                    "message": "Invalid API key: my-company-secret-value"}})])
+        self.assertNotIn("my-company-secret-value", str(caught.exception.detail))
+
+    def test_a_rate_limit_carries_the_metadata_the_queue_reads(self):
+        # scan_queue pulls these by getattr; without them a rate-limited item is
+        # rescheduled with no backoff at all.
+        with self.assertRaises(HTTPException) as caught:
+            self._call([_FakeResponse(429, {}, {"retry-after": "12"})])
+        self.assertEqual(getattr(caught.exception, "retry_after_seconds", None), 12.0)
+        self.assertEqual(getattr(caught.exception, "retry_reason", None), "rate_limit")
+
+    def test_upstream_text_is_redacted_and_bounded(self):
+        resp = _FakeResponse(500, {"error": {"message":
+            "boom sk-proj-abcdefghijklmnopqrstuvwxyz012345 " + "x" * 500}})
+        detail = safe_upstream_detail(resp)
+        self.assertNotIn("sk-proj-abcdefghijklmnopqrstuvwxyz012345", detail)
+        self.assertLessEqual(len(detail), 200)
 
     def test_a_missing_model_points_at_the_configuration(self):
         with self.assertRaises(HTTPException) as caught:

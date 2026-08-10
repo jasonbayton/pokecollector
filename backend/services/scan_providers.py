@@ -115,6 +115,36 @@ def visual_verification_enabled(db: Session, user_id: int | None, provider: str)
     return provider == GEMINI
 
 
+class ProviderRateLimitError(HTTPException):
+    """A 429 carrying the retry metadata scan_queue reads off the exception.
+
+    scan_queue._scan_error_from_http() pulls retry_after_seconds and
+    retry_reason by getattr, so a plain HTTPException would be retried with no
+    backoff at all.
+    """
+
+    def __init__(self, *, retry_after_seconds: float | None, detail: str):
+        self.retry_after_seconds = float(retry_after_seconds or 0.0)
+        self.retry_reason = "rate_limit"
+        headers = None
+        if retry_after_seconds:
+            headers = {"Retry-After": str(max(1, int(self.retry_after_seconds + 0.999)))}
+        super().__init__(status_code=429, detail=detail, headers=headers)
+
+
+def safe_upstream_detail(resp: httpx.Response, *, limit: int = 200) -> str:
+    """Upstream error text, redacted and bounded.
+
+    Provider messages are echoed into API responses, persisted as queue-item
+    errors and logged. A compatible endpoint that reports "Invalid API key:
+    <secret>" would otherwise write that secret to all three.
+    """
+    from services.scan_trace import redact_sensitive
+
+    message = redact_sensitive(openai_error_message(resp)).strip()
+    return message[:limit]
+
+
 def openai_error_message(resp: httpx.Response) -> str:
     """Best-effort upstream detail, without assuming the error envelope."""
     try:
@@ -218,27 +248,25 @@ async def post_openai_chat(
             resp = await client.post(url, headers=headers, json=payload)
 
             if resp.status_code == 429:
-                retry_after = openai_retry_after_seconds(resp)
                 detail = "The scanner provider is rate limited. Please try again shortly."
-                upstream = openai_error_message(resp)
+                upstream = safe_upstream_detail(resp)
                 if upstream:
                     detail = f"{detail} Provider reports: {upstream}"
-                raise HTTPException(
-                    status_code=429,
+                raise ProviderRateLimitError(
+                    retry_after_seconds=openai_retry_after_seconds(resp),
                     detail=detail,
-                    headers={"Retry-After": str(int(retry_after))} if retry_after else None,
                 )
             if resp.status_code in {400, 401, 403}:
-                upstream = openai_error_message(resp)
+                # Deliberately no upstream text on the authentication classes.
+                # This is exactly where endpoints quote the offending credential
+                # back, and this detail is persisted and logged downstream.
                 if openai_requires_key():
                     detail = "The OpenAI API key was rejected. Please check it in Settings."
                 else:
                     detail = "The scanner endpoint rejected the request."
-                if upstream:
-                    detail = f"{detail} Provider reports: {upstream}"
                 raise HTTPException(status_code=400, detail=detail)
             if resp.status_code == 404:
-                upstream = openai_error_message(resp)
+                upstream = safe_upstream_detail(resp)
                 detail = (
                     "The scanner model was not found at this endpoint. "
                     "Check OPENAI_MODEL and OPENAI_BASE_URL."
@@ -255,7 +283,7 @@ async def post_openai_chat(
                     detail="The scanner provider is temporarily unavailable. Please try again shortly.",
                 )
             if resp.is_error:
-                upstream = openai_error_message(resp)
+                upstream = safe_upstream_detail(resp)
                 detail = f"The scanner request failed ({resp.status_code})."
                 if upstream:
                     detail = f"{detail} Provider reports: {upstream}"
