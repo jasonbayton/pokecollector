@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -162,9 +163,22 @@ def _coerce_setting_value(key: str, value) -> str:
         # value of spaces means "use the installation default" rather than being
         # sent upstream as a model name, and bounded so it cannot be used to
         # stuff arbitrary content into the request.
-        model = str(value).strip()
+        if value is None:
+            return ""
+        if not isinstance(value, str):
+            raise HTTPException(status_code=422, detail="Model must be text.")
+        model = value.strip()
+        if not model:
+            return ""
         if len(model) > 100:
             raise HTTPException(status_code=422, detail="Model name is too long.")
+        # Restricted to the shape model identifiers actually take, so the value
+        # is safe wherever it lands, including a URL path for Gemini.
+        if not re.fullmatch(r"[A-Za-z0-9._:/-]+", model):
+            raise HTTPException(
+                status_code=422,
+                detail="Model name may only contain letters, numbers and . _ : / -",
+            )
         return model
     if key == VISUAL_VERIFICATION_SETTING:
         return "true" if str(value).strip().lower() in {"true", "1", "yes", "on"} else "false"

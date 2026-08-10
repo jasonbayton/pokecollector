@@ -343,8 +343,9 @@ async def post_openai_chat(
                 raise HTTPException(
                     status_code=502,
                     detail=(
-                        "The scanner model was not found at this endpoint. "
-                        "Check OPENAI_MODEL and OPENAI_BASE_URL."
+                        f"The scanner model \"{self.model()}\" was not found at this "
+                        "endpoint. Change it in Settings, or ask an administrator to "
+                        "check the configured model and endpoint."
                     ),
                 )
             if resp.status_code in OPENAI_TRANSIENT_STATUS_CODES:
@@ -478,7 +479,9 @@ class ScanProvider:
 
             response = await post_gemini_generate(
                 client,
-                build_gemini_generate_url(),
+                # The chosen model has to reach the URL, or the request runs on
+                # the installation model while diagnostics record the user's.
+                build_gemini_generate_url(self.model()),
                 api_key,
                 {"contents": [{"parts": _gemini_parts(parts)}]},
                 max_attempts=max_attempts,

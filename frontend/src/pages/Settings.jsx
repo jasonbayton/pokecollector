@@ -646,6 +646,10 @@ export default function Settings() {
     try {
       await setSetting('scanner_provider', value)
       queryClient.invalidateQueries({ queryKey: ['setting', 'scanner_provider'] })
+      // Both of these are derived from the provider, so a stale cache would show
+      // the previous provider's default model and visual-verification state.
+      queryClient.invalidateQueries({ queryKey: ['setting', 'scanner_model_default'] })
+      queryClient.invalidateQueries({ queryKey: ['setting', 'scanner_visual_verification_default'] })
       toast.success(t('settings.saved'))
     } catch {
       // Put the control back, or it shows a provider the server never accepted.
@@ -1168,9 +1172,19 @@ export default function Settings() {
                   {scannerModelDirty && (
                     <button
                       onClick={async () => {
-                        if (!(await saveSetting('scanner_model', scannerModel))) return
+                        try {
+                          await setSetting('scanner_model', scannerModel)
+                        } catch {
+                          // Stay dirty so an unsaved value is never presented as saved.
+                          toast.error(t('settings.saveFailed'))
+                          return
+                        }
                         setScannerModelDirty(false)
                         queryClient.invalidateQueries({ queryKey: ['setting', 'scanner_model'] })
+                        // The placeholder shows the installation default, which the provider
+                        // determines, so refresh it too.
+                        queryClient.invalidateQueries({ queryKey: ['setting', 'scanner_model_default'] })
+                        toast.success(t('settings.saved'))
                       }}
                       className="btn-primary-sm flex-shrink-0"
                     >

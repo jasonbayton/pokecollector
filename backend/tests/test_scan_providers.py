@@ -114,47 +114,104 @@ class ProviderResolutionTests(_Fixture, unittest.TestCase):
 
 
 @unittest.skipUnless(DEPS, "FastAPI/SQLAlchemy are not installed in this environment")
+class ModelValidationTests(unittest.TestCase):
+    """The stored value is exercised through the real coercion path, not written
+    straight into the database as the other tests do."""
+
+    def _coerce(self, value):
+        from api.settings import _coerce_setting_value
+        from services.scan_providers import SCANNER_MODEL_SETTING
+
+        return _coerce_setting_value(SCANNER_MODEL_SETTING, value)
+
+    def test_a_normal_model_name_is_kept(self):
+        self.assertEqual(self._coerce("  gpt-5.6-luna  "), "gpt-5.6-luna")
+
+    def test_blank_means_the_installation_default(self):
+        self.assertEqual(self._coerce("   "), "")
+        self.assertEqual(self._coerce(None), "")
+
+    def test_non_text_is_rejected(self):
+        for bad in ([1, 2], {"a": 1}, 42, True):
+            with self.subTest(bad=bad):
+                with self.assertRaises(HTTPException):
+                    self._coerce(bad)
+
+    def test_control_characters_are_rejected(self):
+        for bad in ["gpt\n4o", "gpt 4o", "gpt\t4o", "../etc/passwd\x00"]:
+            with self.subTest(bad=bad):
+                with self.assertRaises(HTTPException):
+                    self._coerce(bad)
+
+    def test_an_overlong_name_is_rejected(self):
+        with self.assertRaises(HTTPException):
+            self._coerce("m" * 101)
+
+
+@unittest.skipUnless(DEPS, "FastAPI/SQLAlchemy are not installed in this environment")
 class ModelSelectionTests(_Fixture, unittest.TestCase):
-    """Users pick their own model; the installation setting is the fallback."""
+    """Users pick their own model; the installation setting is the fallback.
+
+    The two values are deliberately different and neither is a real default, so
+    these fail if precedence breaks rather than passing by coincidence.
+    """
+
+    INSTALLATION = "installation-model"
+    CHOSEN = "chosen-model"
 
     def test_no_choice_means_the_installation_model(self):
         self._set("scanner_provider", "openai")
-        with patch.dict(os.environ, {"OPENAI_MODEL": "gpt-5.6-luna"}):
-            self.assertEqual(get_provider(self.db, self.user.id).model(), "gpt-5.6-luna")
+        with patch.dict(os.environ, {"OPENAI_MODEL": self.INSTALLATION}):
+            self.assertEqual(get_provider(self.db, self.user.id).model(), self.INSTALLATION)
 
-    def test_a_users_own_model_is_used(self):
+    def test_a_users_own_model_wins(self):
         self._set("scanner_provider", "openai")
-        self._set("scanner_model", "gpt-5.6-luna")
-        with patch.dict(os.environ, {"OPENAI_MODEL": "gpt-5.6-luna"}):
-            self.assertEqual(get_provider(self.db, self.user.id).model(), "gpt-5.6-luna")
-
-    def test_a_users_model_applies_to_gemini_too(self):
-        self._set("scanner_model", "gemini-3-pro")
-        self.assertEqual(get_provider(self.db, self.user.id).model(), "gemini-3-pro")
+        self._set("scanner_model", self.CHOSEN)
+        with patch.dict(os.environ, {"OPENAI_MODEL": self.INSTALLATION}):
+            self.assertEqual(get_provider(self.db, self.user.id).model(), self.CHOSEN)
 
     def test_whitespace_is_not_a_model(self):
-        # Otherwise it would be sent upstream as the model name.
         self._set("scanner_provider", "openai")
         self._set("scanner_model", "   ")
-        with patch.dict(os.environ, {"OPENAI_MODEL": "gpt-5.6-luna"}):
-            self.assertEqual(get_provider(self.db, self.user.id).model(), "gpt-5.6-luna")
-
-    def test_the_chosen_model_reaches_the_request(self):
-        self._set("scanner_provider", "openai")
-        self._set("scanner_model", "gpt-5.6-luna")
-        provider = get_provider(self.db, self.user.id)
-        client = _FakeClient([_FakeResponse(200, {"choices": [{"message": {"content": "ok"}}]})])
-        with patch.dict(os.environ, {"OPENAI_BASE_URL": LOCAL_URL}):
-            asyncio.run(provider.generate_text(client, "", [text_part("hi")]))
-        self.assertEqual(client.calls[0]["json"]["model"], "gpt-5.6-luna")
+        with patch.dict(os.environ, {"OPENAI_MODEL": self.INSTALLATION}):
+            self.assertEqual(get_provider(self.db, self.user.id).model(), self.INSTALLATION)
 
     def test_the_installation_model_is_reported_separately(self):
         self._set("scanner_provider", "openai")
-        self._set("scanner_model", "gpt-5.6-luna")
-        with patch.dict(os.environ, {"OPENAI_MODEL": "gpt-5.6-luna"}):
+        self._set("scanner_model", self.CHOSEN)
+        with patch.dict(os.environ, {"OPENAI_MODEL": self.INSTALLATION}):
             provider = get_provider(self.db, self.user.id)
-            self.assertEqual(provider.model(), "gpt-5.6-luna")
-            self.assertEqual(provider.installation_model(), "gpt-5.6-luna")
+            self.assertEqual(provider.model(), self.CHOSEN)
+            self.assertEqual(provider.installation_model(), self.INSTALLATION)
+
+    def test_the_chosen_model_reaches_the_openai_request(self):
+        self._set("scanner_provider", "openai")
+        self._set("scanner_model", self.CHOSEN)
+        provider = get_provider(self.db, self.user.id)
+        client = _FakeClient([_FakeResponse(200, {"choices": [{"message": {"content": "ok"}}]})])
+        with patch.dict(os.environ, {"OPENAI_BASE_URL": LOCAL_URL, "OPENAI_MODEL": self.INSTALLATION}):
+            asyncio.run(provider.generate_text(client, "", [text_part("hi")]))
+        self.assertEqual(client.calls[0]["json"]["model"], self.CHOSEN)
+
+    def test_the_chosen_model_reaches_the_gemini_request(self):
+        # Gemini puts the model in the URL, so asserting provider.model() alone
+        # would not have caught the request running on the installation model
+        # while diagnostics recorded the user's choice.
+        self._set("scanner_model", self.CHOSEN)
+        captured = {}
+
+        async def fake_post(client, url, api_key, payload, *, max_attempts=3):
+            captured["url"] = url
+            return _FakeResponse(200, {
+                "candidates": [{"content": {"parts": [{"text": "ok"}]}}],
+            })
+
+        provider = get_provider(self.db, self.user.id)
+        with patch("api.recognize.post_gemini_generate", new=fake_post):
+            with patch.dict(os.environ, {"GEMINI_MODEL": self.INSTALLATION}):
+                asyncio.run(provider.generate_text(_FakeClient([]), "k", [text_part("hi")]))
+        self.assertIn(self.CHOSEN, captured["url"])
+        self.assertNotIn(self.INSTALLATION, captured["url"])
 
 
 @unittest.skipUnless(DEPS, "FastAPI/SQLAlchemy are not installed in this environment")
