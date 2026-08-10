@@ -329,6 +329,35 @@ class CredentialGateTests(_Fixture, unittest.TestCase):
 
 
 @unittest.skipUnless(DEPS, "FastAPI/SQLAlchemy are not installed in this environment")
+class PerUserResolutionTests(_Fixture, unittest.TestCase):
+    """The background drain processes every user's jobs in one pass, so the
+    provider has to be resolved per item owner. Resolving it once per drain would
+    silently scan everyone with whoever happened to be first in the queue."""
+
+    def setUp(self):
+        super().setUp()
+        self.other = User(username="mika", hashed_password="x", role="trainer", is_active=True)
+        self.db.add(self.other)
+        self.db.commit()
+        self.db.add(UserSetting(user_id=self.other.id, key="scanner_provider", value="openai"))
+        self.db.commit()
+
+    def test_two_users_in_one_pass_get_their_own_provider(self):
+        self.assertEqual(get_provider(self.db, self.user.id).name, GEMINI)
+        self.assertEqual(get_provider(self.db, self.other.id).name, OPENAI)
+
+    def test_resolution_is_not_cached_between_users(self):
+        # Interleaved deliberately: a cached first answer would show up here.
+        order = [self.user.id, self.other.id, self.user.id, self.other.id]
+        names = [get_provider(self.db, uid).name for uid in order]
+        self.assertEqual(names, [GEMINI, OPENAI, GEMINI, OPENAI])
+
+    def test_each_user_gets_their_own_visual_default(self):
+        self.assertTrue(visual_verification_enabled(self.db, self.user.id, GEMINI))
+        self.assertFalse(visual_verification_enabled(self.db, self.other.id, OPENAI))
+
+
+@unittest.skipUnless(DEPS, "FastAPI/SQLAlchemy are not installed in this environment")
 class TraceRedactionTests(unittest.TestCase):
     """Upstream error text is echoed into the detail and recorded to disk, and
     some endpoints quote the offending key back at you."""
