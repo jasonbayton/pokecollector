@@ -231,7 +231,9 @@ class ErrorMappingTests(unittest.TestCase):
                                       {"retry-after": "7"})])
         self.assertEqual(caught.exception.status_code, 429)
         self.assertEqual(caught.exception.headers["Retry-After"], "7")
-        self.assertIn("slow down", caught.exception.detail)
+        self.assertEqual(caught.exception.retry_after_seconds, 7.0)
+        # The provider's own wording stays out of the detail.
+        self.assertNotIn("slow down", str(caught.exception.detail))
 
     def test_a_rejected_key_is_a_400_not_a_500(self):
         with patch.dict(os.environ, {"OPENAI_BASE_URL": DEFAULT_OPENAI_BASE_URL}):
@@ -264,9 +266,12 @@ class ErrorMappingTests(unittest.TestCase):
         secret = "my-company-secret-value"
         for status in (429, 404, 500, 502):
             with self.subTest(status=status):
+                body = {"error": {"message": f"Invalid API key: {secret}"}}
+                # 502 is a transient class and is retried, so it needs a second
+                # response to exhaust the attempts.
+                responses = [_FakeResponse(status, body)] * 2
                 with self.assertRaises(HTTPException) as caught:
-                    self._call([_FakeResponse(status, {"error": {
-                        "message": f"Invalid API key: {secret}"}})])
+                    self._call(responses)
                 self.assertNotIn(secret, str(caught.exception.detail))
 
     def test_a_429_without_retry_after_leaves_the_delay_unset(self):
