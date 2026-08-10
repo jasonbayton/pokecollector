@@ -906,6 +906,8 @@ const en = {
     scannerProviderDesc: 'Which vision model reads your card photos.',
     scannerProviderGemini: 'Google Gemini',
     scannerProviderOpenai: 'OpenAI compatible',
+    scannerModel: 'Model',
+    scannerModelDesc: 'Which model reads your photos. Leave empty to use the one this server is set up with. Must be vision capable.',
     openaiApiKey: 'OpenAI API Key',
     openaiApiKeyDesc: 'Leave empty when this server points at a local model that needs no key.',
     visualVerification: 'Check my photo against card images',
