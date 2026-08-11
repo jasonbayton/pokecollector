@@ -15,6 +15,8 @@ import { partitionSettledResults } from '../utils/settledResults'
 import { formatBinderCountSummary } from '../utils/binderCounts'
 import { binderPickerItemsWithQuantities, binderPickerQuantitiesAreValid, binderPickerQuantityMaximum, canConvertWishlistBinder, clampBinderPickerQuantity } from '../utils/binderQuantity'
 import { CardDialog, CardDisplay, CardLegend, withCollectionItemState } from '../components/card-system'
+import BinderLayoutView from '../components/BinderLayoutView'
+import { binderIsMapped } from '../utils/binderSlots'
 import Modal from '../components/ui/Modal'
 
 const SPRITE_BASE_URL = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-v/black-white/animated'
@@ -230,6 +232,8 @@ export default function BinderDetail() {
   const [binderFilterQuery, setBinderFilterQuery] = useState('')
   const [binderSortBy, setBinderSortBy] = useState('recent')
   const [badgeLegendOpen, setBadgeLegendOpen] = useState(false)
+  // A mapped binder can be read as a list or as its physical pages.
+  const [showLayout, setShowLayout] = useState(false)
   const [selectedCard, setSelectedCard] = useState(null)
   const [selectedCardTab, setSelectedCardTab] = useState('binder')
   const [showCsvImportModal, setShowCsvImportModal] = useState(false)
@@ -1030,7 +1034,28 @@ export default function BinderDetail() {
         </div>
       )}
 
-      {cards.length === 0 ? (
+      {binderIsMapped(binder) && (
+        <div className="mb-3 flex gap-1 rounded-xl border border-border bg-bg-card p-1">
+          <button
+            type="button"
+            onClick={() => setShowLayout(false)}
+            className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${!showLayout ? 'bg-bg-elevated text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
+          >
+            {t('binders.layout.listTab')}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowLayout(true)}
+            className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${showLayout ? 'bg-bg-elevated text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
+          >
+            {t('binders.layout.tab')}
+          </button>
+        </div>
+      )}
+
+      {showLayout && binderIsMapped(binder) ? (
+        <BinderLayoutView binderId={parseInt(binderId)} binder={binder} cards={cards} />
+      ) : cards.length === 0 ? (
         <div className="card text-center py-20">
           <p className="text-text-muted">
             {isWishlist ? '⭐ No cards in this wishlist binder yet' : '📦 No cards in this binder yet'}

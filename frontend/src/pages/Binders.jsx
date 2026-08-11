@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Trash2, Edit2, BookOpen, Star, Package, Check, X, Library, Heart, Globe, Lock, Copy } from 'lucide-react'
 import { getBinders, createBinder, updateBinder, deleteBinder, getWishlist, getProfile } from '../api/client'
+import { GRID_PRESETS } from '../utils/binderSlots'
 import { useSettings } from '../contexts/SettingsContext'
 import { useConfirmDialog } from '../contexts/ConfirmDialogContext'
 import TabNav from '../components/TabNav'
@@ -28,6 +29,10 @@ function BinderForm({ initial = {}, onSubmit, onCancel, loading }) {
   const [format, setFormat] = useState(initial.format || '')
   const [iconPokemonId, setIconPokemonId] = useState(initial.icon_pokemon_id || null)
   const [showIconPicker, setShowIconPicker] = useState(false)
+  // Page geometry. Both dimensions travel together, so the picker offers a
+  // single choice of size rather than two independent numbers.
+  const [gridRows, setGridRows] = useState(initial.grid_rows || null)
+  const [gridColumns, setGridColumns] = useState(initial.grid_columns || null)
 
   return (
     <div className="space-y-3">
@@ -68,6 +73,31 @@ function BinderForm({ initial = {}, onSubmit, onCancel, loading }) {
           {FORMAT_OPTIONS.map(option => <option key={option} value={option}>{option}</option>)}
         </select>
         <p className="text-xs text-text-muted mt-1.5">{t('binderTypes.formatHint')}</p>
+      </div>
+
+      <div>
+        <label className="text-xs text-text-muted mb-2 block">{t('binders.layout.gridLabel')}</label>
+        <select
+          className="select"
+          value={gridRows && gridColumns ? `${gridRows}x${gridColumns}` : ''}
+          onChange={(event) => {
+            if (!event.target.value) {
+              setGridRows(null)
+              setGridColumns(null)
+              return
+            }
+            const [rows, columns] = event.target.value.split('x').map(Number)
+            setGridRows(rows)
+            setGridColumns(columns)
+          }}
+        >
+          <option value="">{t('binders.layout.gridNone')}</option>
+          {GRID_PRESETS.map(({ rows, columns }) => (
+            <option key={`${rows}x${columns}`} value={`${rows}x${columns}`}>
+              {rows} x {columns}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div>
@@ -121,6 +151,9 @@ function BinderForm({ initial = {}, onSubmit, onCancel, loading }) {
           ...(!isEditing && { binder_type: binderType }),
           format: format || null,
           icon_pokemon_id: iconPokemonId,
+          grid_rows: gridRows,
+          grid_columns: gridColumns,
+          ...(isEditing && !gridRows && initial.grid_rows ? { clear_layout: true } : {}),
         })}
           disabled={!name || loading} className="btn-primary flex-1">
           <Check size={14} /> {loading ? t('common.saving') : t('common.save')}
