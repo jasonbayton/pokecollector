@@ -8,7 +8,7 @@ from api.auth import get_current_user
 from database import get_db
 from models import Binder, BinderCard, Card, Set, PriceHistory, CustomCardMatch, CollectionItem, WishlistItem, User, ImageCache, ProductCard, ProductLedgerEntry, TradeItem
 from schemas import CardBase, CardWithSet, PriceHistoryResponse, CardCustomCreate, CustomCardUpdate, CardCustomImageUpdate
-from services import pokemon_api
+from services import binder_slots, pokemon_api
 from services.card_fallbacks import (
     apply_cross_language_fallbacks,
     build_missing_language_card,
@@ -893,12 +893,17 @@ def migrate_custom_card(
             existing_query = existing_query.filter(BinderCard.collection_item_id == binder_card.collection_item_id)
         existing_binder_card = existing_query.order_by(BinderCard.id.asc()).first()
         if existing_binder_card:
-            existing_binder_card.required_quantity = min(
+            combined_quantity = min(
                 99,
                 max(int(existing_binder_card.required_quantity or 1), 1)
                 + max(int(binder_card.required_quantity or 1), 1),
             )
-            db.delete(binder_card)
+            # The surviving entry inherits the promoted card's pockets. Without
+            # this the physical placements cascade away with the deleted row and
+            # the cards sit in a binder the app can no longer locate them in.
+            binder_slots.merge_binder_cards(
+                db, binder_card, existing_binder_card, combined_quantity
+            )
         else:
             binder_card.card_id = composite_api_card_id
     db.flush()
