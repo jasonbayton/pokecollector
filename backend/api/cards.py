@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from typing import Optional, List
 from api.auth import get_current_user
 from database import get_db
-from models import Binder, BinderCard, Card, Set, PriceHistory, CustomCardMatch, CollectionItem, WishlistItem, User, ImageCache, ProductCard, ProductLedgerEntry, TradeItem
+from models import Binder, BinderCard, Card, Set, DeletedCollectionItem, PriceHistory, CustomCardMatch, CollectionItem, WishlistItem, User, ImageCache, ProductCard, ProductLedgerEntry, TradeItem
 from schemas import CardBase, CardWithSet, PriceHistoryResponse, CardCustomCreate, CustomCardUpdate, CardCustomImageUpdate
 from services import pokemon_api
 from services.card_fallbacks import (
@@ -250,7 +250,13 @@ def _search_by_code_number(
     def query_matching_cards() -> list[Card]:
         filters = [
             Card.set_id.in_(tcg_set_ids),
-            visible_card_filter(db, current_user.id, lang),
+            # Catalogue visibility says nothing about who owns a manual card.
+            # Manual cards are private by default, so filtering on it alone
+            # returned another trainer's card whenever their set and number
+            # happened to match the search. The ordinary search sidesteps this
+            # by excluding custom cards outright; here the owner should still
+            # find their own, so scope by ownership instead.
+            visible_any_card_filter(db, current_user.id, lang),
         ]
         candidates = db.query(Card).filter(*filters).order_by(Card.id.asc()).all()
         return [card for card in candidates if card_number_matches(card.number, card_number)]
@@ -506,9 +512,21 @@ def delete_custom_card(
         )
 
     try:
+        # Binder rows first. binder_cards.collection_item_id is a NO ACTION
+        # foreign key to collection.id, so removing the collection rows while a
+        # binder slot still points at one fails outright on PostgreSQL. SQLite
+        # with foreign keys off, which is what the tests used to run, never
+        # noticed.
+        db.query(BinderCard).filter(BinderCard.card_id == card_id).delete(synchronize_session=False)
         db.query(CollectionItem).filter(CollectionItem.card_id == card_id).delete(synchronize_session=False)
         db.query(WishlistItem).filter(WishlistItem.card_id == card_id).delete(synchronize_session=False)
-        db.query(BinderCard).filter(BinderCard.card_id == card_id).delete(synchronize_session=False)
+        # The recycle bin outlives the collection row it came from, so a card
+        # deleted while an archived copy existed left a permanently
+        # unrestorable "card missing" entry. Promotion already rewrites these;
+        # deletion has no card to rewrite them to, so they go with it.
+        db.query(DeletedCollectionItem).filter(
+            DeletedCollectionItem.card_id == card_id
+        ).delete(synchronize_session=False)
         db.query(PriceHistory).filter(PriceHistory.card_id == card_id).delete(synchronize_session=False)
         db.query(CustomCardMatch).filter(CustomCardMatch.custom_card_id == card_id).delete(synchronize_session=False)
         db.query(ImageCache).filter(
@@ -980,6 +998,13 @@ def migrate_custom_card(
     # leaving these rows in place made the delete below fail outright.
     db.query(PriceHistory).filter(
         PriceHistory.card_id == custom_card_id
+    ).delete(synchronize_session=False)
+
+    # The cached images belong to the manual card's own artwork, keyed by its
+    # id. The catalogue card has its own imagery and its own keys, so these are
+    # simply stranded once the card goes.
+    db.query(ImageCache).filter(
+        ImageCache.image_key.like(f"card:{custom_card_id}:%")
     ).delete(synchronize_session=False)
     db.flush()
 

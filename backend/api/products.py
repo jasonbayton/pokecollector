@@ -814,6 +814,13 @@ def unlink_product_card(
     price_field: str = Query(default="price_trend", description="Cardmarket price field for linked-card valuation"),
 ):
     """Remove an active product-card link without touching collection inventory."""
+    # Take the same first lock every other inventory writer takes:
+    # User -> Trade -> CollectionItem -> ProductCard -> ledger rows.
+    # This path started at ProductCard and reached CollectionItem afterwards,
+    # the opposite order to update_trade, so editing a trade while unlinking
+    # the same product deadlocked in PostgreSQL and one side died with a
+    # DeadlockDetected instead of the intended 409.
+    db.query(User).filter(User.id == current_user.id).with_for_update(of=User).one()
     product = _get_product_or_404(db, current_user, product_id, lock=True)
     # Serialize the history check with sales and trade-outs. Without the row
     # lock, an unlink can read the pre-trade state and delete this provenance

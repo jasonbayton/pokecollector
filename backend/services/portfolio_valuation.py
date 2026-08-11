@@ -15,7 +15,7 @@ from models import (
     ProductPurchase,
 )
 from services.card_values import effective_market_price, normalize_price_field
-from services.card_visibility import visible_card_filter
+from services.card_visibility import visible_any_card_filter
 from services.product_ledger import product_effective_value, product_lifecycle_status
 
 
@@ -117,7 +117,12 @@ def _collection_items(db: Session, user_id: int) -> list[CollectionItem]:
         joinedload(CollectionItem.card)
     ).filter(
         CollectionItem.user_id == user_id,
-        visible_card_filter(db, user_id, "all"),
+        # Catalogue visibility is about synced sets and languages, which a
+        # manual card has none of. Filtering on it dropped the owner's own
+        # manual cards out of snapshots and investment history whenever their
+        # language was not a synced one, so the card showed in the collection
+        # while its value quietly went missing from the portfolio.
+        visible_any_card_filter(db, user_id, "all"),
     ).all()
 
 
