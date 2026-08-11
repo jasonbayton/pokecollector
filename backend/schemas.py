@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List, Any, Literal
 from datetime import datetime, date
+from services.binder_layout import MAX_GRID_DIMENSION, MIN_GRID_DIMENSION
 from services.quantity_limits import MAX_CARD_QUANTITY
 
 
@@ -250,6 +251,10 @@ class BinderCreate(BaseModel):
     binder_type: str = "collection"
     format: Optional[str] = None
     icon_pokemon_id: Optional[int] = None
+    # Both dimensions travel together: a binder is mapped to a physical album
+    # or it is not, and half a grid leaves pocket numbering undefined.
+    grid_rows: Optional[int] = Field(None, ge=MIN_GRID_DIMENSION, le=MAX_GRID_DIMENSION)
+    grid_columns: Optional[int] = Field(None, ge=MIN_GRID_DIMENSION, le=MAX_GRID_DIMENSION)
 
 
 class BinderUpdate(BaseModel):
@@ -260,6 +265,10 @@ class BinderUpdate(BaseModel):
     format: Optional[str] = None
     icon_pokemon_id: Optional[int] = None
     is_public: Optional[bool] = None
+    grid_rows: Optional[int] = Field(None, ge=MIN_GRID_DIMENSION, le=MAX_GRID_DIMENSION)
+    grid_columns: Optional[int] = Field(None, ge=MIN_GRID_DIMENSION, le=MAX_GRID_DIMENSION)
+    # Distinct from leaving the dimensions unset, which means "leave as is".
+    clear_layout: Optional[bool] = None
 
 
 class BinderCardUpdate(BaseModel):
@@ -275,6 +284,39 @@ class BinderPrintOptimizationApply(BaseModel):
     selected_binder_card_ids: Optional[List[int]] = None
 
 
+class BinderSlotPlace(BaseModel):
+    binder_card_id: int
+    page: int = Field(ge=1)
+    pocket: int = Field(ge=1)
+
+
+class BinderSlotMove(BaseModel):
+    from_page: int = Field(ge=1)
+    from_pocket: int = Field(ge=1)
+    to_page: int = Field(ge=1)
+    to_pocket: int = Field(ge=1)
+
+
+class BinderSlotPocket(BaseModel):
+    pocket: int
+    binder_card_id: Optional[int] = None
+
+
+class BinderEntryPlacement(BaseModel):
+    binder_card_id: int
+    placed: int
+
+
+class BinderPageResponse(BaseModel):
+    page: int
+    page_count: int
+    placed_by_entry: List[BinderEntryPlacement] = []
+    grid_rows: int
+    grid_columns: int
+    placed_total: int
+    pockets: List[BinderSlotPocket]
+
+
 class BinderResponse(BaseModel):
     id: int
     name: str
@@ -287,6 +329,9 @@ class BinderResponse(BaseModel):
     card_count: int = 0
     unique_card_count: int = 0
     is_public: bool = False
+    grid_rows: Optional[int] = None
+    grid_columns: Optional[int] = None
+    placed_slot_count: int = 0
 
     class Config:
         from_attributes = True

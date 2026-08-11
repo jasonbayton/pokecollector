@@ -1,11 +1,12 @@
 from sqlalchemy import (
     Column, String, Integer, Float, DateTime, Date, Boolean,
-    CheckConstraint, ForeignKey, Text, JSON, UniqueConstraint, LargeBinary, Index
+    CheckConstraint, ForeignKey, ForeignKeyConstraint, Text, JSON, UniqueConstraint, LargeBinary, Index
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSONB
 from database import Base
+from services.binder_layout import MAX_GRID_DIMENSION, MIN_GRID_DIMENSION
 from services.quantity_limits import MAX_CARD_QUANTITY
 
 POKEDEX_JSON = JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql")
@@ -225,9 +226,23 @@ class Binder(Base):
     icon_pokemon_id = Column(Integer, nullable=True)
     is_public = Column(Boolean, default=False, nullable=False)
     auto_owned_set_id = Column(String, nullable=True)
+    # Physical page geometry. Null means the binder is not mapped to a real
+    # album, which is where every existing binder starts. Both dimensions are
+    # set together or neither is, so pocket numbering is never undefined.
+    grid_rows = Column(Integer, nullable=True)
+    grid_columns = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=func.now())
 
     binder_cards = relationship("BinderCard", back_populates="binder", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        CheckConstraint(
+            "(grid_rows IS NULL AND grid_columns IS NULL) OR "
+            f"(grid_rows BETWEEN {MIN_GRID_DIMENSION} AND {MAX_GRID_DIMENSION} "
+            f"AND grid_columns BETWEEN {MIN_GRID_DIMENSION} AND {MAX_GRID_DIMENSION})",
+            name="ck_binder_grid_dimensions",
+        ),
+    )
 
 
 class BinderCard(Base):
@@ -247,6 +262,53 @@ class BinderCard(Base):
     __table_args__ = (
         CheckConstraint(f"required_quantity >= 1 AND required_quantity <= {MAX_CARD_QUANTITY}", name="ck_binder_card_quantity_range"),
         UniqueConstraint("binder_id", "collection_item_id", name="uq_binder_collection_item"),
+        # Referenced by binder_slots' composite foreign key. PostgreSQL will not
+        # accept a foreign key onto columns lacking a unique constraint, even
+        # though id alone is already the primary key.
+        UniqueConstraint("id", "binder_id", name="uq_binder_cards_id_binder"),
+    )
+
+    slots = relationship(
+        "BinderSlot", back_populates="binder_card", cascade="all, delete-orphan"
+    )
+
+
+class BinderSlot(Base):
+    """Where one physical copy sits: which page of the binder, and which pocket.
+
+    A row rather than a column on BinderCard, because an entry's
+    required_quantity may be far greater than one: a single entry can represent
+    many physical copies, and each copy occupies its own pocket.
+
+    binder_id is denormalised from the parent so pocket uniqueness can be
+    enforced across the whole binder by the database rather than in Python. The
+    composite foreign key keeps that honest: a slot cannot claim a binder its
+    parent entry does not belong to.
+    """
+
+    __tablename__ = "binder_slots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    binder_card_id = Column(Integer, nullable=False)
+    binder_id = Column(Integer, nullable=False)
+    page = Column(Integer, nullable=False)
+    pocket = Column(Integer, nullable=False)
+    placed_at = Column(DateTime, default=func.now())
+
+    binder_card = relationship("BinderCard", back_populates="slots")
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["binder_card_id", "binder_id"],
+            ["binder_cards.id", "binder_cards.binder_id"],
+            ondelete="CASCADE",
+            name="fk_binder_slots_entry",
+        ),
+        UniqueConstraint("binder_id", "page", "pocket", name="uq_binder_slot_position"),
+        CheckConstraint("page >= 1", name="ck_binder_slot_page_positive"),
+        CheckConstraint("pocket >= 1", name="ck_binder_slot_pocket_positive"),
+        Index("ix_binder_slots_entry", "binder_card_id"),
+        Index("ix_binder_slots_binder_page", "binder_id", "page"),
     )
 
 

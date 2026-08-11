@@ -16,6 +16,8 @@ import { formatBinderCountSummary } from '../utils/binderCounts'
 import { binderPickerItemsWithQuantities, binderPickerQuantitiesAreValid, binderPickerQuantityMaximum, canConvertWishlistBinder, clampBinderPickerQuantity } from '../utils/binderQuantity'
 import { MAX_CARD_QUANTITY } from '../utils/quantityLimits'
 import { CardDialog, CardDisplay, CardLegend, withCollectionItemState } from '../components/card-system'
+import BinderLayoutView from '../components/BinderLayoutView'
+import { binderIsMapped } from '../utils/binderSlots'
 import Modal from '../components/ui/Modal'
 
 const SPRITE_BASE_URL = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-v/black-white/animated'
@@ -231,6 +233,8 @@ export default function BinderDetail() {
   const [binderFilterQuery, setBinderFilterQuery] = useState('')
   const [binderSortBy, setBinderSortBy] = useState('recent')
   const [badgeLegendOpen, setBadgeLegendOpen] = useState(false)
+  // A mapped binder can be read as a list or as its physical pages.
+  const [showLayout, setShowLayout] = useState(false)
   const [selectedCard, setSelectedCard] = useState(null)
   const [selectedCardTab, setSelectedCardTab] = useState('binder')
   const [showCsvImportModal, setShowCsvImportModal] = useState(false)
@@ -340,6 +344,7 @@ export default function BinderDetail() {
     onSettled: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['binder-cards', binderId] }),
+        queryClient.invalidateQueries({ queryKey: ['binder-layout', binderId] }),
         queryClient.invalidateQueries({ queryKey: ['binders'] }),
       ])
       invalidateTcgdexFilterLanguages(queryClient)
@@ -393,6 +398,7 @@ export default function BinderDetail() {
     onSuccess: () => {
       toast.success(t('common.remove') + ' ✓')
       queryClient.invalidateQueries({ queryKey: ['binder-cards', binderId] })
+      queryClient.invalidateQueries({ queryKey: ['binder-layout', binderId] })
       invalidateTcgdexFilterLanguages(queryClient)
       queryClient.invalidateQueries({ queryKey: ['binders'] })
     },
@@ -416,6 +422,7 @@ export default function BinderDetail() {
         }
       })
       queryClient.invalidateQueries({ queryKey: ['binder-cards', binderId] })
+      queryClient.invalidateQueries({ queryKey: ['binder-layout', binderId] })
       invalidateTcgdexFilterLanguages(queryClient)
       queryClient.invalidateQueries({ queryKey: ['binders'] })
     },
@@ -474,6 +481,7 @@ export default function BinderDetail() {
     onSuccess: () => {
       toast.success(t('binderTypes.convertWishlistSuccess'))
       queryClient.invalidateQueries({ queryKey: ['binder-cards', binderId] })
+      queryClient.invalidateQueries({ queryKey: ['binder-layout', binderId] })
       queryClient.invalidateQueries({ queryKey: ['binders'] })
       queryClient.invalidateQueries({ queryKey: ['collection'] })
       queryClient.invalidateQueries({ queryKey: ['binder-print-optimization', binderId] })
@@ -483,6 +491,7 @@ export default function BinderDetail() {
     },
     onError: (e) => {
       queryClient.invalidateQueries({ queryKey: ['binder-cards', binderId] })
+      queryClient.invalidateQueries({ queryKey: ['binder-layout', binderId] })
       toast.error(e.response?.data?.detail || t('binderTypes.convertWishlistFailed'))
     },
   })
@@ -492,6 +501,7 @@ export default function BinderDetail() {
     onSuccess: () => {
       toast.success(t('binderTypes.convertCollectionSuccess'))
       queryClient.invalidateQueries({ queryKey: ['binder-cards', binderId] })
+      queryClient.invalidateQueries({ queryKey: ['binder-layout', binderId] })
       queryClient.invalidateQueries({ queryKey: ['binders'] })
       queryClient.invalidateQueries({ queryKey: ['collection'] })
       queryClient.invalidateQueries({ queryKey: ['binder-print-optimization', binderId] })
@@ -504,6 +514,7 @@ export default function BinderDetail() {
     },
     onError: (e) => {
       queryClient.invalidateQueries({ queryKey: ['binder-cards', binderId] })
+      queryClient.invalidateQueries({ queryKey: ['binder-layout', binderId] })
       queryClient.invalidateQueries({ queryKey: ['binders'] })
       toast.error(e.response?.data?.detail || t('binderTypes.convertCollectionFailed'))
     },
@@ -549,6 +560,7 @@ export default function BinderDetail() {
         toast.success(message)
       }
       queryClient.invalidateQueries({ queryKey: ['binder-cards', binderId] })
+      queryClient.invalidateQueries({ queryKey: ['binder-layout', binderId] })
       invalidateTcgdexFilterLanguages(queryClient)
       queryClient.invalidateQueries({ queryKey: ['binders'] })
       setShowCsvImportModal(false)
@@ -572,6 +584,7 @@ export default function BinderDetail() {
     onSuccess: () => {
       toast.success(t('binderTypes.printSwitched') + ' ✓')
       queryClient.invalidateQueries({ queryKey: ['binder-cards', binderId] })
+      queryClient.invalidateQueries({ queryKey: ['binder-layout', binderId] })
       invalidateTcgdexFilterLanguages(queryClient)
       queryClient.invalidateQueries({ queryKey: ['binders'] })
       setSelectedCard(null)
@@ -596,6 +609,7 @@ export default function BinderDetail() {
     onSuccess: (result) => {
       toast.success(`${t('binderTypes.optimizePrintsApplied')} ✓ (${result.applied} ${t('binderTypes.updated')}, ${result.skipped} ${t('binderTypes.skipped')}, ${formatPrice(result.total_savings || 0)})`)
       queryClient.invalidateQueries({ queryKey: ['binder-cards', binderId] })
+      queryClient.invalidateQueries({ queryKey: ['binder-layout', binderId] })
       invalidateTcgdexFilterLanguages(queryClient)
       queryClient.invalidateQueries({ queryKey: ['binders'] })
       queryClient.invalidateQueries({ queryKey: ['binder-print-optimization', binderId] })
@@ -1031,7 +1045,28 @@ export default function BinderDetail() {
         </div>
       )}
 
-      {cards.length === 0 ? (
+      {binderIsMapped(binder) && (
+        <div className="mb-3 flex gap-1 rounded-xl border border-border bg-bg-card p-1">
+          <button
+            type="button"
+            onClick={() => setShowLayout(false)}
+            className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${!showLayout ? 'bg-bg-elevated text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
+          >
+            {t('binders.layout.listTab')}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowLayout(true)}
+            className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${showLayout ? 'bg-bg-elevated text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
+          >
+            {t('binders.layout.tab')}
+          </button>
+        </div>
+      )}
+
+      {showLayout && binderIsMapped(binder) ? (
+        <BinderLayoutView binderId={parseInt(binderId)} binder={binder} cards={cards} />
+      ) : cards.length === 0 ? (
         <div className="card text-center py-20">
           <p className="text-text-muted">
             {isWishlist ? '⭐ No cards in this wishlist binder yet' : '📦 No cards in this binder yet'}

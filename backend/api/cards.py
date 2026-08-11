@@ -8,7 +8,7 @@ from api.auth import get_current_user
 from database import get_db
 from models import Binder, BinderCard, Card, Set, DeletedCollectionItem, PriceHistory, CustomCardMatch, CollectionItem, WishlistItem, User, ImageCache, ProductCard, ProductLedgerEntry, TradeItem
 from schemas import CardBase, CardWithSet, PriceHistoryResponse, CardCustomCreate, CustomCardUpdate, CardCustomImageUpdate
-from services import pokemon_api
+from services import binder_slots, pokemon_api
 from services.card_fallbacks import (
     apply_cross_language_fallbacks,
     build_missing_language_card,
@@ -954,9 +954,25 @@ def migrate_custom_card(
 
     # 4. Re-assign binder cards. If the API card is already present in the same
     # binder slot, merge required quantities instead of dropping deck copies.
+    # Lock every binder this card appears in before touching their entries.
+    # binder_slots' mutations assume the caller holds the binder row lock, and
+    # without it a placement committed between the re-parent and the delete is
+    # cascaded away: the request that made it already returned success. Ordered
+    # by id so this cannot deadlock against the binder endpoints, which take
+    # their locks in the same order.
+    affected_binder_ids = [
+        binder_id for (binder_id,) in db.query(BinderCard.binder_id).filter(
+            BinderCard.card_id == custom_card_id
+        ).distinct().order_by(BinderCard.binder_id.asc()).all()
+    ]
+    if affected_binder_ids:
+        db.query(Binder).filter(
+            Binder.id.in_(affected_binder_ids)
+        ).order_by(Binder.id.asc()).with_for_update(of=Binder).all()
+
     custom_binder_cards = db.query(BinderCard).filter(
         BinderCard.card_id == custom_card_id
-    ).order_by(BinderCard.id.asc()).all()
+    ).order_by(BinderCard.id.asc()).with_for_update(of=BinderCard).all()
     for binder_card in custom_binder_cards:
         existing_query = db.query(BinderCard).filter(
             BinderCard.id != binder_card.id,
@@ -969,12 +985,17 @@ def migrate_custom_card(
             existing_query = existing_query.filter(BinderCard.collection_item_id == binder_card.collection_item_id)
         existing_binder_card = existing_query.order_by(BinderCard.id.asc()).first()
         if existing_binder_card:
-            existing_binder_card.required_quantity = min(
+            combined_quantity = min(
                 MAX_CARD_QUANTITY,
                 max(int(existing_binder_card.required_quantity or 1), 1)
                 + max(int(binder_card.required_quantity or 1), 1),
             )
-            db.delete(binder_card)
+            # The surviving entry inherits the promoted card's pockets. Without
+            # this the physical placements cascade away with the deleted row and
+            # the cards sit in a binder the app can no longer locate them in.
+            binder_slots.merge_binder_cards(
+                db, binder_card, existing_binder_card, combined_quantity
+            )
         else:
             binder_card.card_id = composite_api_card_id
     db.flush()

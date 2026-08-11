@@ -6,8 +6,11 @@ from sqlalchemy.orm import Session, joinedload
 from typing import List
 from api.auth import get_current_user
 from database import get_db
-from models import Binder, BinderCard, Card, CollectionItem, Set, User, WishlistItem
-from schemas import BinderCreate, BinderUpdate, BinderResponse, BinderCardUpdate, BinderCardSwitch, BinderPrintOptimizationApply
+from models import Binder, BinderCard, BinderSlot, Card, CollectionItem, Set, User, WishlistItem
+from schemas import (
+    BinderCreate, BinderUpdate, BinderResponse, BinderCardUpdate, BinderCardSwitch,
+    BinderPrintOptimizationApply, BinderPageResponse, BinderSlotMove, BinderSlotPlace,
+)
 from api.collection import ensure_card_exists, _find_card_by_code
 from services import pokemon_api
 from services.card_fallbacks import apply_cross_language_fallbacks
@@ -16,6 +19,8 @@ from services.card_values import effective_market_price, normalize_price_field
 from services.card_visibility import visible_any_card_filter, visible_set_filter
 from services.collection_csv import normalize_collection_variant
 from services.binder_csv import BINDER_CSV_DUPLICATE_QUANTITY_ERROR, combine_binder_required_quantity
+from services import binder_slots
+from services.binder_layout import grid_is_valid
 from services.binder_allocations import (
     collection_binder_allocated_card_counts,
     collection_binder_allocation_counts,
@@ -91,7 +96,12 @@ def _binder_counts(db: Session, binder: Binder) -> tuple[int, int]:
     return int(total_count), int(unique_count)
 
 
-def _binder_response(binder: Binder, card_count: int = 0, unique_card_count: int = 0) -> BinderResponse:
+def _binder_response(
+    binder: Binder,
+    card_count: int = 0,
+    unique_card_count: int = 0,
+    placed_slot_count: int = 0,
+) -> BinderResponse:
     return BinderResponse(
         id=binder.id,
         name=binder.name,
@@ -104,6 +114,9 @@ def _binder_response(binder: Binder, card_count: int = 0, unique_card_count: int
         card_count=card_count,
         unique_card_count=unique_card_count,
         is_public=binder.is_public or False,
+        grid_rows=binder.grid_rows,
+        grid_columns=binder.grid_columns,
+        placed_slot_count=placed_slot_count,
     )
 
 
@@ -525,10 +538,20 @@ def get_binders(
     binders = db.query(Binder).filter(
         Binder.user_id == current_user.id
     ).order_by(Binder.created_at.desc()).all()
+    # One grouped query rather than one per binder, so a shelf full of mapped
+    # binders does not cost a query each.
+    placed_by_binder = dict(
+        db.query(BinderSlot.binder_id, func.count(BinderSlot.id))
+        .filter(BinderSlot.binder_id.in_([binder.id for binder in binders] or [0]))
+        .group_by(BinderSlot.binder_id)
+        .all()
+    ) if binders else {}
     result = []
     for binder in binders:
         total_count, unique_count = _binder_counts(db, binder)
-        result.append(_binder_response(binder, total_count, unique_count))
+        result.append(_binder_response(
+            binder, total_count, unique_count, placed_by_binder.get(binder.id, 0)
+        ))
     return result
 
 
@@ -539,6 +562,11 @@ def create_binder(
     db: Session = Depends(get_db),
 ):
     """Create a new binder."""
+    if not grid_is_valid(binder.grid_rows, binder.grid_columns):
+        raise HTTPException(
+            status_code=422,
+            detail="Set both grid dimensions to map a binder, or neither to leave it unmapped.",
+        )
     db_binder = Binder(
         name=binder.name,
         description=binder.description,
@@ -546,6 +574,8 @@ def create_binder(
         binder_type=binder.binder_type,
         format=_clean_binder_format(binder.format),
         icon_pokemon_id=binder.icon_pokemon_id,
+        grid_rows=binder.grid_rows,
+        grid_columns=binder.grid_columns,
         user_id=current_user.id,
         created_at=datetime.datetime.utcnow(),
     )
@@ -610,10 +640,46 @@ def update_binder(
     if "is_public" in update.model_fields_set:
         binder.is_public = update.is_public
 
+    placed = binder_slots.slot_count(db, binder.id)
+    if update.clear_layout:
+        # Explicit: the user is unmapping the binder, so the placements go with
+        # it. Their entries and quantities are untouched, only the record of
+        # which pocket each copy sat in.
+        db.query(BinderSlot).filter(BinderSlot.binder_id == binder.id).delete(
+            synchronize_session=False
+        )
+        binder.grid_rows = None
+        binder.grid_columns = None
+    elif "grid_rows" in update.model_fields_set or "grid_columns" in update.model_fields_set:
+        rows = update.grid_rows if "grid_rows" in update.model_fields_set else binder.grid_rows
+        columns = update.grid_columns if "grid_columns" in update.model_fields_set else binder.grid_columns
+        if not grid_is_valid(rows, columns):
+            raise HTTPException(
+                status_code=422,
+                detail="Set both grid dimensions to map a binder, or neither to leave it unmapped.",
+            )
+        if placed and rows is not None:
+            # Shrinking a page would leave placements in pockets that no longer
+            # exist. Refuse rather than silently discarding them; the user can
+            # move the cards or clear the layout deliberately.
+            highest_pocket = db.query(func.max(BinderSlot.pocket)).filter(
+                BinderSlot.binder_id == binder.id
+            ).scalar() or 0
+            if highest_pocket > rows * columns:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Some cards sit in pockets that a smaller page would not have. "
+                        "Move them or clear the layout first."
+                    ),
+                )
+        binder.grid_rows = rows
+        binder.grid_columns = columns
+
     db.commit()
     db.refresh(binder)
     total_count, unique_count = _binder_counts(db, binder)
-    return _binder_response(binder, total_count, unique_count)
+    return _binder_response(binder, total_count, unique_count, binder_slots.slot_count(db, binder.id))
 
 
 @router.post("/{binder_id}/convert-to-collection")
@@ -631,6 +697,19 @@ def convert_wishlist_binder_to_collection(
         raise HTTPException(status_code=404, detail="Binder not found")
     if (binder.binder_type or "collection") != "wishlist":
         raise HTTPException(status_code=400, detail="Only wishlist binders can be converted")
+    if binder_slots.slot_count(db, binder.id):
+        # This conversion rebuilds the entries: some are rewritten to point at
+        # an exact owned copy, duplicates are deleted and replacements created.
+        # Placements would survive on whichever entry happened to be kept and
+        # describe the wrong cards. Refused for the same reason as the opposite
+        # conversion, and for the same remedy: clear the layout deliberately.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This binder has a page layout. Clear the layout before converting it "
+                "to a collection binder, so the record of where each card sits is not lost."
+            ),
+        )
 
     entries = db.query(BinderCard).options(joinedload(BinderCard.card)).filter(
         BinderCard.binder_id == binder.id,
@@ -742,6 +821,18 @@ def convert_collection_binder_to_wishlist(
         raise HTTPException(status_code=404, detail="Binder not found")
     if (binder.binder_type or "collection") != "collection":
         raise HTTPException(status_code=400, detail="Only collection binders can be converted")
+    if binder_slots.slot_count(db, binder.id):
+        # The conversion rebuilds the entries, which would take their pockets
+        # with them. A physical layout is a record of where real cards are, so
+        # it is not something to discard as a side effect of changing the
+        # binder's type.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This binder has a page layout. Clear the layout before converting it "
+                "to a wishlist, so the record of where each card sits is not lost."
+            ),
+        )
 
     entries = db.query(BinderCard).filter(
         BinderCard.binder_id == binder.id,
@@ -1085,8 +1176,10 @@ def apply_binder_print_optimization(
                 if combined_quantity > MAX_CARD_QUANTITY or usage_count + assigned_quantity > int(target_item.quantity or 0):
                     skipped += 1
                     continue
-                existing.required_quantity = combined_quantity
-                db.delete(bc)
+                # Shared helper: the surviving entry inherits the source's
+                # physical placements before the row goes, otherwise the cards
+                # stay in the binder while the app forgets where they are.
+                binder_slots.merge_binder_cards(db, bc, existing, combined_quantity)
                 applied += 1
                 applied_total_savings += recommendation["total_savings"]
                 continue
@@ -1123,8 +1216,10 @@ def apply_binder_print_optimization(
             if combined_quantity > MAX_CARD_QUANTITY:
                 skipped += 1
                 continue
-            existing.required_quantity = combined_quantity
-            db.delete(bc)
+            # Shared helper: the surviving entry inherits the source's
+            # physical placements before the row goes, otherwise the cards
+            # stay in the binder while the app forgets where they are.
+            binder_slots.merge_binder_cards(db, bc, existing, combined_quantity)
             applied += 1
             applied_total_savings += recommendation["total_savings"]
             continue
@@ -1176,6 +1271,9 @@ def add_card_to_binder(
 
     if existing:
         existing.required_quantity = required_quantity
+        # This path sets the quantity outright rather than adding to it, so a
+        # lower value can leave more pockets filled than the entry has copies.
+        binder_slots.reconcile_entry(db, existing)
         db.commit()
         return {"message": "Binder quantity updated"}
 
@@ -1439,6 +1537,10 @@ def update_binder_entry(
             raise HTTPException(status_code=409, detail=f"At most {maximum} copie(s) can be assigned to this binder")
 
     bc.required_quantity = next_quantity
+    # Reducing the count leaves placements with no copy behind them. Surplus
+    # pockets are released from the back of the binder, so a deliberate
+    # arrangement at the front survives.
+    binder_slots.reconcile_entry(db, bc)
     db.commit()
     return {"message": "Binder entry updated"}
 
@@ -1650,8 +1752,10 @@ def switch_binder_entry_card(
             usage_count = _collection_binder_usage_counts(db, current_user).get(target_item.id, 0)
             if usage_count + assigned_quantity > int(target_item.quantity or 0):
                 raise HTTPException(status_code=409, detail="Not enough unallocated copies of this print are available")
-            existing.required_quantity = combined_quantity
-            db.delete(bc)
+            # Shared helper: the surviving entry inherits the source's
+            # physical placements before the row goes, otherwise the cards
+            # stay in the binder while the app forgets where they are.
+            binder_slots.merge_binder_cards(db, bc, existing, combined_quantity)
             db.commit()
             return {"message": "Binder entries merged", "binder_card_id": existing.id, "merged": True}
 
@@ -1713,8 +1817,10 @@ def switch_binder_entry_card(
         combined_quantity = (existing.required_quantity or 1) + (bc.required_quantity or 1)
         if combined_quantity > MAX_CARD_QUANTITY:
             raise HTTPException(status_code=400, detail=f"Switching would exceed the maximum required quantity of {MAX_CARD_QUANTITY}")
-        existing.required_quantity = combined_quantity
-        db.delete(bc)
+        # Shared helper: the surviving entry inherits the source's
+        # physical placements before the row goes, otherwise the cards
+        # stay in the binder while the app forgets where they are.
+        binder_slots.merge_binder_cards(db, bc, existing, combined_quantity)
         db.commit()
         return {"message": "Binder entries merged", "binder_card_id": existing.id, "merged": True}
 
@@ -2355,3 +2461,114 @@ def remove_card_from_binder(
     db.delete(bc)
     db.commit()
     return {"message": "Card removed from binder"}
+
+
+# ── Physical layout ───────────────────────────────────────────────────────────
+# A mapped binder records which page and pocket each copy occupies. Every route
+# below locks the binder first, matching the order the rest of this module uses,
+# and converts SlotError into a 409 so the client can tell a refusal from a bug.
+
+
+def _locked_binder(db: Session, binder_id: int, current_user: User) -> Binder:
+    binder = db.query(Binder).filter(
+        Binder.id == binder_id,
+        Binder.user_id == current_user.id,
+    ).with_for_update(of=Binder).first()
+    if not binder:
+        raise HTTPException(status_code=404, detail="Binder not found")
+    return binder
+
+
+def _slot_error(error: binder_slots.SlotError) -> HTTPException:
+    status = 404 if error.code == "not_mapped" else 409
+    return HTTPException(status_code=status, detail=error.message)
+
+
+@router.get("/{binder_id}/layout", response_model=BinderPageResponse)
+def get_binder_page(
+    binder_id: int,
+    page: int = Query(default=1, ge=1),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """One page of a mapped binder, with empty pockets generated on the fly."""
+    binder = db.query(Binder).filter(
+        Binder.id == binder_id,
+        Binder.user_id == current_user.id,
+    ).first()
+    if not binder:
+        raise HTTPException(status_code=404, detail="Binder not found")
+    try:
+        return binder_slots.page_view(db, binder, page)
+    except binder_slots.SlotError as error:
+        raise _slot_error(error)
+
+
+@router.post("/{binder_id}/layout/slots", response_model=BinderPageResponse)
+def place_binder_slot(
+    binder_id: int,
+    placement: BinderSlotPlace,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Put one copy of an entry into a specific pocket."""
+    binder = _locked_binder(db, binder_id, current_user)
+    entry = db.query(BinderCard).filter(
+        BinderCard.id == placement.binder_card_id,
+        BinderCard.binder_id == binder.id,
+    ).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Binder entry not found")
+    try:
+        binder_slots.place(db, binder, entry, placement.page, placement.pocket)
+        db.commit()
+        return binder_slots.page_view(db, binder, placement.page)
+    except binder_slots.SlotError as error:
+        db.rollback()
+        raise _slot_error(error)
+    except IntegrityError:
+        # Someone else took the pocket between the check and the write.
+        db.rollback()
+        raise HTTPException(status_code=409, detail="That pocket already holds a card.")
+
+
+@router.put("/{binder_id}/layout/slots", response_model=BinderPageResponse)
+def move_binder_slot(
+    binder_id: int,
+    request: BinderSlotMove,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Move a placement, swapping with whatever already sits in the target."""
+    binder = _locked_binder(db, binder_id, current_user)
+    slot = binder_slots.occupant(db, binder.id, request.from_page, request.from_pocket)
+    if not slot:
+        raise HTTPException(status_code=404, detail="That pocket is empty.")
+    try:
+        binder_slots.move(db, binder, slot, request.to_page, request.to_pocket)
+        db.commit()
+        return binder_slots.page_view(db, binder, request.to_page)
+    except binder_slots.SlotError as error:
+        db.rollback()
+        raise _slot_error(error)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="That pocket already holds a card.")
+
+
+@router.delete("/{binder_id}/layout/slots")
+def clear_binder_slot(
+    binder_id: int,
+    page: int = Query(ge=1),
+    pocket: int = Query(ge=1),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Empty a pocket. The entry keeps its copies; they simply become unplaced."""
+    binder = _locked_binder(db, binder_id, current_user)
+    slot = binder_slots.occupant(db, binder.id, page, pocket)
+    if not slot:
+        raise HTTPException(status_code=404, detail="That pocket is empty.")
+    db.delete(slot)
+    db.commit()
+    return {"status": "cleared", "page": page, "pocket": pocket}
