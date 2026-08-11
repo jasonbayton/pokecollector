@@ -1021,9 +1021,46 @@ def migrate_card_ids():
         db.close()
 
 
+def _ensure_pre_create_constraints():
+    """Add constraints that create_all itself depends on.
+
+    create_all runs before the migration list, and it skips tables that already
+    exist. On an established database that means binder_cards keeps whatever
+    constraints it already had, while create_all still tries to build
+    binder_slots, whose composite foreign key references
+    (binder_cards.id, binder_id). PostgreSQL rejects a foreign key onto columns
+    without a matching unique constraint, so startup died there: fine on a fresh
+    database, fatal on every existing one.
+
+    Runs before create_all and does nothing when the table is absent, which is
+    the fresh-install case where create_all builds it correctly anyway.
+    """
+    try:
+        with engine.connect() as conn:
+            exists = conn.execute(text("SELECT to_regclass('binder_cards')")).scalar()
+            if not exists:
+                return
+            conn.execute(text("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'uq_binder_cards_id_binder'
+                    ) THEN
+                        ALTER TABLE binder_cards
+                            ADD CONSTRAINT uq_binder_cards_id_binder UNIQUE (id, binder_id);
+                    END IF;
+                END$$
+            """))
+            conn.commit()
+    except Exception:
+        logger.warning("pre-create constraint check skipped", exc_info=True)
+
+
 def init_db():
     """Initialize the database: create tables, run migrations, seed settings."""
     from models import Base as ModelBase, Setting, User
+    _ensure_pre_create_constraints()
     ModelBase.metadata.create_all(bind=engine)
 
     # Run lightweight schema migrations (idempotent, PostgreSQL only)
