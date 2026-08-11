@@ -15,7 +15,9 @@ export default function BinderLayoutView({ binderId, binder, cards }) {
   const [page, setPage] = useState(1)
   // Tapping an occupied pocket selects it; tapping a second pocket moves or
   // swaps. Selecting an empty pocket while an unplaced card is chosen places it.
-  const [selectedPocket, setSelectedPocket] = useState(null)
+  // The page travels with the selection: storing only a pocket number meant
+  // navigating to another page silently changed which card a move referred to.
+  const [selected, setSelected] = useState(null)
   const [pendingEntryId, setPendingEntryId] = useState(null)
 
   const { data: pageData, isLoading } = useQuery({
@@ -30,12 +32,13 @@ export default function BinderLayoutView({ binderId, binder, cards }) {
     return map
   }, [cards])
 
+  // Binder-wide, from the server. Counting the visible page alone made a card
+  // placed on page one look unplaced while page two was open, offering an
+  // action the server would then refuse.
   const placedCounts = useMemo(() => {
     const counts = new Map()
-    for (const cell of pageCells(pageData)) {
-      if (cell.binderCardId != null) {
-        counts.set(cell.binderCardId, (counts.get(cell.binderCardId) || 0) + 1)
-      }
+    for (const entry of pageData?.placed_by_entry || []) {
+      counts.set(entry.binder_card_id, entry.placed)
     }
     return counts
   }, [pageData])
@@ -56,15 +59,20 @@ export default function BinderLayoutView({ binderId, binder, cards }) {
 
   const moveMutation = useMutation({
     mutationFn: (data) => moveBinderSlot(binderId, data),
-    onSuccess: () => { refresh(); setSelectedPocket(null) },
-    onError,
+    onSuccess: () => { refresh(); setSelected(null) },
+    onError: (error) => { setSelected(null); onError(error) },
   })
 
   const clearMutation = useMutation({
     mutationFn: ({ page: p, pocket }) => clearBinderSlot(binderId, p, pocket),
-    onSuccess: () => { refresh(); setSelectedPocket(null) },
-    onError,
+    onSuccess: () => { refresh(); setSelected(null) },
+    onError: (error) => { setSelected(null); onError(error) },
   })
+
+  // A second tap while a move is in flight would act on a stale arrangement:
+  // after a swap the source pocket holds the other card, so the follow-up
+  // request would move the wrong one.
+  const isBusy = placeMutation.isPending || moveMutation.isPending || clearMutation.isPending
 
   if (!binder?.grid_rows || !binder?.grid_columns) {
     return (
@@ -78,27 +86,31 @@ export default function BinderLayoutView({ binderId, binder, cards }) {
   const pageCount = pageData?.page_count || 1
 
   const handleCellClick = (cell) => {
+    if (isBusy) return
+    // The source page comes from the selection, not the page on screen, so a
+    // card selected on one page and dropped on another moves the right one.
+    const moveTo = (pocket) => moveMutation.mutate({
+      from_page: selected.page, from_pocket: selected.pocket,
+      to_page: page, to_pocket: pocket,
+    })
+
     if (cell.isEmpty) {
       if (pendingEntryId != null) {
         placeMutation.mutate({ binder_card_id: pendingEntryId, page, pocket: cell.pocket })
-      } else if (selectedPocket != null) {
-        moveMutation.mutate({
-          from_page: page, from_pocket: selectedPocket, to_page: page, to_pocket: cell.pocket,
-        })
+      } else if (selected) {
+        moveTo(cell.pocket)
       }
       return
     }
-    if (selectedPocket === cell.pocket) {
-      setSelectedPocket(null)
+    if (selected && selected.page === page && selected.pocket === cell.pocket) {
+      setSelected(null)
       return
     }
-    if (selectedPocket != null) {
-      moveMutation.mutate({
-        from_page: page, from_pocket: selectedPocket, to_page: page, to_pocket: cell.pocket,
-      })
+    if (selected) {
+      moveTo(cell.pocket)
       return
     }
-    setSelectedPocket(cell.pocket)
+    setSelected({ page, pocket: cell.pocket })
   }
 
   // Cards with copies the layout does not yet account for, so they can be
@@ -142,12 +154,13 @@ export default function BinderLayoutView({ binderId, binder, cards }) {
         >
           {cells.map(cell => {
             const card = cell.binderCardId != null ? cardsByEntry.get(cell.binderCardId) : null
-            const isSelected = selectedPocket === cell.pocket
+            const isSelected = Boolean(selected && selected.page === page && selected.pocket === cell.pocket)
             return (
               <button
                 key={cell.pocket}
                 type="button"
                 onClick={() => handleCellClick(cell)}
+                disabled={isBusy}
                 title={card ? card.name : t('binders.layout.emptyPocket')}
                 className={`relative aspect-[5/7] rounded-lg border transition-all ${
                   isSelected
@@ -173,7 +186,7 @@ export default function BinderLayoutView({ binderId, binder, cards }) {
                     tabIndex={0}
                     onClick={(event) => {
                       event.stopPropagation()
-                      clearMutation.mutate({ page, pocket: cell.pocket })
+                      if (!isBusy) clearMutation.mutate({ page, pocket: cell.pocket })
                     }}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') {

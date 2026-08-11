@@ -878,9 +878,25 @@ def migrate_custom_card(
 
     # 4. Re-assign binder cards. If the API card is already present in the same
     # binder slot, merge required quantities instead of dropping deck copies.
+    # Lock every binder this card appears in before touching their entries.
+    # binder_slots' mutations assume the caller holds the binder row lock, and
+    # without it a placement committed between the re-parent and the delete is
+    # cascaded away: the request that made it already returned success. Ordered
+    # by id so this cannot deadlock against the binder endpoints, which take
+    # their locks in the same order.
+    affected_binder_ids = [
+        binder_id for (binder_id,) in db.query(BinderCard.binder_id).filter(
+            BinderCard.card_id == custom_card_id
+        ).distinct().order_by(BinderCard.binder_id.asc()).all()
+    ]
+    if affected_binder_ids:
+        db.query(Binder).filter(
+            Binder.id.in_(affected_binder_ids)
+        ).order_by(Binder.id.asc()).with_for_update(of=Binder).all()
+
     custom_binder_cards = db.query(BinderCard).filter(
         BinderCard.card_id == custom_card_id
-    ).order_by(BinderCard.id.asc()).all()
+    ).order_by(BinderCard.id.asc()).with_for_update(of=BinderCard).all()
     for binder_card in custom_binder_cards:
         existing_query = db.query(BinderCard).filter(
             BinderCard.id != binder_card.id,

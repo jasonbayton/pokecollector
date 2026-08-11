@@ -565,8 +565,20 @@ def _run_migrations(conn):
         # binder_slots' composite foreign key needs this, because PostgreSQL
         # will not reference columns without a unique constraint even when one
         # of them is already the primary key. It must exist before the table.
-        "ALTER TABLE binder_cards DROP CONSTRAINT IF EXISTS uq_binder_cards_id_binder",
-        "ALTER TABLE binder_cards ADD CONSTRAINT uq_binder_cards_id_binder UNIQUE (id, binder_id)",
+        # Added only when absent rather than dropped and recreated: once
+        # binder_slots exists its foreign key depends on this constraint, so a
+        # drop is refused and the following add then fails as a duplicate. Both
+        # errors are swallowed by the per-statement rollback, which means every
+        # boot would quietly fail two statements and hide a real failure later.
+        """DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'uq_binder_cards_id_binder'
+            ) THEN
+                ALTER TABLE binder_cards
+                    ADD CONSTRAINT uq_binder_cards_id_binder UNIQUE (id, binder_id);
+            END IF;
+        END$$""",
         """CREATE TABLE IF NOT EXISTS binder_slots (
             id SERIAL PRIMARY KEY,
             binder_card_id INTEGER NOT NULL,

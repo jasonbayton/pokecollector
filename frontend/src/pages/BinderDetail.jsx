@@ -343,6 +343,7 @@ export default function BinderDetail() {
     onSettled: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['binder-cards', binderId] }),
+        queryClient.invalidateQueries({ queryKey: ['binder-layout', binderId] }),
         queryClient.invalidateQueries({ queryKey: ['binders'] }),
       ])
       invalidateTcgdexFilterLanguages(queryClient)
@@ -396,6 +397,7 @@ export default function BinderDetail() {
     onSuccess: () => {
       toast.success(t('common.remove') + ' ✓')
       queryClient.invalidateQueries({ queryKey: ['binder-cards', binderId] })
+      queryClient.invalidateQueries({ queryKey: ['binder-layout', binderId] })
       invalidateTcgdexFilterLanguages(queryClient)
       queryClient.invalidateQueries({ queryKey: ['binders'] })
     },
@@ -419,6 +421,7 @@ export default function BinderDetail() {
         }
       })
       queryClient.invalidateQueries({ queryKey: ['binder-cards', binderId] })
+      queryClient.invalidateQueries({ queryKey: ['binder-layout', binderId] })
       invalidateTcgdexFilterLanguages(queryClient)
       queryClient.invalidateQueries({ queryKey: ['binders'] })
     },
@@ -477,6 +480,7 @@ export default function BinderDetail() {
     onSuccess: () => {
       toast.success(t('binderTypes.convertWishlistSuccess'))
       queryClient.invalidateQueries({ queryKey: ['binder-cards', binderId] })
+      queryClient.invalidateQueries({ queryKey: ['binder-layout', binderId] })
       queryClient.invalidateQueries({ queryKey: ['binders'] })
       queryClient.invalidateQueries({ queryKey: ['collection'] })
       queryClient.invalidateQueries({ queryKey: ['binder-print-optimization', binderId] })
@@ -486,6 +490,7 @@ export default function BinderDetail() {
     },
     onError: (e) => {
       queryClient.invalidateQueries({ queryKey: ['binder-cards', binderId] })
+      queryClient.invalidateQueries({ queryKey: ['binder-layout', binderId] })
       toast.error(e.response?.data?.detail || t('binderTypes.convertWishlistFailed'))
     },
   })
@@ -495,6 +500,7 @@ export default function BinderDetail() {
     onSuccess: () => {
       toast.success(t('binderTypes.convertCollectionSuccess'))
       queryClient.invalidateQueries({ queryKey: ['binder-cards', binderId] })
+      queryClient.invalidateQueries({ queryKey: ['binder-layout', binderId] })
       queryClient.invalidateQueries({ queryKey: ['binders'] })
       queryClient.invalidateQueries({ queryKey: ['collection'] })
       queryClient.invalidateQueries({ queryKey: ['binder-print-optimization', binderId] })
@@ -507,6 +513,7 @@ export default function BinderDetail() {
     },
     onError: (e) => {
       queryClient.invalidateQueries({ queryKey: ['binder-cards', binderId] })
+      queryClient.invalidateQueries({ queryKey: ['binder-layout', binderId] })
       queryClient.invalidateQueries({ queryKey: ['binders'] })
       toast.error(e.response?.data?.detail || t('binderTypes.convertCollectionFailed'))
     },
@@ -552,6 +559,7 @@ export default function BinderDetail() {
         toast.success(message)
       }
       queryClient.invalidateQueries({ queryKey: ['binder-cards', binderId] })
+      queryClient.invalidateQueries({ queryKey: ['binder-layout', binderId] })
       invalidateTcgdexFilterLanguages(queryClient)
       queryClient.invalidateQueries({ queryKey: ['binders'] })
       setShowCsvImportModal(false)
@@ -575,6 +583,7 @@ export default function BinderDetail() {
     onSuccess: () => {
       toast.success(t('binderTypes.printSwitched') + ' ✓')
       queryClient.invalidateQueries({ queryKey: ['binder-cards', binderId] })
+      queryClient.invalidateQueries({ queryKey: ['binder-layout', binderId] })
       invalidateTcgdexFilterLanguages(queryClient)
       queryClient.invalidateQueries({ queryKey: ['binders'] })
       setSelectedCard(null)
@@ -599,6 +608,7 @@ export default function BinderDetail() {
     onSuccess: (result) => {
       toast.success(`${t('binderTypes.optimizePrintsApplied')} ✓ (${result.applied} ${t('binderTypes.updated')}, ${result.skipped} ${t('binderTypes.skipped')}, ${formatPrice(result.total_savings || 0)})`)
       queryClient.invalidateQueries({ queryKey: ['binder-cards', binderId] })
+      queryClient.invalidateQueries({ queryKey: ['binder-layout', binderId] })
       invalidateTcgdexFilterLanguages(queryClient)
       queryClient.invalidateQueries({ queryKey: ['binders'] })
       queryClient.invalidateQueries({ queryKey: ['binder-print-optimization', binderId] })

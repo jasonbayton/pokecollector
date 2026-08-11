@@ -537,10 +537,20 @@ def get_binders(
     binders = db.query(Binder).filter(
         Binder.user_id == current_user.id
     ).order_by(Binder.created_at.desc()).all()
+    # One grouped query rather than one per binder, so a shelf full of mapped
+    # binders does not cost a query each.
+    placed_by_binder = dict(
+        db.query(BinderSlot.binder_id, func.count(BinderSlot.id))
+        .filter(BinderSlot.binder_id.in_([binder.id for binder in binders] or [0]))
+        .group_by(BinderSlot.binder_id)
+        .all()
+    ) if binders else {}
     result = []
     for binder in binders:
         total_count, unique_count = _binder_counts(db, binder)
-        result.append(_binder_response(binder, total_count, unique_count))
+        result.append(_binder_response(
+            binder, total_count, unique_count, placed_by_binder.get(binder.id, 0)
+        ))
     return result
 
 
@@ -686,6 +696,19 @@ def convert_wishlist_binder_to_collection(
         raise HTTPException(status_code=404, detail="Binder not found")
     if (binder.binder_type or "collection") != "wishlist":
         raise HTTPException(status_code=400, detail="Only wishlist binders can be converted")
+    if binder_slots.slot_count(db, binder.id):
+        # This conversion rebuilds the entries: some are rewritten to point at
+        # an exact owned copy, duplicates are deleted and replacements created.
+        # Placements would survive on whichever entry happened to be kept and
+        # describe the wrong cards. Refused for the same reason as the opposite
+        # conversion, and for the same remedy: clear the layout deliberately.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This binder has a page layout. Clear the layout before converting it "
+                "to a collection binder, so the record of where each card sits is not lost."
+            ),
+        )
 
     entries = db.query(BinderCard).options(joinedload(BinderCard.card)).filter(
         BinderCard.binder_id == binder.id,
@@ -1247,6 +1270,9 @@ def add_card_to_binder(
 
     if existing:
         existing.required_quantity = required_quantity
+        # This path sets the quantity outright rather than adding to it, so a
+        # lower value can leave more pockets filled than the entry has copies.
+        binder_slots.reconcile_entry(db, existing)
         db.commit()
         return {"message": "Binder quantity updated"}
 

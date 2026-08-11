@@ -287,9 +287,15 @@ class BinderSlotPocket(BaseModel):
     binder_card_id: Optional[int] = None
 
 
+class BinderEntryPlacement(BaseModel):
+    binder_card_id: int
+    placed: int
+
+
 class BinderPageResponse(BaseModel):
     page: int
     page_count: int
+    placed_by_entry: List[BinderEntryPlacement] = []
     grid_rows: int
     grid_columns: int
     placed_total: int

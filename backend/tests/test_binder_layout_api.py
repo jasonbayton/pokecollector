@@ -13,7 +13,10 @@ try:
     from sqlalchemy.orm import sessionmaker
 
     from api.binders import (
+        add_card_to_binder,
         clear_binder_slot,
+        convert_wishlist_binder_to_collection,
+        get_binders,
         convert_collection_binder_to_wishlist,
         create_binder,
         get_binder_page,
@@ -198,6 +201,55 @@ class BinderLayoutApiTests(unittest.TestCase):
         binder = self.db.query(Binder).filter(Binder.id == self.binder.id).one()
         self.assertEqual((binder.grid_rows, binder.grid_columns), (4, 3))
         self.assertEqual(binder_slots.slot_count(self.db, self.binder.id), 1)
+
+    def test_converting_a_wishlist_to_collection_is_refused_while_a_layout_exists(self):
+        """That conversion rebuilds entries, so placements would land on the wrong ones."""
+        wishlist = create_binder(
+            BinderCreate(name="Wants", binder_type="wishlist", grid_rows=3, grid_columns=3),
+            current_user=self.user, db=self.db,
+        )
+        binder = self.db.query(Binder).filter(Binder.id == wishlist.id).one()
+        entry = BinderCard(binder_id=binder.id, card_id=self.card.id, required_quantity=1)
+        self.db.add(entry)
+        self.db.commit()
+        self.db.refresh(entry)
+        binder_slots.place(self.db, binder, entry, page=1, pocket=1)
+        self.db.commit()
+
+        with self.assertRaises(HTTPException) as caught:
+            convert_wishlist_binder_to_collection(binder.id, current_user=self.user, db=self.db)
+        self.assertEqual(caught.exception.status_code, 409)
+        # The status alone is not evidence: this conversion also returns 409
+        # when the wishlist is incomplete, so an earlier version of this test
+        # passed with the layout guard removed entirely.
+        self.assertIn("layout", caught.exception.detail.lower())
+        self.assertEqual(binder_slots.slot_count(self.db, binder.id), 1)
+
+    def test_setting_a_lower_quantity_outright_releases_surplus_pockets(self):
+        """add_card_to_binder overwrites rather than adds, so it must reconcile too."""
+        wishlist = create_binder(
+            BinderCreate(name="Wants", binder_type="wishlist", grid_rows=3, grid_columns=3),
+            current_user=self.user, db=self.db,
+        )
+        binder = self.db.query(Binder).filter(Binder.id == wishlist.id).one()
+        entry = BinderCard(binder_id=binder.id, card_id=self.card.id, required_quantity=3)
+        self.db.add(entry)
+        self.db.commit()
+        self.db.refresh(entry)
+        for pocket in (1, 2, 3):
+            binder_slots.place(self.db, binder, entry, page=1, pocket=pocket)
+        self.db.commit()
+
+        add_card_to_binder(binder.id, card_id=self.card.id, required_quantity=1,
+                           current_user=self.user, db=self.db)
+
+        self.assertEqual(binder_slots.entry_slot_count(self.db, entry.id), 1)
+
+    def test_the_binder_listing_reports_how_many_pockets_are_filled(self):
+        self._place(page=1, pocket=1)
+        listed = get_binders(current_user=self.user, db=self.db)
+        mine = next(b for b in listed if b.id == self.binder.id)
+        self.assertEqual(mine.placed_slot_count, 1)
 
     def test_clearing_the_layout_is_deliberate_and_keeps_the_entries(self):
         self._place(page=1, pocket=1)

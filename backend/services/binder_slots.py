@@ -220,9 +220,22 @@ def page_view(db: Session, binder: Binder, page: int) -> dict:
     highest = db.query(func.max(BinderSlot.page)).filter(
         BinderSlot.binder_id == binder.id
     ).scalar() or 1
+    # Placements per entry across the whole binder, not just this page. The
+    # client needs it to know what is still unplaced: counting only the visible
+    # page makes a card placed on page one look unplaced from page two.
+    placed_by_entry = dict(
+        db.query(BinderSlot.binder_card_id, func.count(BinderSlot.id))
+        .filter(BinderSlot.binder_id == binder.id)
+        .group_by(BinderSlot.binder_card_id)
+        .all()
+    )
     return {
         "page": page,
         "page_count": max(highest, 1),
+        "placed_by_entry": [
+            {"binder_card_id": entry_id, "placed": count}
+            for entry_id, count in sorted(placed_by_entry.items())
+        ],
         "grid_rows": rows,
         "grid_columns": columns,
         "placed_total": total_slots,

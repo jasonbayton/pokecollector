@@ -32,6 +32,7 @@ function BinderForm({ initial = {}, onSubmit, onCancel, loading }) {
   // Page geometry. Both dimensions travel together, so the picker offers a
   // single choice of size rather than two independent numbers.
   const [gridRows, setGridRows] = useState(initial.grid_rows || null)
+  const confirmClear = useConfirmDialog()
   const [gridColumns, setGridColumns] = useState(initial.grid_columns || null)
 
   return (
@@ -144,17 +145,31 @@ function BinderForm({ initial = {}, onSubmit, onCancel, loading }) {
         </div>
       </div>
       <div className="flex gap-2">
-        <button onClick={() => onSubmit({
-          name,
-          description: desc,
-          color,
-          ...(!isEditing && { binder_type: binderType }),
-          format: format || null,
-          icon_pokemon_id: iconPokemonId,
-          grid_rows: gridRows,
-          grid_columns: gridColumns,
-          ...(isEditing && !gridRows && initial.grid_rows ? { clear_layout: true } : {}),
-        })}
+        <button onClick={async () => {
+          // Removing a layout deletes every placement, which nothing else
+          // undoes, so it is confirmed rather than happening on Save.
+          const clearingLayout = Boolean(isEditing && !gridRows && initial.grid_rows)
+          if (clearingLayout) {
+            const confirmed = await confirmClear({
+              title: t('binders.layout.clearLayout'),
+              message: t('binders.layout.clearLayoutConfirm'),
+              confirmLabel: t('binders.layout.clearLayout'),
+              destructive: true,
+            })
+            if (!confirmed) return
+          }
+          onSubmit({
+            name,
+            description: desc,
+            color,
+            ...(!isEditing && { binder_type: binderType }),
+            format: format || null,
+            icon_pokemon_id: iconPokemonId,
+            grid_rows: gridRows,
+            grid_columns: gridColumns,
+            ...(clearingLayout ? { clear_layout: true } : {}),
+          })
+        }}
           disabled={!name || loading} className="btn-primary flex-1">
           <Check size={14} /> {loading ? t('common.saving') : t('common.save')}
         </button>
