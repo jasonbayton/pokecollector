@@ -4,6 +4,7 @@ import os
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from services.binder_layout import MAX_GRID_DIMENSION, MIN_GRID_DIMENSION
 from services.tcgdex_languages import (
     SUPPORTED_TCGDEX_LANGUAGES,
     has_lang_suffix,
@@ -551,6 +552,37 @@ def _run_migrations(conn):
                     FOREIGN KEY (custom_owner_id) REFERENCES users(id) ON DELETE CASCADE;
             END IF;
         END$$""",
+        # v60: physical binder layout. Grid dimensions on the binder, and one
+        # row per occupied pocket. Every existing binder starts unmapped, so
+        # the columns are nullable and no backfill is required.
+        "ALTER TABLE binders ADD COLUMN IF NOT EXISTS grid_rows INTEGER",
+        "ALTER TABLE binders ADD COLUMN IF NOT EXISTS grid_columns INTEGER",
+        "ALTER TABLE binders DROP CONSTRAINT IF EXISTS ck_binder_grid_dimensions",
+        f"""ALTER TABLE binders ADD CONSTRAINT ck_binder_grid_dimensions
+            CHECK ((grid_rows IS NULL AND grid_columns IS NULL)
+                OR (grid_rows BETWEEN {MIN_GRID_DIMENSION} AND {MAX_GRID_DIMENSION}
+                AND grid_columns BETWEEN {MIN_GRID_DIMENSION} AND {MAX_GRID_DIMENSION}))""",
+        # binder_slots' composite foreign key needs this, because PostgreSQL
+        # will not reference columns without a unique constraint even when one
+        # of them is already the primary key. It must exist before the table.
+        "ALTER TABLE binder_cards DROP CONSTRAINT IF EXISTS uq_binder_cards_id_binder",
+        "ALTER TABLE binder_cards ADD CONSTRAINT uq_binder_cards_id_binder UNIQUE (id, binder_id)",
+        """CREATE TABLE IF NOT EXISTS binder_slots (
+            id SERIAL PRIMARY KEY,
+            binder_card_id INTEGER NOT NULL,
+            binder_id INTEGER NOT NULL,
+            page INTEGER NOT NULL,
+            pocket INTEGER NOT NULL,
+            placed_at TIMESTAMP DEFAULT NOW(),
+            CONSTRAINT ck_binder_slot_page_positive CHECK (page >= 1),
+            CONSTRAINT ck_binder_slot_pocket_positive CHECK (pocket >= 1),
+            CONSTRAINT uq_binder_slot_position UNIQUE (binder_id, page, pocket),
+            CONSTRAINT fk_binder_slots_entry
+                FOREIGN KEY (binder_card_id, binder_id)
+                REFERENCES binder_cards (id, binder_id) ON DELETE CASCADE
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_binder_slots_entry ON binder_slots(binder_card_id)",
+        "CREATE INDEX IF NOT EXISTS ix_binder_slots_binder_page ON binder_slots(binder_id, page)",
     ]
     for stmt in migrations:
         try:
