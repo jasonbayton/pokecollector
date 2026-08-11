@@ -8,18 +8,19 @@ from schemas import WishlistItemCreate, WishlistItemUpdate, WishlistItemResponse
 from api.collection import ensure_card_exists
 from services.card_visibility import visible_any_card_filter
 import datetime
+from services.quantity_limits import MAX_CARD_QUANTITY
 
 router = APIRouter()
 
 WISHLIST_MIN_QUANTITY = 1
-WISHLIST_MAX_QUANTITY = 99
+WISHLIST_MAX_QUANTITY = MAX_CARD_QUANTITY
 
 
 def _add_wishlist_quantity(current: int | None, increment: int) -> int:
     current_quantity = max(int(current or WISHLIST_MIN_QUANTITY), WISHLIST_MIN_QUANTITY)
     next_quantity = current_quantity + increment
     if next_quantity > WISHLIST_MAX_QUANTITY:
-        raise HTTPException(status_code=400, detail="Wishlist quantity cannot exceed 99")
+        raise HTTPException(status_code=400, detail=f"Wishlist quantity cannot exceed {WISHLIST_MAX_QUANTITY}")
     return next_quantity
 
 

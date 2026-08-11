@@ -10,6 +10,7 @@ from services.tcgdex_languages import (
     normalize_tcgdex_sync_languages,
     strip_lang_suffix,
 )
+from services.quantity_limits import MAX_CARD_QUANTITY
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
@@ -187,11 +188,11 @@ def _run_migrations(conn):
         "ALTER TABLE wishlist ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id)",
         "ALTER TABLE wishlist ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1",
         "UPDATE wishlist SET quantity = 1 WHERE quantity IS NULL OR quantity < 1",
-        "UPDATE wishlist SET quantity = 99 WHERE quantity > 99",
+        f"UPDATE wishlist SET quantity = {MAX_CARD_QUANTITY} WHERE quantity > {MAX_CARD_QUANTITY}",
         "ALTER TABLE wishlist ALTER COLUMN quantity SET DEFAULT 1",
         "ALTER TABLE wishlist ALTER COLUMN quantity SET NOT NULL",
         "ALTER TABLE wishlist DROP CONSTRAINT IF EXISTS ck_wishlist_quantity_range",
-        "ALTER TABLE wishlist ADD CONSTRAINT ck_wishlist_quantity_range CHECK (quantity >= 1 AND quantity <= 99)",
+        f"ALTER TABLE wishlist ADD CONSTRAINT ck_wishlist_quantity_range CHECK (quantity >= 1 AND quantity <= {MAX_CARD_QUANTITY})",
         "ALTER TABLE wishlist DROP CONSTRAINT IF EXISTS wishlist_card_id_key",
         "ALTER TABLE wishlist DROP CONSTRAINT IF EXISTS uq_wishlist_card_id",
         """DO $$
@@ -250,19 +251,17 @@ def _run_migrations(conn):
         "CREATE INDEX IF NOT EXISTS idx_cards_playable_fingerprint ON cards(playable_fingerprint)",
         "UPDATE binder_cards SET required_quantity = 1 WHERE required_quantity IS NULL",
         "UPDATE binder_cards SET required_quantity = 1 WHERE required_quantity < 1",
-        "UPDATE binder_cards SET required_quantity = 99 WHERE required_quantity > 99",
+        f"UPDATE binder_cards SET required_quantity = {MAX_CARD_QUANTITY} WHERE required_quantity > {MAX_CARD_QUANTITY}",
         "ALTER TABLE binder_cards ALTER COLUMN required_quantity SET DEFAULT 1",
         "ALTER TABLE binder_cards ALTER COLUMN required_quantity SET NOT NULL",
-        """DO $$
-        BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM pg_constraint
-                WHERE conname = 'ck_binder_card_quantity_range'
-            ) THEN
-                ALTER TABLE binder_cards ADD CONSTRAINT ck_binder_card_quantity_range
-                    CHECK (required_quantity >= 1 AND required_quantity <= 99);
-            END IF;
-        END$$""",
+        # Dropped and recreated rather than guarded by IF NOT EXISTS, because
+        # the constraint already exists at the old limit on every install that
+        # has run before: guarding on existence would leave the old bound in
+        # place and the raised cap would appear to work until a write hit the
+        # constraint.
+        "ALTER TABLE binder_cards DROP CONSTRAINT IF EXISTS ck_binder_card_quantity_range",
+        f"""ALTER TABLE binder_cards ADD CONSTRAINT ck_binder_card_quantity_range
+            CHECK (required_quantity >= 1 AND required_quantity <= {MAX_CARD_QUANTITY})""",
         "ALTER TABLE binder_cards DROP CONSTRAINT IF EXISTS uq_binder_card",
         """DO $$
         BEGIN
@@ -688,7 +687,7 @@ def migrate_legacy_collection_binder_entries():
 
         migrated = 0
         for entry, user_id in entries:
-            requested = min(stored_binder_quantity(entry.required_quantity), 99)
+            requested = min(stored_binder_quantity(entry.required_quantity), MAX_CARD_QUANTITY)
             candidates = db.query(CollectionItem).filter(
                 CollectionItem.user_id == user_id,
                 CollectionItem.card_id == entry.card_id,

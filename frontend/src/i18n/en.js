@@ -443,7 +443,7 @@ const en = {
     updated: 'Wishlist updated!',
     copies: 'copies',
     quantityPrompt: 'Quantity to add to wishlist:',
-    quantityInvalid: 'Enter a quantity between 1 and 99.',
+    quantityInvalid: 'Enter a quantity between 1 and {max}.',
     addedToCollection: 'Added to collection!',
     removed: 'Removed from wishlist',
     removeConfirm: 'Remove from wishlist?',

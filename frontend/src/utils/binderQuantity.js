@@ -1,3 +1,4 @@
+import { MAX_CARD_QUANTITY } from './quantityLimits'
 export function canConvertWishlistBinder(isWishlist, totalCount, missingCount) {
   return Boolean(isWishlist && Number(totalCount) > 0 && Number(missingCount) === 0)
 }
@@ -10,10 +11,10 @@ export function binderPickerItemsWithQuantities(items, quantities) {
 }
 
 export function binderPickerQuantityMaximum(item) {
-  if (item.maxQuantity === undefined || item.maxQuantity === null) return 99
+  if (item.maxQuantity === undefined || item.maxQuantity === null) return MAX_CARD_QUANTITY
   const maximum = Number(item.maxQuantity)
-  if (!Number.isFinite(maximum)) return 99
-  return Math.max(0, Math.min(99, Math.trunc(maximum)))
+  if (!Number.isFinite(maximum)) return MAX_CARD_QUANTITY
+  return Math.max(0, Math.min(MAX_CARD_QUANTITY, Math.trunc(maximum)))
 }
 
 export function clampBinderPickerQuantity(value, item) {

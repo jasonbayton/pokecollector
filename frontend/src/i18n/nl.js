@@ -354,7 +354,7 @@ const nl = {
     updated: 'Verlanglijst bijgewerkt!',
     copies: 'kopieën',
     quantityPrompt: 'Aantal om aan verlanglijst toe te voegen:',
-    quantityInvalid: 'Voer een aantal tussen 1 en 99 in.',
+    quantityInvalid: 'Voer een aantal tussen 1 en {max} in.',
     addedToCollection: 'Toegevoegd aan collectie!',
     removed: 'Verwijderd van verlanglijst',
     removeConfirm: 'Verwijderen van verlanglijst?',

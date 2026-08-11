@@ -356,7 +356,7 @@ const esMx = {
     updated: '¡Lista de deseos actualizada!',
     copies: 'copias',
     quantityPrompt: 'Cantidad para agregar a la lista de deseos:',
-    quantityInvalid: 'Introduce una cantidad entre 1 y 99.',
+    quantityInvalid: 'Introduce una cantidad entre 1 y {max}.',
     addedToCollection: '¡Agregada a la colección!',
     removed: 'Quitada de la lista de deseos',
     removeConfirm: '¿Quitar de la lista de deseos?',

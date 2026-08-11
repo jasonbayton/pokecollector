@@ -28,6 +28,7 @@ import datetime
 import csv
 import io
 import logging
+from services.quantity_limits import MAX_CARD_QUANTITY
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -68,8 +69,8 @@ def _safe_required_quantity(value: int | None) -> int:
             qty = int(value)
     except (TypeError, ValueError):
         raise HTTPException(status_code=422, detail="Required quantity must be a number")
-    if qty < 1 or qty > 99:
-        raise HTTPException(status_code=422, detail="Required quantity must be between 1 and 99")
+    if qty < 1 or qty > MAX_CARD_QUANTITY:
+        raise HTTPException(status_code=422, detail=f"Required quantity must be between 1 and {MAX_CARD_QUANTITY}")
     return qty
 
 
@@ -171,13 +172,13 @@ def _apply_wishlist_additions(db: Session, current_user: User, additions) -> tup
         ).first()
         if existing:
             current_quantity = max(int(existing.quantity or 1), 1)
-            next_quantity = min(99, current_quantity + addition.quantity)
+            next_quantity = min(MAX_CARD_QUANTITY, current_quantity + addition.quantity)
             actual_added = next_quantity - current_quantity
             if actual_added <= 0:
                 continue
             existing.quantity = next_quantity
         else:
-            actual_added = min(99, addition.quantity)
+            actual_added = min(MAX_CARD_QUANTITY, addition.quantity)
             if actual_added <= 0:
                 continue
             db.add(WishlistItem(
@@ -387,7 +388,7 @@ def _collection_optimizer_candidates(
         used_quantity = int(usage_counts.get(item.id, 0) or 0)
         reserved_quantity = int(reserved_collection_item_quantities.get(item.id, 0) or 0)
         stock_capacity = int(item.quantity or 0) - used_quantity - reserved_quantity
-        row_capacity = 99 - int(binder_collection_item_quantities.get(item.id, 0) or 0) - reserved_quantity
+        row_capacity = MAX_CARD_QUANTITY - int(binder_collection_item_quantities.get(item.id, 0) or 0) - reserved_quantity
         available_quantity = max(min(stock_capacity, row_capacity), 0)
         if available_quantity < required_quantity:
             continue
@@ -669,7 +670,7 @@ def convert_wishlist_binder_to_collection(
         planned = []
         for item in items_by_card.get(card_id, []):
             available = remaining_by_item.get(item.id, 0)
-            assigned = min(remaining, available, 99)
+            assigned = min(remaining, available, MAX_CARD_QUANTITY)
             if assigned <= 0:
                 continue
             planned.append((item, assigned))
@@ -764,7 +765,7 @@ def convert_collection_binder_to_wishlist(
         chunks = []
         remaining = total_quantity
         while remaining > 0:
-            chunk = min(remaining, 99)
+            chunk = min(remaining, MAX_CARD_QUANTITY)
             chunks.append(chunk)
             remaining -= chunk
 
@@ -873,7 +874,7 @@ def get_binder_cards(
         available_collection_item_quantities = {
             item_id: min(
                 max(int(quantity or 0) - int(usage_counts.get(item_id, 0) or 0), 0),
-                max(99 - int(current_binder_quantities.get(item_id, 0) or 0), 0),
+                max(MAX_CARD_QUANTITY - int(current_binder_quantities.get(item_id, 0) or 0), 0),
             )
             for item_id, quantity in owned_items
         }
@@ -967,7 +968,7 @@ def get_binder_cards(
         if binder_type == "collection" and exact_col_item:
             allocated_elsewhere = max(int(usage_counts.get(exact_col_item.id, 0) or 0) - required_quantity, 0)
             card_dict["available_quantity"] = max(collection_quantity - int(usage_counts.get(exact_col_item.id, 0) or 0), 0)
-            card_dict["max_assignable_quantity"] = min(99, max(collection_quantity - allocated_elsewhere, 0))
+            card_dict["max_assignable_quantity"] = min(MAX_CARD_QUANTITY, max(collection_quantity - allocated_elsewhere, 0))
         if bc.card.set_ref:
             card_dict["set_name"] = bc.card.set_ref.name
         cards.append(card_dict)
@@ -1081,7 +1082,7 @@ def apply_binder_print_optimization(
                 assigned_quantity = stored_binder_quantity(bc.required_quantity)
                 combined_quantity = stored_binder_quantity(existing.required_quantity) + assigned_quantity
                 usage_count = _collection_binder_usage_counts(db, current_user).get(target_item.id, 0)
-                if combined_quantity > 99 or usage_count + assigned_quantity > int(target_item.quantity or 0):
+                if combined_quantity > MAX_CARD_QUANTITY or usage_count + assigned_quantity > int(target_item.quantity or 0):
                     skipped += 1
                     continue
                 existing.required_quantity = combined_quantity
@@ -1119,7 +1120,7 @@ def apply_binder_print_optimization(
         ).first()
         if existing:
             combined_quantity = (existing.required_quantity or 1) + (bc.required_quantity or 1)
-            if combined_quantity > 99:
+            if combined_quantity > MAX_CARD_QUANTITY:
                 skipped += 1
                 continue
             existing.required_quantity = combined_quantity
@@ -1233,8 +1234,8 @@ def add_collection_item_to_binder(
 
     if existing:
         next_quantity = stored_binder_quantity(existing.required_quantity) + quantity
-        if next_quantity > 99:
-            raise HTTPException(status_code=422, detail="Required quantity must be between 1 and 99")
+        if next_quantity > MAX_CARD_QUANTITY:
+            raise HTTPException(status_code=422, detail=f"Required quantity must be between 1 and {MAX_CARD_QUANTITY}")
         existing.required_quantity = next_quantity
         db.commit()
         return {
@@ -1320,7 +1321,7 @@ def _add_owned_set_entries(
             binder_id=binder.id,
             card_id=item.card_id,
             collection_item_id=item.id,
-            required_quantity=min(available_quantity, 99),
+            required_quantity=min(available_quantity, MAX_CARD_QUANTITY),
             added_at=datetime.datetime.utcnow(),
         ))
         added += 1
@@ -1644,8 +1645,8 @@ def switch_binder_entry_card(
         ).first()
         if existing:
             combined_quantity = stored_binder_quantity(existing.required_quantity) + assigned_quantity
-            if combined_quantity > 99:
-                raise HTTPException(status_code=422, detail="Required quantity must be between 1 and 99")
+            if combined_quantity > MAX_CARD_QUANTITY:
+                raise HTTPException(status_code=422, detail=f"Required quantity must be between 1 and {MAX_CARD_QUANTITY}")
             usage_count = _collection_binder_usage_counts(db, current_user).get(target_item.id, 0)
             if usage_count + assigned_quantity > int(target_item.quantity or 0):
                 raise HTTPException(status_code=409, detail="Not enough unallocated copies of this print are available")
@@ -1710,8 +1711,8 @@ def switch_binder_entry_card(
     ).first()
     if existing:
         combined_quantity = (existing.required_quantity or 1) + (bc.required_quantity or 1)
-        if combined_quantity > 99:
-            raise HTTPException(status_code=400, detail="Switching would exceed the maximum required quantity of 99")
+        if combined_quantity > MAX_CARD_QUANTITY:
+            raise HTTPException(status_code=400, detail=f"Switching would exceed the maximum required quantity of {MAX_CARD_QUANTITY}")
         existing.required_quantity = combined_quantity
         db.delete(bc)
         db.commit()
@@ -1777,7 +1778,7 @@ def add_binder_entry_to_wishlist(
         ).first()
         if existing:
             current_quantity = max(int(existing.quantity or 1), 1)
-            next_quantity = min(99, current_quantity + requested_quantity)
+            next_quantity = min(MAX_CARD_QUANTITY, current_quantity + requested_quantity)
             actual_added = next_quantity - current_quantity
             if actual_added <= 0:
                 return {
@@ -2048,7 +2049,7 @@ async def import_binder_csv(
                 required_quantity = _safe_required_quantity(row.get("required_quantity"))
             except HTTPException:
                 failed += 1
-                errors.append(f"row {row_number}: required_quantity must be a number between 1 and 99")
+                errors.append(f"row {row_number}: required_quantity must be a number between 1 and {MAX_CARD_QUANTITY}")
                 continue
             try:
                 card = _find_card_by_code(db, set_code, number, lang)
@@ -2108,7 +2109,7 @@ async def import_binder_csv(
                 if planned:
                     next_increment = planned["increment"] + required_quantity
                     next_quantity = planned["required_quantity"] + required_quantity
-                    if next_quantity > 99:
+                    if next_quantity > MAX_CARD_QUANTITY:
                         failed += 1
                         errors.append(f"row {row_number}: {BINDER_CSV_DUPLICATE_QUANTITY_ERROR}")
                     else:
@@ -2121,7 +2122,7 @@ async def import_binder_csv(
                 ).first()
                 base_quantity = stored_binder_quantity(existing_entry.required_quantity) if existing_entry else 0
                 next_quantity = base_quantity + required_quantity
-                if next_quantity > 99:
+                if next_quantity > MAX_CARD_QUANTITY:
                     failed += 1
                     errors.append(f"row {row_number}: {BINDER_CSV_DUPLICATE_QUANTITY_ERROR}")
                     continue
@@ -2220,7 +2221,7 @@ async def import_binder_csv(
             base_quantity = stored_binder_quantity(existing.required_quantity) if existing else 0
             next_quantity = base_quantity + increment
             available_quantity = int(item.quantity or 0) - int(locked_usage.get(item_id, 0) or 0) if item else 0
-            if not item or increment > available_quantity or next_quantity > 99:
+            if not item or increment > available_quantity or next_quantity > MAX_CARD_QUANTITY:
                 db.rollback()
                 return {
                     "added": 0,

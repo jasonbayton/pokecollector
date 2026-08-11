@@ -354,7 +354,7 @@ const sv = {
     updated: 'Önskelistan uppdaterad!',
     copies: 'kopior',
     quantityPrompt: 'Antal att lägga till i önskelistan:',
-    quantityInvalid: 'Ange ett antal mellan 1 och 99.',
+    quantityInvalid: 'Ange ett antal mellan 1 och {max}.',
     addedToCollection: 'Tillagd i samlingen!',
     removed: 'Borttagen från önskelistan',
     removeConfirm: 'Ta bort från önskelistan?',

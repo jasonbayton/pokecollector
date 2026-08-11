@@ -356,7 +356,7 @@ const ru = {
     updated: 'Список желаний обновлен!',
     copies: 'копии',
     quantityPrompt: 'Количество для добавления в список желаний:',
-    quantityInvalid: 'Введите количество от 1 до 99.',
+    quantityInvalid: 'Введите количество от 1 до {max}.',
     addedToCollection: 'Добавлено в коллекцию!',
     removed: 'Удалено из списка желаний',
     removeConfirm: 'Удалить из списка желаний?',

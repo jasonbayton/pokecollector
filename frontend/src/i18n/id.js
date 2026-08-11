@@ -356,7 +356,7 @@ const id = {
     updated: 'Wishlist diperbarui!',
     copies: 'salinan',
     quantityPrompt: 'Jumlah untuk ditambahkan ke wishlist:',
-    quantityInvalid: 'Masukkan jumlah antara 1 dan 99.',
+    quantityInvalid: 'Masukkan jumlah antara 1 dan {max}.',
     addedToCollection: 'Ditambahkan ke koleksi!',
     removed: 'Dihapus dari wishlist',
     removeConfirm: 'Hapus dari wishlist?',

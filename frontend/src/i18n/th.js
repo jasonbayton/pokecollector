@@ -354,7 +354,7 @@ const th = {
     updated: 'อัปเดตรายการที่อยากได้แล้ว!',
     copies: 'สำเนา',
     quantityPrompt: 'จำนวนที่จะเพิ่มลงรายการที่อยากได้:',
-    quantityInvalid: 'ป้อนจำนวนระหว่าง 1 ถึง 99',
+    quantityInvalid: 'ป้อนจำนวนระหว่าง 1 ถึง {max}',
     addedToCollection: 'เพิ่มลงคอลเลกชันแล้ว!',
     removed: 'ลบออกจากรายการที่อยากได้แล้ว',
     removeConfirm: 'ลบออกจากรายการที่อยากได้?',

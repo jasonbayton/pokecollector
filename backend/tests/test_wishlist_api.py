@@ -1,5 +1,7 @@
 import datetime
 import unittest
+
+from services.quantity_limits import MAX_CARD_QUANTITY
 from unittest.mock import patch
 
 try:
@@ -96,7 +98,7 @@ class WishlistApiTests(unittest.TestCase):
         item = WishlistItem(
             card_id=self.card.id,
             user_id=self.user.id,
-            quantity=99,
+            quantity=MAX_CARD_QUANTITY,
             created_at=datetime.datetime.utcnow(),
         )
         self.db.add(item)

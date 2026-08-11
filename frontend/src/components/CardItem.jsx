@@ -20,6 +20,7 @@ import { invalidateCardState, invalidateTcgdexFilterLanguages } from '../utils/q
 import { parseMoneyInputValue } from '../utils/moneyInput'
 import { cardmarketLinks } from '../utils/cardmarket'
 import UnifiedCard, { UnifiedCardDialog } from './UnifiedCard'
+import { MAX_CARD_QUANTITY } from '../utils/quantityLimits'
 
 const RARITY_COLORS = {
   'Common': 'text-text-secondary',
@@ -1133,16 +1134,16 @@ export function CardModal({ card, onClose, onEdit, defaultLang = 'en', ownedItem
                     <input
                       type="number"
                       min="1"
-                      max="99"
+                      max={MAX_CARD_QUANTITY}
                       value={quantity}
-                      onChange={(e) => setQuantity(Math.max(1, Math.min(99, parseInt(e.target.value, 10) || 1)))}
+                      onChange={(e) => setQuantity(Math.max(1, Math.min(MAX_CARD_QUANTITY, parseInt(e.target.value, 10) || 1)))}
                       className="input"
                     />
                   </div>
                   <button
                     type="button"
                     className="btn-primary w-full"
-                    onClick={() => wishlistMutation.mutate({ card_id: card.id, quantity: Math.max(1, Math.min(99, quantity)) })}
+                    onClick={() => wishlistMutation.mutate({ card_id: card.id, quantity: Math.max(1, Math.min(MAX_CARD_QUANTITY, quantity)) })}
                     disabled={wishlistMutation.isPending}
                   >
                     <Heart size={16} />

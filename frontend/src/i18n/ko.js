@@ -356,7 +356,7 @@ const ko = {
     updated: '위시리스트가 업데이트되었습니다!',
     copies: '사본',
     quantityPrompt: '위시리스트에 추가할 수량:',
-    quantityInvalid: '1에서 99 사이의 수량을 입력하세요.',
+    quantityInvalid: '1에서 {max} 사이의 수량을 입력하세요.',
     addedToCollection: '컬렉션에 추가되었습니다!',
     removed: '위시리스트에서 제거됨',
     removeConfirm: '위시리스트에서 제거할까요?',

@@ -356,7 +356,7 @@ const pt = {
     updated: 'Lista de desejos atualizada!',
     copies: 'cópias',
     quantityPrompt: 'Quantidade a adicionar à lista de desejos:',
-    quantityInvalid: 'Introduza uma quantidade entre 1 e 99.',
+    quantityInvalid: 'Introduza uma quantidade entre 1 e {max}.',
     addedToCollection: 'Adicionado à coleção!',
     removed: 'Removido da lista de desejos',
     removeConfirm: 'Remover da lista de desejos?',

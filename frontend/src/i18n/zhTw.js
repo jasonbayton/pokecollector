@@ -356,7 +356,7 @@ const zhTw = {
     updated: '願望清單已更新！',
     copies: '份',
     quantityPrompt: '要新增到願望清單的數量：',
-    quantityInvalid: '請輸入 1 到 99 之間的數量。',
+    quantityInvalid: '請輸入 1 到 {max} 之間的數量。',
     addedToCollection: '已新增到收藏！',
     removed: '已從願望清單移除',
     removeConfirm: '從願望清單移除？',

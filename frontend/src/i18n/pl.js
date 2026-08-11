@@ -356,7 +356,7 @@ const pl = {
     updated: 'Lista życzeń zaktualizowana!',
     copies: 'kopie',
     quantityPrompt: 'Ilość do dodania do listy życzeń:',
-    quantityInvalid: 'Wpisz ilość od 1 do 99.',
+    quantityInvalid: 'Wpisz ilość od 1 do {max}.',
     addedToCollection: 'Dodano do kolekcji!',
     removed: 'Usunięto z listy życzeń',
     removeConfirm: 'Usunąć z listy życzeń?',

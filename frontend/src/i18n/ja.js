@@ -356,7 +356,7 @@ const ja = {
     updated: 'ウィッシュリストを更新しました!',
     copies: '枚',
     quantityPrompt: 'ウィッシュリストに追加する数量:',
-    quantityInvalid: '1 から 99 の数量を入力してください。',
+    quantityInvalid: '1 から {max} の数量を入力してください。',
     addedToCollection: 'コレクションに追加しました!',
     removed: 'ウィッシュリストから削除しました',
     removeConfirm: 'ウィッシュリストから削除しますか?',

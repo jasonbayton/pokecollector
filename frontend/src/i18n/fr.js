@@ -354,7 +354,7 @@ const fr = {
     updated: 'Liste de souhaits mise à jour !',
     copies: 'copies',
     quantityPrompt: 'Quantité à ajouter à la liste de souhaits :',
-    quantityInvalid: 'Saisis une quantité entre 1 et 99.',
+    quantityInvalid: 'Saisis une quantité entre 1 et {max}.',
     addedToCollection: 'Ajouté à la collection !',
     removed: 'Retiré de la liste de souhaits',
     removeConfirm: 'Retirer de la liste de souhaits ?',

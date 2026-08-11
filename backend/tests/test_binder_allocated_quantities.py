@@ -1,6 +1,8 @@
 import asyncio
 import io
 import unittest
+
+from services.quantity_limits import MAX_CARD_QUANTITY
 from unittest.mock import patch
 
 try:
@@ -335,7 +337,7 @@ class BinderAllocatedQuantityTests(unittest.TestCase):
         self.assertEqual(wishlist["missing_count"], 2)
 
     def test_collection_conversion_preserves_totals_above_single_row_limit(self):
-        self.item.quantity = 99
+        self.item.quantity = MAX_CARD_QUANTITY
         second_item = CollectionItem(
             card_id=self.card.id,
             user_id=self.user.id,
@@ -347,7 +349,7 @@ class BinderAllocatedQuantityTests(unittest.TestCase):
         self.db.add(second_item)
         self.db.commit()
         add_collection_item_to_binder(
-            self.first.id, self.item.id, quantity=99, current_user=self.user, db=self.db
+            self.first.id, self.item.id, quantity=MAX_CARD_QUANTITY, current_user=self.user, db=self.db
         )
         add_collection_item_to_binder(
             self.first.id, second_item.id, quantity=51, current_user=self.user, db=self.db
@@ -360,7 +362,7 @@ class BinderAllocatedQuantityTests(unittest.TestCase):
         )
 
         rows = self.db.query(BinderCard).filter(BinderCard.binder_id == self.first.id).all()
-        self.assertEqual(sorted(row.required_quantity for row in rows), [51, 99])
+        self.assertEqual(sorted(row.required_quantity for row in rows), [51, MAX_CARD_QUANTITY])
         self.assertTrue(all(row.collection_item_id is None for row in rows))
 
     def test_empty_collection_binder_can_be_converted_to_wishlist(self):
@@ -798,8 +800,8 @@ class BinderAllocatedQuantityTests(unittest.TestCase):
         self.assertEqual(entries[0].required_quantity, 2)
 
     def test_optimizer_preview_does_not_overbook_binder_row_limit(self):
-        self.item.quantity = 60
-        self.alt_item.quantity = 120
+        self.item.quantity = MAX_CARD_QUANTITY
+        self.alt_item.quantity = MAX_CARD_QUANTITY + 40
         second_source = CollectionItem(
             card_id=self.card.id,
             user_id=self.user.id,
@@ -811,7 +813,7 @@ class BinderAllocatedQuantityTests(unittest.TestCase):
         self.db.add(second_source)
         self.db.commit()
         add_collection_item_to_binder(
-            self.first.id, self.item.id, quantity=60, current_user=self.user, db=self.db
+            self.first.id, self.item.id, quantity=MAX_CARD_QUANTITY, current_user=self.user, db=self.db
         )
         add_collection_item_to_binder(
             self.first.id, second_source.id, quantity=40, current_user=self.user, db=self.db
@@ -828,9 +830,9 @@ class BinderAllocatedQuantityTests(unittest.TestCase):
         entries = self.db.query(BinderCard).filter(BinderCard.binder_id == self.first.id).all()
         self.assertEqual(len(entries), 2)
         target_entry = next(entry for entry in entries if entry.collection_item_id == self.alt_item.id)
-        self.assertIn(target_entry.required_quantity, {40, 60})
-        self.assertLessEqual(target_entry.required_quantity, 99)
-        self.assertEqual(sum(entry.required_quantity for entry in entries), 100)
+        self.assertIn(target_entry.required_quantity, {40, MAX_CARD_QUANTITY})
+        self.assertLessEqual(target_entry.required_quantity, MAX_CARD_QUANTITY)
+        self.assertEqual(sum(entry.required_quantity for entry in entries), MAX_CARD_QUANTITY + 40)
 
 
 if __name__ == "__main__":

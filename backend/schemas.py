@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List, Any, Literal
 from datetime import datetime, date
+from services.quantity_limits import MAX_CARD_QUANTITY
 
 
 class SetBase(BaseModel):
@@ -203,13 +204,13 @@ class CollectionItemResponse(BaseModel):
 
 class WishlistItemCreate(BaseModel):
     card_id: str
-    quantity: int = Field(1, ge=1, le=99)
+    quantity: int = Field(1, ge=1, le=MAX_CARD_QUANTITY)
     price_alert_above: Optional[float] = None
     price_alert_below: Optional[float] = None
 
 
 class WishlistItemUpdate(BaseModel):
-    quantity: Optional[int] = Field(None, ge=1, le=99)
+    quantity: Optional[int] = Field(None, ge=1, le=MAX_CARD_QUANTITY)
     price_alert_above: Optional[float] = None
     price_alert_below: Optional[float] = None
 

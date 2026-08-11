@@ -426,7 +426,7 @@ const de = {
     updated: 'Wunschliste aktualisiert!',
     copies: 'Kopien',
     quantityPrompt: 'Menge für die Wunschliste:',
-    quantityInvalid: 'Gib eine Menge zwischen 1 und 99 ein.',
+    quantityInvalid: 'Gib eine Menge zwischen 1 und {max} ein.',
     addedToCollection: 'Zur Sammlung hinzugefügt!',
     removed: 'Von Wunschliste entfernt',
     removeConfirm: 'von der Wunschliste entfernen?',

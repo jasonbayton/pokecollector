@@ -356,7 +356,7 @@ const zh = {
     updated: '愿望清单已更新！',
     copies: '份',
     quantityPrompt: '要添加到愿望清单的数量：',
-    quantityInvalid: '请输入 1 到 99 之间的数量。',
+    quantityInvalid: '请输入 1 到 {max} 之间的数量。',
     addedToCollection: '已添加到收藏！',
     removed: '已从愿望清单移除',
     removeConfirm: '从愿望清单移除？',

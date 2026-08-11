@@ -40,6 +40,7 @@ from services.card_state import card_state_summaries
 import datetime
 import re
 from uuid import uuid4
+from services.quantity_limits import MAX_CARD_QUANTITY
 
 router = APIRouter()
 
@@ -938,7 +939,7 @@ def migrate_custom_card(
     for custom_wishlist in custom_wishlist_items:
         existing_wishlist = existing_wishlist_by_user.get(custom_wishlist.user_id)
         if existing_wishlist:
-            existing_wishlist.quantity = min(99, max(int(existing_wishlist.quantity or 1), 1) + max(int(custom_wishlist.quantity or 1), 1))
+            existing_wishlist.quantity = min(MAX_CARD_QUANTITY, max(int(existing_wishlist.quantity or 1), 1) + max(int(custom_wishlist.quantity or 1), 1))
             if existing_wishlist.price_alert_above is None:
                 existing_wishlist.price_alert_above = custom_wishlist.price_alert_above
             if existing_wishlist.price_alert_below is None:
@@ -969,7 +970,7 @@ def migrate_custom_card(
         existing_binder_card = existing_query.order_by(BinderCard.id.asc()).first()
         if existing_binder_card:
             existing_binder_card.required_quantity = min(
-                99,
+                MAX_CARD_QUANTITY,
                 max(int(existing_binder_card.required_quantity or 1), 1)
                 + max(int(binder_card.required_quantity or 1), 1),
             )

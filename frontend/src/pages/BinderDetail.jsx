@@ -14,6 +14,7 @@ import { BINDER_SORT_OPTIONS, sortBinderCards } from '../utils/binderCards'
 import { partitionSettledResults } from '../utils/settledResults'
 import { formatBinderCountSummary } from '../utils/binderCounts'
 import { binderPickerItemsWithQuantities, binderPickerQuantitiesAreValid, binderPickerQuantityMaximum, canConvertWishlistBinder, clampBinderPickerQuantity } from '../utils/binderQuantity'
+import { MAX_CARD_QUANTITY } from '../utils/quantityLimits'
 import { CardDialog, CardDisplay, CardLegend, withCollectionItemState } from '../components/card-system'
 import Modal from '../components/ui/Modal'
 
@@ -516,7 +517,7 @@ export default function BinderDetail() {
     if (!quantityDialog) return
     const items = binderPickerItemsWithQuantities(quantityDialog.items, pickerQuantities)
     if (!binderPickerQuantitiesAreValid(items)) {
-      toast.error(t('wishlist.quantityInvalid'))
+      toast.error(t('wishlist.quantityInvalid').replace('{max}', MAX_CARD_QUANTITY))
       return
     }
     if (quantityDialog.mode === 'wishlist') {

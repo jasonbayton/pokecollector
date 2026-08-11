@@ -6,6 +6,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSONB
 from database import Base
+from services.quantity_limits import MAX_CARD_QUANTITY
 
 POKEDEX_JSON = JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql")
 PORTFOLIO_CALCULATION_VERSION = 2
@@ -189,7 +190,7 @@ class WishlistItem(Base):
     card = relationship("Card", back_populates="wishlist_items")
 
     __table_args__ = (
-        CheckConstraint("quantity >= 1 AND quantity <= 99", name="ck_wishlist_quantity_range"),
+        CheckConstraint(f"quantity >= 1 AND quantity <= {MAX_CARD_QUANTITY}", name="ck_wishlist_quantity_range"),
         UniqueConstraint("user_id", "card_id", name="uq_wishlist_user_card"),
     )
 
@@ -244,7 +245,7 @@ class BinderCard(Base):
     collection_item = relationship("CollectionItem")
 
     __table_args__ = (
-        CheckConstraint("required_quantity >= 1 AND required_quantity <= 99", name="ck_binder_card_quantity_range"),
+        CheckConstraint(f"required_quantity >= 1 AND required_quantity <= {MAX_CARD_QUANTITY}", name="ck_binder_card_quantity_range"),
         UniqueConstraint("binder_id", "collection_item_id", name="uq_binder_collection_item"),
     )
 
