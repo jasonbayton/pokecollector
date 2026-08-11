@@ -639,7 +639,7 @@ export default function BinderDetail() {
   }), binderSortBy, { isWishlist })
 
   const changeRequiredQuantity = (card, delta) => {
-    const maximum = isCollection ? (card.max_assignable_quantity || 1) : 99
+    const maximum = isCollection ? (card.max_assignable_quantity || 1) : MAX_CARD_QUANTITY
     const next = Math.max(1, Math.min(maximum, (card.required_quantity || 1) + delta))
     updateEntryMutation.mutate({ binderCardId: card.binder_card_id, requiredQuantity: next })
   }
@@ -1260,7 +1260,7 @@ export default function BinderDetail() {
                       <div className="flex items-center gap-2">
                         <button className="btn-ghost px-2" onClick={() => changeRequiredQuantity(selectedCard, -1)} disabled={updateEntryMutation.isPending || (selectedCard.required_quantity || 1) <= 1}><Minus size={14} /></button>
                         <span className="text-lg font-bold text-text-primary min-w-8 text-center">{selectedCard.required_quantity || 1}</span>
-                        <button className="btn-ghost px-2" onClick={() => changeRequiredQuantity(selectedCard, 1)} disabled={updateEntryMutation.isPending || (selectedCard.required_quantity || 1) >= (isCollection ? (selectedCard.max_assignable_quantity || 1) : 99)}><Plus size={14} /></button>
+                        <button className="btn-ghost px-2" onClick={() => changeRequiredQuantity(selectedCard, 1)} disabled={updateEntryMutation.isPending || (selectedCard.required_quantity || 1) >= (isCollection ? (selectedCard.max_assignable_quantity || 1) : MAX_CARD_QUANTITY)}><Plus size={14} /></button>
                       </div>
                       {isCollection && <p className="mt-1 text-xs text-text-muted">{selectedCard.available_quantity || 0} {t('products.available')}</p>}
                     </div>
