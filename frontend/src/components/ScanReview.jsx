@@ -62,17 +62,14 @@ export function useScanItemPhoto(jobId, item) {
   return url
 }
 
-function CandidateGrid({ matches, photoUrl, onSelect, onModalChange, t }) {
+function CandidateGrid({ matches, photoUrl, onSelect, t }) {
   const [zoomCard, setZoomCard] = useState(null)
   if (!matches?.length) return null
 
   return (
     <>
       {zoomCard && (
-        <ScanZoomModal photoUrl={photoUrl} card={zoomCard} onClose={() => {
-          setZoomCard(null)
-          onModalChange?.(false)
-        }} t={t} />
+        <ScanZoomModal photoUrl={photoUrl} card={zoomCard} onClose={() => setZoomCard(null)} t={t} />
       )}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {matches.map(match => {
@@ -90,7 +87,6 @@ function CandidateGrid({ matches, photoUrl, onSelect, onModalChange, t }) {
                   <button type="button" onClick={event => {
                     event.stopPropagation()
                     setZoomCard(match)
-                    onModalChange?.(true)
                   }}
                     aria-label={t('scanner.compareCandidate')}
                     title={t('scanner.compareCandidate')}
@@ -107,7 +103,7 @@ function CandidateGrid({ matches, photoUrl, onSelect, onModalChange, t }) {
   )
 }
 
-export function ScanItemPanel({ jobId, item, onAdd, onRetry, onDismiss, onModalChange, retryNow, t }) {
+export function ScanItemPanel({ jobId, item, onAdd, onRetry, onDismiss, retryNow, t }) {
   const photoUrl = useScanItemPhoto(jobId, item)
   const [photoExpanded, setPhotoExpanded] = useState(false)
   const active = ['pending', 'processing', 'retrying'].includes(item.status)
@@ -116,16 +112,12 @@ export function ScanItemPanel({ jobId, item, onAdd, onRetry, onDismiss, onModalC
   return (
     <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
       {photoExpanded && (
-        <ScanZoomModal photoUrl={photoUrl} onClose={() => {
-          setPhotoExpanded(false)
-          onModalChange?.(false)
-        }} t={t} />
+        <ScanZoomModal photoUrl={photoUrl} onClose={() => setPhotoExpanded(false)} t={t} />
       )}
       <div className="flex gap-4">
         <button type="button" onClick={() => {
           if (!photoUrl) return
           setPhotoExpanded(true)
-          onModalChange?.(true)
         }} disabled={!photoUrl}
           className="grid aspect-[2.5/3.5] w-24 flex-shrink-0 place-items-center overflow-hidden rounded-xl border border-white/10 bg-bg-primary/50 disabled:cursor-default">
           {photoUrl
@@ -186,7 +178,7 @@ export function ScanItemPanel({ jobId, item, onAdd, onRetry, onDismiss, onModalC
           <p className="mb-3 text-[10px] font-black uppercase tracking-[0.2em] text-text-muted">
             {t('scanner.bestMatches')} ({item.matches.length})
           </p>
-          <CandidateGrid matches={item.matches} photoUrl={photoUrl} onSelect={match => onAdd(item, match)} onModalChange={onModalChange} t={t} />
+          <CandidateGrid matches={item.matches} photoUrl={photoUrl} onSelect={match => onAdd(item, match)} t={t} />
         </div>
       )}
     </article>

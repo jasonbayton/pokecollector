@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Clock3, Loader2, ScanLine, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -13,7 +13,6 @@ import {
 import ScanAddModal from '../components/ScanAddModal'
 import { ScanItemPanel } from '../components/ScanReview'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
-import Modal from '../components/ui/Modal'
 import { useSettings } from '../contexts/SettingsContext'
 import {
   SCAN_JOBS_QUERY_KEY,
@@ -22,6 +21,20 @@ import {
   scanJobPollInterval,
 } from '../utils/scanJobs'
 import { formatRetryCountdown } from '../utils/retryCountdown'
+
+// react-router stamps an incrementing `idx` onto window.history.state, starting
+// at 0 for the entry the tab was loaded on. An idx above 0 therefore means this
+// router pushed at least one entry before we arrived, so going back lands on one
+// of our own pages instead of leaving the app. location.key cannot answer this:
+// replacing the first entry mints a fresh key while the index stays 0.
+export function hasInAppPredecessor(historyState) {
+  return Number.isInteger(historyState?.idx) && historyState.idx > 0
+}
+
+function currentHistoryState() {
+  if (typeof window === 'undefined') return null
+  return window.history?.state ?? null
+}
 
 function useRetryClock(enabled) {
   const [now, setNow] = useState(() => Date.now())
@@ -78,18 +91,22 @@ function JobRow({ job, onOpen, retryNow, t }) {
   )
 }
 
-function JobDetail({ jobId, onObscuredChange }) {
+function JobDetail({ jobId }) {
   const { t } = useSettings()
   const navigate = useNavigate()
+  const location = useLocation()
   const queryClient = useQueryClient()
   const [addSelection, setAddSelection] = useState(null)
   const [confirmation, setConfirmation] = useState(null)
-  const [itemModalOpen, setItemModalOpen] = useState(false)
 
-  useEffect(() => {
-    onObscuredChange(Boolean(addSelection || confirmation || itemModalOpen))
-    return () => onObscuredChange(false)
-  }, [addSelection, confirmation, itemModalOpen, onObscuredChange])
+  // The list is not always the previous entry: the scanner pushes straight to a
+  // freshly enqueued job from the search page. Only a detail opened from a queue
+  // row may pop; anything else replaces itself with the list, which keeps the
+  // history index where it was so leaving the list still has a sane target.
+  const backToList = () => {
+    if (location.state?.fromScanQueue) navigate(-1)
+    else navigate('/scans', { replace: true })
+  }
 
   const { data: job, isLoading, isError } = useQuery({
     queryKey: ['scan-job', jobId],
@@ -109,7 +126,7 @@ function JobDetail({ jobId, onObscuredChange }) {
       const remaining = (job?.items || []).filter(candidate => candidate.id !== item.id)
       setConfirmation(null)
       invalidate()
-      if (remaining.length === 0) navigate('/scans', { replace: true })
+      if (remaining.length === 0) backToList()
     },
     onError: error => toast.error(error?.response?.data?.detail || t('scanner.actionFailed')),
   })
@@ -125,7 +142,7 @@ function JobDetail({ jobId, onObscuredChange }) {
     onSuccess: () => {
       setConfirmation(null)
       invalidate()
-      navigate('/scans', { replace: true })
+      backToList()
     },
     onError: error => toast.error(error?.response?.data?.detail || t('scanner.actionFailed')),
   })
@@ -153,7 +170,7 @@ function JobDetail({ jobId, onObscuredChange }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
-        <button type="button" onClick={() => navigate('/scans')}
+        <button type="button" onClick={backToList}
           className="btn-ghost px-3 py-1.5 text-sm">
           <ArrowLeft size={16} /> {t('scanner.backToScans')}
         </button>
@@ -199,7 +216,6 @@ function JobDetail({ jobId, onObscuredChange }) {
             onAdd={(scanItem, match) => setAddSelection({ item: scanItem, match })}
             onRetry={itemToRetry => retryMutation.mutate(itemToRetry)}
             onDismiss={dismiss}
-            onModalChange={setItemModalOpen}
             retryNow={retryNow}
             t={t}
           />
@@ -240,7 +256,6 @@ export default function ScanQueue() {
   const { t } = useSettings()
   const navigate = useNavigate()
   const { jobId } = useParams()
-  const [isNestedOpen, setIsNestedOpen] = useState(false)
 
   const { data, isLoading } = useQuery({
     queryKey: SCAN_JOBS_QUERY_KEY,
@@ -248,36 +263,62 @@ export default function ScanQueue() {
     refetchInterval: query => hasActiveScanJobs(query.state.data?.jobs || []) ? 3000 : false,
   })
 
-  const closeScans = () => navigate('/search')
+  // Leaving the queue is a page navigation now, so it has to respect where the
+  // user came from. Only a direct load (or an arrival from outside the app) has
+  // nowhere to go back to, and then the search page is the one that hosts the
+  // scanner and the queue's own entry point.
+  const leaveScans = () => {
+    if (hasInAppPredecessor(currentHistoryState())) navigate(-1)
+    else navigate('/search')
+  }
+
   const jobs = data?.jobs || []
   const retryNow = useRetryClock(jobs.some(job => Number(job.retrying || 0) > 0))
   return (
-    <Modal isOpen onClose={closeScans} title={t('scanner.queueTitle')} size="xl" isObscured={isNestedOpen}>
-      <div className="space-y-4 p-4 sm:p-5">
-        {jobId ? (
-          <JobDetail jobId={Number(jobId)} onObscuredChange={setIsNestedOpen} />
-        ) : (
-          <>
-            <p className="text-sm text-text-secondary">{t('scanner.queueSubtitle')}</p>
+    <div className="mx-auto w-full max-w-4xl space-y-4 py-2">
+      {jobId ? (
+        <JobDetail jobId={Number(jobId)} />
+      ) : (
+        <>
+          <div>
+            <button type="button" onClick={leaveScans} className="btn-ghost px-3 py-1.5 text-sm">
+              <ArrowLeft size={16} /> {t('common.back')}
+            </button>
+          </div>
+          <p className="text-sm text-text-secondary">{t('scanner.queueSubtitle')}</p>
 
-            {isLoading ? (
-              <div className="flex justify-center py-16"><Loader2 size={28} className="animate-spin text-brand-red" /></div>
-            ) : jobs.length === 0 ? (
-              <div className="card space-y-3 py-12 text-center">
-                <ScanLine size={28} className="mx-auto text-text-muted opacity-50" />
-                <p className="text-sm text-text-muted">{t('scanner.noScans')}</p>
-                <button type="button" onClick={closeScans} className="btn-primary mx-auto justify-center">
-                  {t('scanner.goScan')}
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {jobs.map(job => <JobRow key={job.id} job={job} onOpen={id => navigate(`/scans/${id}`)} retryNow={retryNow} t={t} />)}
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </Modal>
+          {isLoading ? (
+            <div className="flex justify-center py-16"><Loader2 size={28} className="animate-spin text-brand-red" /></div>
+          ) : jobs.length === 0 ? (
+            <div className="card space-y-3 py-12 text-center">
+              <ScanLine size={28} className="mx-auto text-text-muted opacity-50" />
+              <p className="text-sm text-text-muted">{t('scanner.noScans')}</p>
+              {/* Deliberately the search page rather than "wherever you came
+                  from": the scanner is only reachable from the camera button
+                  there, so history could drop the user somewhere with no way to
+                  scan at all. It still costs the user a second click, which only
+                  a scanner route or provider can remove. */}
+              <button type="button" onClick={() => navigate('/search')} className="btn-primary mx-auto justify-center">
+                {t('scanner.goScan')}
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {jobs.map(job => (
+                <JobRow
+                  key={job.id}
+                  job={job}
+                  // The marker is what lets the detail's back button pop instead
+                  // of pushing another list entry on top of this one.
+                  onOpen={id => navigate(`/scans/${id}`, { state: { fromScanQueue: true } })}
+                  retryNow={retryNow}
+                  t={t}
+                />
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
   )
 }
