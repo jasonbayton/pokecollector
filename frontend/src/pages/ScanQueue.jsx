@@ -5,6 +5,7 @@ import { ArrowLeft, Clock3, Loader2, ScanLine, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
   deleteScanJob,
+  addAllConfidentScanJobItems,
   getScanJob,
   getScanJobs,
   resolveScanJobItem,
@@ -21,6 +22,7 @@ import {
   scanJobPollInterval,
 } from '../utils/scanJobs'
 import { formatRetryCountdown } from '../utils/retryCountdown'
+import { invalidateCardState, invalidateTcgdexFilterLanguages } from '../utils/queryInvalidation'
 
 // react-router stamps an incrementing `idx` onto window.history.state, starting
 // at 0 for the entry the tab was loaded on. An idx above 0 therefore means this
@@ -175,13 +177,33 @@ function JobDetail({ jobId }) {
     onError: error => toast.error(error?.response?.data?.detail || t('scanner.actionFailed')),
   })
 
+  const addAllConfidentMutation = useMutation({
+    mutationFn: () => addAllConfidentScanJobItems(jobId),
+    onSuccess: result => {
+      setConfirmation(null)
+      invalidateCardState(queryClient)
+      invalidateTcgdexFilterLanguages(queryClient)
+      invalidate()
+      if (Number(result?.added || 0) > 0) {
+        toast.success(t('scanner.confidentCardsFiled').replace('{count}', result.added))
+      }
+    },
+    onError: error => toast.error(error?.response?.data?.detail || t('scanner.actionFailed')),
+  })
+
   const dismiss = item => setConfirmation({ type: 'dismiss', item })
 
   const discardJob = () => setConfirmation({ type: 'discard' })
 
+  const addAllConfident = () => setConfirmation({
+    type: 'add-all-confident',
+    count: Number(job?.confident_addable || 0),
+  })
+
   const confirmDestructiveAction = () => {
     if (confirmation?.type === 'dismiss') resolveMutation.mutate({ item: confirmation.item })
     else if (confirmation?.type === 'discard') deleteMutation.mutate()
+    else if (confirmation?.type === 'add-all-confident') addAllConfidentMutation.mutate()
   }
 
   // No job to discard yet, so the shell renders the way back on its own.
@@ -228,6 +250,12 @@ function JobDetail({ jobId }) {
           {job.pending + job.processing + job.retrying} {t('scanner.remaining')}
           {job.failed > 0 && ` · ${job.failed} ${t('scanner.failed')}`}
         </p>
+        {Number(job.confident_addable || 0) > 0 && (
+          <button type="button" onClick={addAllConfident} disabled={addAllConfidentMutation.isPending}
+            className="btn-primary mt-4 w-full justify-center sm:w-auto">
+            {t('scanner.addAllConfident').replace('{count}', job.confident_addable)}
+          </button>
+        )}
       </div>
 
       <div className="space-y-3">
@@ -264,12 +292,24 @@ function JobDetail({ jobId }) {
         isOpen={Boolean(confirmation)}
         onClose={() => setConfirmation(null)}
         onConfirm={confirmDestructiveAction}
-        title={confirmation?.type === 'discard' ? t('scanner.discardJob') : t('scanner.dismissScan')}
-        message={confirmation?.type === 'discard' ? t('scanner.discardJobConfirm') : t('scanner.dismissScanConfirm')}
-        confirmLabel={confirmation?.type === 'discard' ? t('scanner.discardJob') : t('scanner.dismissScan')}
+        title={confirmation?.type === 'discard'
+          ? t('scanner.discardJob')
+          : confirmation?.type === 'add-all-confident'
+            ? t('scanner.addAllConfidentTitle')
+            : t('scanner.dismissScan')}
+        message={confirmation?.type === 'discard'
+          ? t('scanner.discardJobConfirm')
+          : confirmation?.type === 'add-all-confident'
+            ? t('scanner.addAllConfidentConfirm').replace('{count}', confirmation.count)
+            : t('scanner.dismissScanConfirm')}
+        confirmLabel={confirmation?.type === 'discard'
+          ? t('scanner.discardJob')
+          : confirmation?.type === 'add-all-confident'
+            ? t('scanner.addAllConfidentConfirmLabel')
+            : t('scanner.dismissScan')}
         cancelLabel={t('common.cancel')}
-        isPending={deleteMutation.isPending || resolveMutation.isPending}
-        destructive
+        isPending={deleteMutation.isPending || resolveMutation.isPending || addAllConfidentMutation.isPending}
+        destructive={confirmation?.type !== 'add-all-confident'}
       />
     </JobDetailShell>
   )
