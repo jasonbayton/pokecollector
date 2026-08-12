@@ -7,7 +7,7 @@ import { searchCards, getSets, getCustomCards, bulkAddToCollection, getScanJobs 
 import { CardItem, CustomCardModal, CardModal } from '../components/CardItem'
 import { useSettings } from '../contexts/SettingsContext'
 import Sheet from '../components/ui/Sheet'
-import CardScanner from '../components/UnifiedCardScanner'
+import UnifiedCardScanner from '../components/UnifiedCardScanner'
 import { getDefaultVariantOrNull } from '../utils/cardVariants'
 import { cardNumberMatches } from '../utils/cardNumbers'
 import { normalizeSearchText, textIncludes } from '../utils/textSearch'
@@ -808,13 +808,9 @@ export default function CardSearch() {
         />
       )}
 
-      <CardScanner
+      <UnifiedCardScanner
         isOpen={showScanner}
         onClose={() => setShowScanner(false)}
-        onCardSelected={(card) => {
-          updateSearchParams({ q: card.name })
-          setShowScanner(false)
-        }}
       />
     </div>
   )

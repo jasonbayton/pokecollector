@@ -10,7 +10,7 @@ import {
   resolveScanJobItem,
   retryScanJobItem,
 } from '../api/client'
-import { ScanAddModal } from '../components/CardScanner'
+import ScanAddModal from '../components/ScanAddModal'
 import { ScanItemPanel } from '../components/ScanReview'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
 import Modal from '../components/ui/Modal'

@@ -57,9 +57,10 @@ pokecollector/
 │   │   ├── components/
 │   │   │   ├── AppNav.jsx
 │   │   │   ├── CardItem.jsx
-│   │   │   ├── CardScanner.jsx
 │   │   │   ├── Layout.jsx
-│   │   │   └── TabNav.jsx
+│   │   │   ├── ScanAddModal.jsx
+│   │   │   ├── TabNav.jsx
+│   │   │   └── UnifiedCardScanner.jsx
 │   │   ├── contexts/
 │   │   │   ├── AuthContext.jsx
 │   │   │   └── SettingsContext.jsx
@@ -80,6 +81,7 @@ Removed from the current architecture:
 - no `backend/api/ebay.py`
 - no `services/notifications.py`
 - no old nested `pokemon-tcg-collection/` directory
+- no `CardScanner.jsx` under `frontend/src/components/`, the superseded single-card scanner. `UnifiedCardScanner.jsx` replaced its capture flow and the persistent scan queue replaced its inline recognition, leaving only its add-to-collection modal live. That modal now stands alone as `components/ScanAddModal.jsx`.
 
 ## Backend Architecture
 
@@ -178,7 +180,7 @@ Current auth model:
 
 ## Scanner Flow
 
-Recognition is implemented in `backend/api/recognize.py` and surfaced through `frontend/src/components/UnifiedCardScanner.jsx`, `frontend/src/pages/ScanQueue.jsx`, and the shared add/review components.
+Recognition is implemented in `backend/api/recognize.py` and surfaced through `frontend/src/components/UnifiedCardScanner.jsx`, `frontend/src/pages/ScanQueue.jsx`, and the shared add/review components `frontend/src/components/ScanReview.jsx` and `frontend/src/components/ScanAddModal.jsx`.
 
 Current flow:
 

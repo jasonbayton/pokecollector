@@ -195,6 +195,8 @@ See [`CARD_SYSTEM.md`](CARD_SYSTEM.md) for usage, design tokens, review guidance
 
 `pages/ScanQueue.jsx` and `components/ScanReview.jsx` show job progress, retry countdowns/reasons, sanitized source photos, ranked candidates, failed items, individual retry, dismissal, and collection-add review. The navigation badge counts outstanding items. A confirmed candidate id is sent when resolving an item so opted-in diagnostics can be labelled with human-reviewed ground truth.
 
+`components/ScanAddModal.jsx` is the single add-to-collection step for a confirmed match. It defaults to quantity `1`, condition `Mint`, and the card's advertised default variant, takes the language from the recognised card and falls back to the review item's detected language, and stays disabled until the exchange rate is ready so a purchase price is never stored at the wrong rate.
+
 Rate-limit countdowns distinguish daily quota from ordinary throttling. Photos remain available only while their item needs review and are deleted on confirmation/dismissal; jobs expire after 14 days.
 
 The AI/Card Scanner section in `pages/Settings.jsx` shows **Share scanner diagnostics** as an available control only when the server configured writable `SCAN_TRACE_DIR` storage. The toggle is off by default. Turning it off stops future tracing without deleting existing data; the adjacent confirmed delete button removes all stored diagnostics for the current user and remains available through the stable cleanup path when new collection is disabled.
