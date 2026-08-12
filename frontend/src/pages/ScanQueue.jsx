@@ -185,7 +185,9 @@ function JobDetail({ jobId }) {
       invalidateTcgdexFilterLanguages(queryClient)
       invalidate()
       if (Number(result?.added || 0) > 0) {
-        toast.success(t('scanner.confidentCardsFiled').replace('{count}', result.added))
+        toast.success(result.added === 1
+          ? t('scanner.confidentCardFiled')
+          : t('scanner.confidentCardsFiled').replace('{count}', result.added))
       }
     },
     onError: error => toast.error(error?.response?.data?.detail || t('scanner.actionFailed')),
@@ -253,7 +255,9 @@ function JobDetail({ jobId }) {
         {Number(job.confident_addable || 0) > 0 && (
           <button type="button" onClick={addAllConfident} disabled={addAllConfidentMutation.isPending}
             className="btn-primary mt-4 w-full justify-center sm:w-auto">
-            {t('scanner.addAllConfident').replace('{count}', job.confident_addable)}
+            {job.confident_addable === 1
+              ? t('scanner.addAllConfidentOne')
+              : t('scanner.addAllConfident').replace('{count}', job.confident_addable)}
           </button>
         )}
       </div>
@@ -300,7 +304,9 @@ function JobDetail({ jobId }) {
         message={confirmation?.type === 'discard'
           ? t('scanner.discardJobConfirm')
           : confirmation?.type === 'add-all-confident'
-            ? t('scanner.addAllConfidentConfirm').replace('{count}', confirmation.count)
+            ? (confirmation.count === 1
+              ? t('scanner.addAllConfidentConfirmOne')
+              : t('scanner.addAllConfidentConfirm').replace('{count}', confirmation.count))
             : t('scanner.dismissScanConfirm')}
         confirmLabel={confirmation?.type === 'discard'
           ? t('scanner.discardJob')

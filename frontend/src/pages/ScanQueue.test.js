@@ -597,7 +597,7 @@ describe('filing confident scan results', () => {
     renderScanQueue()
     const dialog = onlyElementOf(ConfirmDialog, 'bulk-add confirmation')
     expect(dialog.props.title).toBe('scanner.addAllConfidentTitle')
-    expect(dialog.props.message).toBe('scanner.addAllConfidentConfirm')
+    expect(dialog.props.message).toBe('scanner.addAllConfidentConfirmOne')
     expect(dialog.props.destructive).toBe(false)
 
     dialog.props.onConfirm()
@@ -609,6 +609,25 @@ describe('filing confident scan results', () => {
     expect(invalidateTcgdexFilterLanguages).toHaveBeenCalledTimes(1)
     expect(queryClientInvalidate).toHaveBeenCalledWith({ queryKey: ['scan-job', 7] })
     expect(queryClientInvalidate).toHaveBeenCalledWith({ queryKey: ['scan-jobs'] })
+  })
+
+  it('counts one card in the singular and several in the plural', () => {
+    // "Add all confident - 1 cards" shipped to a real screen before anyone
+    // read it. The app already keeps singular and plural as separate keys and
+    // chooses at the call site; this follows that rather than inventing
+    // interpolation.
+    showDetail({ job: confidentJob })
+    seedDetailState()
+    renderScanQueue()
+    expect(buttonLabelled('scanner.addAllConfidentOne')).toBeDefined()
+
+    showDetail({ job: { ...jobDetail, confident_addable: 4 } })
+    seedDetailState()
+    renderScanQueue()
+    // t is mocked to return the key, so the substituted count is not visible
+    // here; which of the two keys was chosen is the observable distinction.
+    expect(buttonLabelled('scanner.addAllConfident'), 'the plural label was not rendered').toBeDefined()
+    expect(buttonLabelled('scanner.addAllConfidentOne')).toBeUndefined()
   })
 })
 
