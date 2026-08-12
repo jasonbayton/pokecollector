@@ -63,6 +63,7 @@ Be kind. Be clear. Assume good intent. Keep feedback constructive.
 - Scanner retries transient provider capacity errors and shows clearer rate-limit / temporary-unavailable messages
 - Two-step scanner matching: number ranking first, visual verification second when useful
 - Unified persistent scanner with individual and composite batch recognition, via Gemini or any OpenAI-compatible vision endpoint
+- Live viewfinder stages one card per tap without an operating-system camera round trip, with the existing camera and gallery pickers kept as fallbacks
 - Persistent, restart-safe scan queue with a review inbox, 14-day expiry, and automatic retries that do not consume recognition attempts for rate limits
 - Shared per-key Gemini quota handling distinguishes daily quotas from short-term limits, honors provider retry delays, and blocks concurrent requests using the same key
 - Deterministic matching ranks local number, printed total, set code, regulation mark, artist, and HP before optional visual verification

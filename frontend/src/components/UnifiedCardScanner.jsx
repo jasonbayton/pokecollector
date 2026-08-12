@@ -6,6 +6,7 @@ import toast from 'react-hot-toast'
 import { enqueueScanJob } from '../api/client'
 import { useSettings } from '../contexts/SettingsContext'
 import { isSupportedScannerImage, SCANNER_IMAGE_ACCEPT } from '../utils/scannerImages'
+import LiveCardViewfinder from './LiveCardViewfinder'
 import ConfirmDialog from './ui/ConfirmDialog'
 import Modal from './ui/Modal'
 
@@ -201,6 +202,14 @@ export default function UnifiedCardScanner({ isOpen, onClose }) {
               appendFiles(event.target.files)
               event.target.value = ''
             }}
+          />
+
+          {/* The live viewfinder stages a card per tap. The two file inputs above
+              stay wired as the fallback for every browser, permission state and
+              device the viewfinder cannot serve. */}
+          <LiveCardViewfinder
+            onCapture={file => appendFiles([file])}
+            isFull={stagedFiles.length >= 50}
           />
 
           <div className="flex items-center justify-between gap-3">

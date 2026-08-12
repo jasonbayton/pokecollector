@@ -1,0 +1,290 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { hookHarness, findAll, walkTree } from '../test/hookHarness'
+
+// The component's own hooks are the thing under test here, so the harness owns
+// them. Everything else in the react module stays real.
+vi.mock('react', async importOriginal => ({
+  ...(await importOriginal()),
+  ...hookHarness.hooks,
+}))
+
+const camera = vi.hoisted(() => ({
+  sessions: [],
+  supportFailure: null,
+}))
+
+vi.mock('../utils/cameraCapture', async importOriginal => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    detectCameraSupport: () => camera.supportFailure,
+    createCameraSession: options => {
+      const session = {
+        options,
+        state: { status: actual.CAMERA_STATUS.IDLE, failure: null, stream: null },
+        unbindVisibility: vi.fn(),
+        boundTo: null,
+      }
+      session.publish = next => {
+        session.state = { ...session.state, ...next }
+        options.onChange({ ...session.state })
+      }
+      session.start = vi.fn(async () => session.state)
+      session.stop = vi.fn(() => { session.publish({ status: actual.CAMERA_STATUS.IDLE, failure: null, stream: null }) })
+      session.capture = vi.fn()
+      session.dispose = vi.fn()
+      session.getState = vi.fn(() => ({ ...session.state }))
+      session.isDenied = vi.fn(() => false)
+      session.bindVisibility = vi.fn(target => {
+        session.boundTo = target
+        return session.unbindVisibility
+      })
+      camera.sessions.push(session)
+      return session
+    },
+  }
+})
+
+vi.mock('../contexts/SettingsContext', () => ({
+  useSettings: () => ({ t: key => key }),
+}))
+
+const { CAMERA_FAILURE, CAMERA_STATUS } = await import('../utils/cameraCapture')
+const LiveCardViewfinder = (await import('./LiveCardViewfinder')).default
+
+let props
+let fakeVideo
+let fakeDocument
+
+const render = (overrides = {}) => hookHarness.renderAndFlush(LiveCardViewfinder, { ...props, ...overrides })
+
+const session = () => camera.sessions[0]
+
+const buttonsWithText = tree => findAll(tree, node => node.type === 'button')
+
+const textOf = tree => [...walkTree(tree)]
+  .flatMap(node => (Array.isArray(node.props?.children) ? node.props.children : [node.props?.children]))
+  .filter(child => typeof child === 'string')
+
+/** Attaches a stand-in <video> to the ref the component just handed React. */
+const attachVideo = tree => {
+  const video = [...walkTree(tree)].find(node => node.type === 'video')
+  // React 18 lifts ref off props onto the element itself.
+  const ref = video.ref ?? video.props.ref
+  ref.current = fakeVideo
+  return video
+}
+
+beforeEach(() => {
+  hookHarness.reset()
+  camera.sessions.length = 0
+  camera.supportFailure = null
+  props = { onCapture: vi.fn(), isFull: false }
+  fakeVideo = { srcObject: undefined, play: vi.fn(() => Promise.resolve()) }
+  fakeDocument = { hidden: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }
+  vi.stubGlobal('document', fakeDocument)
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
+describe('LiveCardViewfinder', () => {
+  it('renders a muted, inline-playing video so a browser will start it without a gesture of its own', () => {
+    const tree = render()
+    const video = [...walkTree(tree)].find(node => node.type === 'video')
+
+    expect(video).toBeDefined()
+    expect(video.props.muted).toBe(true)
+    expect(video.props.playsInline).toBe(true)
+    expect(video.props.autoPlay).toBe(true)
+  })
+
+  it('never renders a file input: this path must not go near the OS camera app', () => {
+    const tree = render()
+
+    expect(findAll(tree, node => node.type === 'input')).toEqual([])
+  })
+
+  it('does not open the camera on mount, only from the start button', async () => {
+    const tree = render()
+
+    // Mounting creates the session and binds visibility, and stops there.
+    expect(session()).toBeDefined()
+    expect(session().start).not.toHaveBeenCalled()
+
+    const start = buttonsWithText(tree)[0]
+    expect(textOf(start)).toContain('scanner.startCamera')
+    await start.props.onClick()
+
+    expect(session().start).toHaveBeenCalledTimes(1)
+  })
+
+  it('binds the visibility listener to the real document', () => {
+    render()
+
+    expect(session().bindVisibility).toHaveBeenCalledWith(fakeDocument)
+  })
+
+  it('attaches the live stream to the video element and plays it', () => {
+    const tree = render()
+    attachVideo(tree)
+    const stream = { id: 'stream-1' }
+
+    session().publish({ status: CAMERA_STATUS.LIVE, failure: null, stream })
+    render()
+
+    expect(fakeVideo.srcObject).toBe(stream)
+    expect(fakeVideo.play).toHaveBeenCalledTimes(1)
+  })
+
+  it('stages one photo per shutter tap and keeps the camera running between taps', async () => {
+    const first = new File(['one'], 'card-1.jpg', { type: 'image/jpeg' })
+    const second = new File(['two'], 'card-2.jpg', { type: 'image/jpeg' })
+    let tree = render()
+    attachVideo(tree)
+    session().publish({ status: CAMERA_STATUS.LIVE, failure: null, stream: { id: 'stream-1' } })
+    tree = render()
+    session().capture.mockResolvedValueOnce(first).mockResolvedValueOnce(second)
+
+    const shutter = buttonsWithText(tree)[0]
+    await shutter.props.onClick()
+    tree = render()
+    await buttonsWithText(tree)[0].props.onClick()
+
+    expect(session().capture).toHaveBeenCalledTimes(2)
+    expect(session().capture).toHaveBeenCalledWith(fakeVideo)
+    expect(props.onCapture.mock.calls).toEqual([[first], [second]])
+    expect(session().stop).not.toHaveBeenCalled()
+  })
+
+  it('offers no shutter at all until the camera is live', () => {
+    const tree = render()
+
+    expect(textOf(tree)).toContain('scanner.startCamera')
+    expect(textOf(tree)).not.toContain('scanner.captureCard')
+  })
+
+  it('stops capturing once the batch is full, without stopping the camera', async () => {
+    let tree = render({ isFull: true })
+    attachVideo(tree)
+    session().publish({ status: CAMERA_STATUS.LIVE, failure: null, stream: { id: 'stream-1' } })
+    tree = render({ isFull: true })
+
+    const shutter = buttonsWithText(tree)[0]
+    expect(shutter.props.disabled).toBe(true)
+    await shutter.props.onClick()
+
+    expect(session().capture).not.toHaveBeenCalled()
+    expect(textOf(tree)).toContain('scanner.cameraBatchFull')
+    expect(session().stop).not.toHaveBeenCalled()
+  })
+
+  it('explains a refusal and offers no way to ask again', () => {
+    render()
+    session().publish({ status: CAMERA_STATUS.ERROR, failure: CAMERA_FAILURE.DENIED, stream: null })
+    const tree = render()
+
+    const text = textOf(tree)
+    expect(text).toContain('scanner.cameraErrorDenied')
+    expect(text).toContain('scanner.cameraFallbackHint')
+    expect(text).not.toContain('scanner.retryCamera')
+    expect(text).not.toContain('scanner.startCamera')
+    expect(buttonsWithText(tree)).toEqual([])
+  })
+
+  it('offers a retry for a camera that is merely busy', async () => {
+    render()
+    session().publish({ status: CAMERA_STATUS.ERROR, failure: CAMERA_FAILURE.BUSY, stream: null })
+    const tree = render()
+
+    expect(textOf(tree)).toContain('scanner.retryCamera')
+    await buttonsWithText(tree)[0].props.onClick()
+    expect(session().start).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports an insecure origin on mount instead of dangling a dead start button', () => {
+    camera.supportFailure = CAMERA_FAILURE.INSECURE
+    render()
+    const tree = render()
+
+    expect(textOf(tree)).toContain('scanner.cameraErrorInsecure')
+    expect(buttonsWithText(tree)).toEqual([])
+    expect(session().start).not.toHaveBeenCalled()
+  })
+
+  it('keeps the camera live and says so when a single frame fails to encode', async () => {
+    let tree = render()
+    attachVideo(tree)
+    session().publish({ status: CAMERA_STATUS.LIVE, failure: null, stream: { id: 'stream-1' } })
+    tree = render()
+    session().capture.mockRejectedValueOnce(
+      Object.assign(new Error('no blob'), { reason: CAMERA_FAILURE.CAPTURE_FAILED }),
+    )
+
+    await buttonsWithText(tree)[0].props.onClick()
+    tree = render()
+
+    expect(props.onCapture).not.toHaveBeenCalled()
+    expect(textOf(tree)).toContain('scanner.cameraErrorCaptureFailed')
+    expect(textOf(tree)).toContain('scanner.captureCard')
+  })
+
+  it('drops out of live and offers a retry when the stream dies mid-capture', async () => {
+    let tree = render()
+    attachVideo(tree)
+    session().publish({ status: CAMERA_STATUS.LIVE, failure: null, stream: { id: 'stream-1' } })
+    tree = render()
+    session().capture.mockImplementation(async () => {
+      session().state = { status: CAMERA_STATUS.ERROR, failure: CAMERA_FAILURE.INTERRUPTED, stream: null }
+      throw Object.assign(new Error('track ended'), { reason: CAMERA_FAILURE.INTERRUPTED })
+    })
+
+    await buttonsWithText(tree)[0].props.onClick()
+    tree = render()
+
+    const text = textOf(tree)
+    expect(text).toContain('scanner.cameraErrorInterrupted')
+    expect(text).toContain('scanner.retryCamera')
+    expect(text).not.toContain('scanner.captureCard')
+  })
+
+  it('stops the camera from its own stop button', async () => {
+    let tree = render()
+    attachVideo(tree)
+    session().publish({ status: CAMERA_STATUS.LIVE, failure: null, stream: { id: 'stream-1' } })
+    tree = render()
+
+    const stop = buttonsWithText(tree)[1]
+    await stop.props.onClick()
+
+    expect(session().stop).toHaveBeenCalledTimes(1)
+  })
+
+  it('unbinds, detaches and disposes the session on unmount', () => {
+    const tree = render()
+    attachVideo(tree)
+    session().publish({ status: CAMERA_STATUS.LIVE, failure: null, stream: { id: 'stream-1' } })
+    render()
+    expect(fakeVideo.srcObject).toEqual({ id: 'stream-1' })
+
+    hookHarness.unmount()
+
+    expect(session().unbindVisibility).toHaveBeenCalledTimes(1)
+    expect(session().dispose).toHaveBeenCalledTimes(1)
+    expect(fakeVideo.srcObject).toBeNull()
+  })
+
+  it('detaches the stream from the element when the session goes idle', () => {
+    const tree = render()
+    attachVideo(tree)
+    session().publish({ status: CAMERA_STATUS.LIVE, failure: null, stream: { id: 'stream-1' } })
+    render()
+
+    session().publish({ status: CAMERA_STATUS.IDLE, failure: null, stream: null })
+    render()
+
+    expect(fakeVideo.srcObject).toBeNull()
+  })
+})
