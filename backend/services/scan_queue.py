@@ -222,6 +222,31 @@ def _refresh_job_status(db: Session, job: ScanJob, now: datetime.datetime) -> No
     job.updated_at = now
 
 
+def _apply_identity_outcome(item: ScanJobItem, result: dict) -> None:
+    """Record the matcher's verdict alongside the candidates it produced.
+
+    The verdict travels with recognized/matches: written wherever they are
+    written, cleared wherever they are cleared. A processor that returns no
+    verdict at all (any caller other than the real matcher) counts as not
+    confident rather than unknown, because a completed scan was in fact judged.
+    The suggested id is kept only while the matcher stands behind it, so an
+    unconfident outcome can never leave a stale id for the badge to find.
+    """
+    confident = bool(result.get("_identity_confident"))
+    item.identity_confident = confident
+    item.identity_decision = result.get("_identity_decision") or None
+    item.suggested_match_id = (
+        (result.get("_identity_suggested_match_id") or None) if confident else None
+    )
+
+
+def _clear_identity_outcome(item: ScanJobItem) -> None:
+    """Drop a verdict that no longer describes this item's stored candidates."""
+    item.identity_confident = None
+    item.identity_decision = None
+    item.suggested_match_id = None
+
+
 def complete_claim(db: Session, claim: ClaimedScanItem, result: dict) -> bool:
     now = datetime.datetime.utcnow()
     item = _leased_item(db, claim)
@@ -231,6 +256,7 @@ def complete_claim(db: Session, claim: ClaimedScanItem, result: dict) -> bool:
     item.status = "done"
     item.recognized = result.get("recognized")
     item.matches = result.get("matches")
+    _apply_identity_outcome(item, result)
     item.error = None
     item.lease_token = None
     item.lease_expires_at = None
@@ -259,12 +285,14 @@ def complete_claim_group(
             item.batch_mode = False
             item.recognized = None
             item.matches = None
+            _clear_identity_outcome(item)
             item.next_attempt_at = now
             item.retry_reason = None
         else:
             item.status = "done"
             item.recognized = result.get("recognized")
             item.matches = result.get("matches")
+            _apply_identity_outcome(item, result)
             item.next_attempt_at = None
             item.retry_reason = None
         item.error = None
@@ -623,6 +651,7 @@ def retry_scan_item(db: Session, item: ScanJobItem) -> ScanJobItem:
     item.lease_expires_at = None
     item.recognized = None
     item.matches = None
+    _clear_identity_outcome(item)
     item.error = None
     item.batch_mode = False
     item.updated_at = now

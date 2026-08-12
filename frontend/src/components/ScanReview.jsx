@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Camera, Loader2, Maximize2, RefreshCw, Trash2 } from 'lucide-react'
+import { Camera, Loader2, Maximize2, RefreshCw, Sparkles, Trash2 } from 'lucide-react'
 import { fetchScanJobItemImage } from '../api/client'
 import { CardDisplay } from './card-system'
 import Modal from './ui/Modal'
@@ -62,7 +62,21 @@ export function useScanItemPhoto(jobId, item) {
   return url
 }
 
-function CandidateGrid({ matches, photoUrl, onSelect, t }) {
+// Only the matcher can say which candidate it chose, and only when it was
+// confident. Rank order is not that answer: the list is always sorted, so the
+// first card would wear the badge even when nothing was decided.
+//
+// The comparison is against match.id, not match.tcg_card_id. One card can be
+// listed once per language searched, so several candidates share a
+// tcg_card_id and matching on it badges all of them; match.id carries the
+// language and is unique within the list.
+function isSuggestedMatch(item, match) {
+  if (item?.identity_confident !== true) return false
+  const suggested = item?.suggested_match_id
+  return Boolean(suggested) && match?.id === suggested
+}
+
+function CandidateGrid({ item, matches, photoUrl, onSelect, t }) {
   const [zoomCard, setZoomCard] = useState(null)
   if (!matches?.length) return null
 
@@ -74,6 +88,7 @@ function CandidateGrid({ matches, photoUrl, onSelect, t }) {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {matches.map(match => {
           const language = match.lang || match._lang || 'en'
+          const suggested = isSuggestedMatch(item, match)
           return (
             <div key={`${match.id}-${language}`}>
               <CardDisplay
@@ -83,16 +98,35 @@ function CandidateGrid({ matches, photoUrl, onSelect, t }) {
                 languageLabel={tcgdexLanguageLabel(language)}
                 onClick={() => onSelect(match)}
                 onSelect={() => onSelect(match)}
-                overlay={match.image ? (
-                  <button type="button" onClick={event => {
-                    event.stopPropagation()
-                    setZoomCard(match)
-                  }}
-                    aria-label={t('scanner.compareCandidate')}
-                    title={t('scanner.compareCandidate')}
-                    className="absolute right-2 top-2 z-30 grid h-8 w-8 place-items-center rounded-lg border border-white/15 bg-black/75 text-white shadow-lg transition-colors hover:bg-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red">
-                    <Maximize2 size={15} />
-                  </button>
+                // The badge rides on the artwork rather than above the card, so
+                // marking one candidate cannot push it out of line with the
+                // rest of the grid. Bottom left keeps it clear of the state
+                // indicators along the top and of the compare button.
+                //
+                // pointer-events-none is load-bearing, not decoration: the
+                // badge is painted at z-30 over the full-bleed select button at
+                // z-25, so without it the badge eats the click and tapping the
+                // thing labelled "Suggested" selects nothing. The design
+                // system's own .unified-card-selection marker does the same.
+                overlay={(suggested || match.image) ? (
+                  <>
+                    {suggested && (
+                      <p className="pointer-events-none absolute bottom-2 left-2 z-30 inline-flex items-center gap-1 rounded-full border border-brand-red/40 bg-black/80 px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.14em] text-brand-red shadow-lg">
+                        <Sparkles size={11} /> {t('scanner.suggestedMatch')}
+                      </p>
+                    )}
+                    {match.image && (
+                      <button type="button" onClick={event => {
+                        event.stopPropagation()
+                        setZoomCard(match)
+                      }}
+                        aria-label={t('scanner.compareCandidate')}
+                        title={t('scanner.compareCandidate')}
+                        className="absolute right-2 top-2 z-30 grid h-8 w-8 place-items-center rounded-lg border border-white/15 bg-black/75 text-white shadow-lg transition-colors hover:bg-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red">
+                        <Maximize2 size={15} />
+                      </button>
+                    )}
+                  </>
                 ) : null}
               />
             </div>
@@ -178,7 +212,7 @@ export function ScanItemPanel({ jobId, item, onAdd, onRetry, onDismiss, retryNow
           <p className="mb-3 text-[10px] font-black uppercase tracking-[0.2em] text-text-muted">
             {t('scanner.bestMatches')} ({item.matches.length})
           </p>
-          <CandidateGrid matches={item.matches} photoUrl={photoUrl} onSelect={match => onAdd(item, match)} t={t} />
+          <CandidateGrid item={item} matches={item.matches} photoUrl={photoUrl} onSelect={match => onAdd(item, match)} t={t} />
         </div>
       )}
     </article>

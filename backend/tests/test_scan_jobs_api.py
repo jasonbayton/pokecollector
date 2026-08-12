@@ -119,6 +119,48 @@ class ScanJobsApiTests(unittest.TestCase):
         self.assertEqual(detail_item["next_attempt_at"], retry_at.isoformat())
         self.assertEqual(detail_item["retry_reason"], "daily_quota")
 
+    def test_detail_payload_carries_the_persisted_matcher_verdict(self):
+        created = self._enqueue()
+        item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
+        item.status = "done"
+        item.matches = [
+            {"id": "base1-58_en", "tcg_card_id": "base1-58"},
+            {"id": "base1-59_en", "tcg_card_id": "base1-59"},
+        ]
+        item.identity_confident = True
+        item.identity_decision = "number_metadata"
+        item.suggested_match_id = "base1-59_en"
+        self.db.commit()
+
+        payload = self.client.get(
+            f"/api/cards/recognize/jobs/{created['id']}"
+        ).json()["items"][0]
+
+        self.assertIs(payload["identity_confident"], True)
+        self.assertEqual(payload["identity_decision"], "number_metadata")
+        self.assertEqual(payload["suggested_match_id"], "base1-59_en")
+
+    def test_detail_payload_reports_an_unjudged_scan_as_unknown_not_as_unsure(self):
+        """The negative control: a row from before this feature has no verdict.
+
+        Null and false must stay distinguishable over the wire. Collapsing them
+        would let the review UI claim the matcher considered a legacy scan and
+        was not convinced, which never happened.
+        """
+        created = self._enqueue()
+        item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
+        item.status = "done"
+        item.matches = [{"id": "base1-58_en", "tcg_card_id": "base1-58"}]
+        self.db.commit()
+
+        payload = self.client.get(
+            f"/api/cards/recognize/jobs/{created['id']}"
+        ).json()["items"][0]
+
+        self.assertIsNone(payload["identity_confident"])
+        self.assertIsNone(payload["identity_decision"])
+        self.assertIsNone(payload["suggested_match_id"])
+
     def test_other_user_cannot_access_job_or_photo(self):
         created = self._enqueue()
         item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()

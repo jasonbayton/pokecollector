@@ -307,6 +307,102 @@ class PhashMatchingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["_identity_decision"], "phash")
         self.assertEqual(result["matches"][0]["id"], "near")
 
+    async def test_matcher_names_the_candidate_it_chose(self):
+        """The queue can only persist a suggestion the matcher states outright.
+
+        Reading it back off the top of the list would be a different claim: the
+        list is ranked whether or not anything was decided.
+        """
+        photo = self._image(7)
+        # The per-language id deliberately differs from tcg_card_id, because
+        # the two are not interchangeable: the review grid has to single out
+        # one candidate, and only the per-language id can.
+        candidates = [
+            {"id": "far", "tcg_card_id": "base1-1", "number": None, "image": "far.webp"},
+            {"id": "near", "tcg_card_id": "base1-2", "number": None, "image": "near.webp"},
+        ]
+        with patch(
+            "api.recognize._search_and_rank_candidates",
+            new=AsyncMock(return_value=(candidates, 0)),
+        ), patch(
+            "api.recognize._download_candidate_images",
+            new=AsyncMock(return_value={"far": self._image(99), "near": photo}),
+        ):
+            result = await match_card_info(
+                object(),
+                {"name": "Pikachu"},
+                photo_bytes=photo,
+            )
+
+        self.assertTrue(result["_identity_confident"])
+        self.assertEqual(result["_identity_suggested_match_id"], "near")
+
+    async def test_suggestion_singles_out_one_of_two_rows_for_the_same_card(self):
+        """A card id cannot name a candidate; there can be one row per language.
+
+        The searches in _search_and_rank_candidates run per language and the
+        dedup that follows keys on the per-language id, so any card present in
+        two searched catalogues arrives twice with one tcg_card_id. Persisting
+        that card id makes the review grid badge both rows as "the" suggestion.
+        """
+        candidates = [
+            {
+                "id": "base1-4_de", "tcg_card_id": "base1-4", "_lang": "de",
+                "number": "4", "name": "Glurak", "image": "de.webp",
+            },
+            {
+                "id": "base1-4_en", "tcg_card_id": "base1-4", "_lang": "en",
+                "number": "4", "name": "Charizard", "image": "en.webp",
+            },
+        ]
+        with patch(
+            "api.recognize._search_and_rank_candidates",
+            new=AsyncMock(return_value=(candidates, 2)),
+        ):
+            result = await match_card_info(
+                object(),
+                {"name": "Glurak", "language": "de", "number_local": "4"},
+            )
+
+        self.assertTrue(result["_identity_confident"])
+        suggested = result["_identity_suggested_match_id"]
+        # Both rows survive into the review grid, sharing one tcg_card_id...
+        self.assertEqual(
+            [match["tcg_card_id"] for match in result["matches"]],
+            ["base1-4", "base1-4"],
+        )
+        # ...so the stored suggestion must match exactly one of them.
+        self.assertEqual(
+            [match["id"] for match in result["matches"] if match["id"] == suggested],
+            ["base1-4_de"],
+        )
+
+    async def test_matcher_names_no_candidate_when_it_is_not_confident(self):
+        """The negative control: an undecided match suggests nothing at all."""
+        photo = self._image(7)
+        candidates = [
+            {"id": "far", "tcg_card_id": "base1-1", "number": "3", "image": "far.webp"},
+            {"id": "near", "tcg_card_id": "base1-2", "number": "2", "image": "near.webp"},
+        ]
+        with patch(
+            "api.recognize._search_and_rank_candidates",
+            new=AsyncMock(return_value=(candidates, 0)),
+        ), patch(
+            "api.recognize._download_candidate_images",
+            new=AsyncMock(return_value={"far": self._image(99), "near": photo}),
+        ):
+            result = await match_card_info(
+                object(),
+                {"name": "Pikachu", "number_local": "1"},
+                photo_bytes=photo,
+            )
+
+        self.assertFalse(result["_identity_confident"])
+        self.assertIsNone(result["_identity_suggested_match_id"])
+        # The candidates are still returned and still ranked; only the claim
+        # about which one is right is withheld.
+        self.assertEqual(result["matches"][0]["tcg_card_id"], "base1-1")
+
     async def test_phash_does_not_override_known_metadata_contradiction(self):
         photo = self._image(7)
         trace = Mock()

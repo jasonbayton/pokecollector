@@ -1020,19 +1020,32 @@ async def match_card_info(
         {key: value for key, value in card.items() if key != "_number_extra"}
         for card in retain_ranked_candidates(candidates)
     ]
+    # candidates[0] is the matcher's pick: the ranked winner, or whichever
+    # candidate pHash or visual verification promoted to the front. Naming it
+    # here rather than only inside the trace is what lets a caller persist the
+    # decision instead of re-deriving it from list order, which stops meaning
+    # "chosen" the moment the matcher is not confident.
+    chosen = candidates[0] if confident and candidates else None
+    # Diagnostics name the card; the review UI has to name the *candidate*, and
+    # the two are not interchangeable. One tcg_card_id can legitimately appear
+    # several times in a single candidate list - once per language searched -
+    # because the searches above are per language and the dedup below keys on
+    # the per-language id, not on the card. Handing the review grid a
+    # tcg_card_id therefore marks every language copy of that card as "the"
+    # suggestion at once. The per-language id is unique within the list by
+    # construction, so it is the only handle that can single one candidate out.
+    selected_card_id = (str(chosen.get("tcg_card_id") or "") or None) if chosen else None
+    selected_match_id = (str(chosen.get("id") or "") or None) if chosen else None
     if trace:
-        selected = (
-            str(candidates[0].get("tcg_card_id") or "")
-            if confident and candidates
-            else None
-        )
-        trace.record_decision(decision or "undecided", selected or None)
+        trace.record_decision(decision or "undecided", selected_card_id)
     return {
         "recognized": card_info,
         "matches": public_matches,
         "_number_match_count": number_match_count,
         "_identity_confident": confident,
         "_identity_decision": decision,
+        # matches[].id, not matches[].tcg_card_id. See above.
+        "_identity_suggested_match_id": selected_match_id,
     }
 
 
