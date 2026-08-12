@@ -250,6 +250,7 @@ const en = {
     allSeries: 'All Series',
     setCodeSearch: 'Search by set code + number',
     setCode: 'Set code',
+    openingCustomCard: 'Opening card form…',
     createCustomCard: 'Create card manually',
     customCard: 'Custom card',
     shareAsTemplate: 'Share as template',

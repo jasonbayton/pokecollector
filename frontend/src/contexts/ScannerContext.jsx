@@ -25,7 +25,7 @@ const UnifiedCardScanner = lazy(() => import('../components/UnifiedCardScanner')
 
 const ScannerContext = createContext(null)
 
-function ScannerLoadingFallback() {
+function PanelLoadingFallback({ labelKey }) {
   const { t } = useSettings()
   return (
     <div
@@ -35,7 +35,7 @@ function ScannerLoadingFallback() {
     >
       <div className="flex items-center gap-3 rounded-2xl border border-border bg-bg-surface px-5 py-4 text-sm font-medium text-text-primary shadow-2xl">
         <span className="h-5 w-5 animate-spin rounded-full border-2 border-brand-red border-t-transparent" aria-hidden="true" />
-        {t('scanner.opening')}
+        {t(labelKey)}
       </div>
     </div>
   )
@@ -152,12 +152,12 @@ export function ScannerProvider({ children }) {
           guard away. Before the first open there is nothing to guard, and not
           mounting keeps its chunk off every page that never scans. */}
       {(scannerMounted || panel === 'scanner') && (
-        <Suspense fallback={<ScannerLoadingFallback />}>
+        <Suspense fallback={<PanelLoadingFallback labelKey="scanner.opening" />}>
           <UnifiedCardScanner isOpen={panel === 'scanner'} onClose={closeScanner} />
         </Suspense>
       )}
       {panel === 'custom' && (
-        <Suspense fallback={null}>
+        <Suspense fallback={<PanelLoadingFallback labelKey="cardSearch.openingCustomCard" />}>
           <CustomCardModal
             onClose={closeCustomCard}
             onCreated={handleCustomCreated}
