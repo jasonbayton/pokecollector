@@ -48,15 +48,29 @@ MAX_GEMINI_RETRY_SECONDS = 14 * 24 * 60 * 60
 PHASH_MAX_DISTANCE = 20
 PHASH_MIN_MARGIN = 5
 PHASH_CANDIDATE_LIMIT = 8
+CANDIDATE_DETAIL_LIMIT = 8
 MAX_REFERENCE_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_REFERENCE_IMAGE_PIXELS = 50_000_000
 TRUSTED_REFERENCE_IMAGE_HOSTS = {"assets.tcgdex.net"}
-# The widest burst one matcher already aims at TCGdex today: retain_ranked_candidates
-# keeps up to 8 baseline candidates plus up to 4 late number matches, and
-# _download_candidate_images fetches every one of them at once. A caller that runs
-# several matchers together can share a gate of this size to hold the whole group
-# at one matcher's peak instead of multiplying it.
-TCGDEX_REQUEST_BURST = 8 + 4
+# The widest burst one gated matcher can aim at TCGdex.
+#
+# A matcher fans out concurrently in exactly two places, and they run in
+# different phases, so its peak is the larger of the two rather than their sum:
+# _fill_candidate_details gathers over at most CANDIDATE_DETAIL_LIMIT candidates,
+# and the pHash download gathers over at most PHASH_CANDIDATE_LIMIT. The searches
+# in _search_and_rank_candidates are a sequential loop and add nothing.
+#
+# One fan-out is wider: _download_candidate_images over every retained candidate
+# (up to 8 baseline plus 4 late number matches). It is reached only from the
+# visual verification branch, and every caller that shares a gate today is the
+# composite path, which hard-sets allow_visual_verification=False. Sizing the
+# gate for a burst that path cannot produce would let a group of matchers exceed
+# the peak of any one of them, which is the opposite of the point.
+#
+# Sharing a gate of this size across several matchers therefore holds the group
+# at one matcher's peak instead of multiplying it. Measured, not asserted from
+# this comment, in test_composite_match_concurrency.
+TCGDEX_REQUEST_BURST = max(PHASH_CANDIDATE_LIMIT, CANDIDATE_DETAIL_LIMIT)
 
 
 def _request_gate(request_gate):
@@ -723,7 +737,7 @@ async def _fill_candidate_details(
     candidates: list[dict],
     card_info: dict,
     *,
-    limit: int = 8,
+    limit: int = CANDIDATE_DETAIL_LIMIT,
     request_gate=None,
 ) -> None:
     """Fill only metadata needed by the deterministic ranker, local DB first."""

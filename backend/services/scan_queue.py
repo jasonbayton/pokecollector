@@ -464,7 +464,11 @@ async def default_composite_processor(
                 slots = asyncio.Semaphore(COMPOSITE_MATCH_CONCURRENCY)
                 # Shared by every matcher in this claim, so the group aims no
                 # more concurrent requests at TCGdex than a single matcher
-                # already does today.
+                # already does today. That holds because this path passes
+                # allow_visual_verification=False, which keeps each matcher
+                # inside the bound TCGDEX_REQUEST_BURST is sized for; a caller
+                # that allowed visual verification would need a wider gate to
+                # get the same throughput, not this one.
                 request_gate = asyncio.Semaphore(TCGDEX_REQUEST_BURST)
 
                 async def match_position(position: int, card_info: dict) -> dict:

@@ -859,6 +859,31 @@ class CompositeRequestGateTests(unittest.IsolatedAsyncioTestCase):
             )
         return fake
 
+    async def _run_one_matcher(self):
+        """One composite matcher, alone and ungated: the peak to hold the group to.
+
+        Measured rather than assumed. The gate was once sized for a 12-wide
+        download that only visual verification reaches, so it lifted a two
+        position claim from 8 concurrent requests to 12 while every comment
+        claimed the group stayed at one matcher's peak.
+        """
+        fake = _FakeTcgdex(cards=_tcgdex_cards(10), hold=0.02)
+        real = _real_matcher()
+
+        with patch("api.recognize.get_gemini_key", return_value="test-key"), \
+                patch("api.recognize.httpx.AsyncClient", fake.client_factory()):
+            await real(
+                self.db,
+                {
+                    "name": "Card0",
+                    "number_local": "25",
+                    "language": "en",
+                    "artist": "Mitsuhiro Arita",
+                },
+                photo_bytes=self.photos[0],
+            )
+        return fake
+
     async def test_two_matchers_never_exceed_one_matchers_burst(self):
         from api.recognize import TCGDEX_REQUEST_BURST
 
@@ -882,6 +907,44 @@ class CompositeRequestGateTests(unittest.IsolatedAsyncioTestCase):
             TCGDEX_REQUEST_BURST,
             "the fake cannot observe an ungated burst, so the positive test proves nothing",
         )
+
+    async def test_the_group_peaks_exactly_where_one_matcher_peaks(self):
+        """The invariant the gate exists for, with both sides measured.
+
+        Asserting only peak <= TCGDEX_REQUEST_BURST cannot catch a gate sized
+        above what the path can produce: it passes for any constant at or above
+        the real peak, which is how a 12-wide gate sat here claiming to hold a
+        two matcher claim at 8.
+        """
+        alone = await self._run_one_matcher()
+        group = await self._run(gated=True)
+
+        print(
+            f"COMPOSITE_GATE one_matcher={alone.peak_in_flight} "
+            f"group={group.peak_in_flight}"
+        )
+        self.assertGreater(alone.peak_in_flight, 1, "the lone matcher never overlapped")
+        self.assertEqual(
+            group.peak_in_flight,
+            alone.peak_in_flight,
+            "concurrent matchers changed the burst one matcher aims at TCGdex",
+        )
+
+    async def test_the_burst_constant_is_the_peak_this_path_can_produce(self):
+        """Pin the constant to the measured peak, not to a hand-written sum.
+
+        Sized above it, the gate silently stops bounding the group. Sized below
+        it, a matcher queues against itself and the claim slows down.
+        """
+        from api.recognize import TCGDEX_REQUEST_BURST
+
+        alone = await self._run_one_matcher()
+
+        print(
+            f"COMPOSITE_GATE constant={TCGDEX_REQUEST_BURST} "
+            f"measured_one_matcher={alone.peak_in_flight}"
+        )
+        self.assertEqual(TCGDEX_REQUEST_BURST, alone.peak_in_flight)
 
 
 if __name__ == "__main__":
