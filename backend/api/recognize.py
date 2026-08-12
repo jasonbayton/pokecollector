@@ -1,5 +1,6 @@
 import base64
 import asyncio
+import contextlib
 import datetime
 import httpx
 import io
@@ -50,6 +51,22 @@ PHASH_CANDIDATE_LIMIT = 8
 MAX_REFERENCE_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_REFERENCE_IMAGE_PIXELS = 50_000_000
 TRUSTED_REFERENCE_IMAGE_HOSTS = {"assets.tcgdex.net"}
+# The widest burst one matcher already aims at TCGdex today: retain_ranked_candidates
+# keeps up to 8 baseline candidates plus up to 4 late number matches, and
+# _download_candidate_images fetches every one of them at once. A caller that runs
+# several matchers together can share a gate of this size to hold the whole group
+# at one matcher's peak instead of multiplying it.
+TCGDEX_REQUEST_BURST = 8 + 4
+
+
+def _request_gate(request_gate):
+    """Use the caller's gate, or nothing at all when it did not supply one.
+
+    Deliberately opt-in. The individual scan path passes nothing and keeps
+    exactly today's fan-out, so nothing the web app serves ends up queueing
+    behind a background worker's downloads.
+    """
+    return request_gate if request_gate is not None else contextlib.nullcontext()
 
 
 class GeminiRateLimitHTTPException(HTTPException):
@@ -552,6 +569,8 @@ async def _download_candidate_images(
     client: httpx.AsyncClient,
     candidates: list[dict],
     existing: dict[str, bytes] | None = None,
+    *,
+    request_gate=None,
 ) -> dict[str, bytes]:
     """Download each candidate image at most once for pHash/Gemini reuse."""
     downloaded = dict(existing or {})
@@ -568,24 +587,25 @@ async def _download_candidate_images(
         ):
             return None
         try:
-            async with client.stream("GET", image_url, timeout=5) as response:
-                if response.status_code != 200:
-                    return None
-                content_length = response.headers.get("content-length")
-                if content_length:
-                    try:
-                        if int(content_length) > MAX_REFERENCE_IMAGE_BYTES:
+            async with _request_gate(request_gate):
+                async with client.stream("GET", image_url, timeout=5) as response:
+                    if response.status_code != 200:
+                        return None
+                    content_length = response.headers.get("content-length")
+                    if content_length:
+                        try:
+                            if int(content_length) > MAX_REFERENCE_IMAGE_BYTES:
+                                return None
+                        except ValueError:
                             return None
-                    except ValueError:
-                        return None
 
-                content = bytearray()
-                async for chunk in response.aiter_bytes():
-                    if len(content) + len(chunk) > MAX_REFERENCE_IMAGE_BYTES:
-                        return None
-                    content.extend(chunk)
-                if content:
-                    return candidate_id, bytes(content)
+                    content = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        if len(content) + len(chunk) > MAX_REFERENCE_IMAGE_BYTES:
+                            return None
+                        content.extend(chunk)
+                    if content:
+                        return candidate_id, bytes(content)
         except Exception:
             return None
         return None
@@ -704,6 +724,7 @@ async def _fill_candidate_details(
     card_info: dict,
     *,
     limit: int = 8,
+    request_gate=None,
 ) -> None:
     """Fill only metadata needed by the deterministic ranker, local DB first."""
     targets = candidates[:limit]
@@ -722,6 +743,10 @@ async def _fill_candidate_details(
 
     ids = [card["id"] for card in targets if card.get("id")]
     if ids and required_fields.intersection({"artist", "hp", "regulation_mark"}):
+        # Issued and fully consumed without an await in between, so concurrent
+        # callers sharing one Session cannot interleave here. Keep it that way:
+        # awaiting between the query and the last read of `rows` would let a
+        # second matcher re-enter the session mid-transaction.
         rows = db.query(Card.id, Card.artist, Card.hp, Card.regulation_mark).filter(
             Card.id.in_(ids)
         ).all()
@@ -748,9 +773,10 @@ async def _fill_candidate_details(
             if not tcg_id:
                 return
             try:
-                response = await client.get(
-                    f"https://api.tcgdex.net/v2/{language}/cards/{tcg_id}"
-                )
+                async with _request_gate(request_gate):
+                    response = await client.get(
+                        f"https://api.tcgdex.net/v2/{language}/cards/{tcg_id}"
+                    )
                 if response.status_code != 200:
                     return
                 detail = response.json()
@@ -771,6 +797,8 @@ async def _search_and_rank_candidates(
     db: Session,
     card_info: dict,
     trace: ScanTrace | None = None,
+    *,
+    request_gate=None,
 ) -> tuple[list[dict], int]:
     card_name = str(card_info.get("name") or "").strip()
     card_name_en = str(card_info.get("name_en") or card_name).strip() or card_name
@@ -795,11 +823,12 @@ async def _search_and_rank_candidates(
         if len(candidates) >= 15:
             break
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                response = await client.get(
-                    f"https://api.tcgdex.net/v2/{search_language}/cards",
-                    params={"name": search_name},
-                )
+            async with _request_gate(request_gate):
+                async with httpx.AsyncClient(timeout=15) as client:
+                    response = await client.get(
+                        f"https://api.tcgdex.net/v2/{search_language}/cards",
+                        params={"name": search_name},
+                    )
             cards = response.json() if response.status_code == 200 else []
             if trace:
                 trace.record_tcgdex(
@@ -850,6 +879,8 @@ async def _search_and_rank_candidates(
     }
     local_sets = {}
     if candidate_set_ids:
+        # As in _fill_candidate_details: query and read back with no await in
+        # between, so a shared Session is never re-entered mid-transaction.
         rows = db.query(Set).filter(Set.tcg_set_id.in_(candidate_set_ids)).all()
         local_sets = {(row.tcg_set_id, row.lang): row for row in rows}
     for candidate in candidates:
@@ -872,7 +903,7 @@ async def _search_and_rank_candidates(
             seen.add(key)
             deduped.append(candidate)
 
-    await _fill_candidate_details(db, deduped, card_info)
+    await _fill_candidate_details(db, deduped, card_info, request_gate=request_gate)
     deduped.sort(key=lambda card: _candidate_rank_key(card_info, card))
     number_match_count = sum(
         1
@@ -900,15 +931,27 @@ async def match_card_info(
     photo_bytes: bytes | None = None,
     trace: ScanTrace | None = None,
     provider: ScanProvider | None = None,
+    request_gate=None,
 ) -> dict:
     """Shared deterministic matcher for both individual and composite scans.
 
     provider defaults to Gemini so existing callers, including the tests, behave
     exactly as before.
+
+    request_gate is an optional async context manager entered around each
+    outbound TCGdex request. A caller running several matchers at once passes a
+    shared bounded gate so the group's burst stays at one matcher's peak;
+    callers that pass nothing are gated not at all, exactly as before.
+
+    db is used for two short synchronous reads, each issued and consumed without
+    an await in between. That is what makes it safe to hand several concurrent
+    matchers the same Session rather than one connection each.
     """
     provider = provider or ScanProvider(GEMINI)
     card_info = normalize_recognized_card_info(card_info)
-    candidates, number_match_count = await _search_and_rank_candidates(db, card_info, trace)
+    candidates, number_match_count = await _search_and_rank_candidates(
+        db, card_info, trace, request_gate=request_gate
+    )
     confident, decision = _metadata_decision(card_info, candidates)
 
     top_candidates = retain_ranked_candidates(candidates)
@@ -937,6 +980,7 @@ async def match_card_info(
                 candidate_images = await _download_candidate_images(
                     client,
                     top_candidates[:PHASH_CANDIDATE_LIMIT],
+                    request_gate=request_gate,
                 )
                 if should_try_phash:
                     try:
@@ -964,6 +1008,7 @@ async def match_card_info(
                         client,
                         top_candidates,
                         candidate_images,
+                        request_gate=request_gate,
                     )
                     parts = [
                         {"text": "Here is the original card photo:"},
@@ -1234,12 +1279,19 @@ async def match_composite_card_info(
     *,
     photo_bytes: bytes | None = None,
     trace: ScanTrace | None = None,
+    request_gate=None,
 ) -> dict:
-    """Use local pHash before an uncertain composite falls back individually."""
+    """Use local pHash before an uncertain composite falls back individually.
+
+    allow_visual_verification stays False, so this path never reaches a paid
+    vision provider: the one composite extraction per claim is the only such
+    call, and running these concurrently cannot add another.
+    """
     return await match_card_info(
         db,
         card_info,
         allow_visual_verification=False,
         photo_bytes=photo_bytes,
         trace=trace,
+        request_gate=request_gate,
     )

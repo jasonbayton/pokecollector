@@ -25,6 +25,12 @@ logger = logging.getLogger(__name__)
 
 MAX_RECOGNITION_ATTEMPTS = 3
 LEASE_SECONDS = 10 * 60
+# How many recognised composite positions may be matched at once. The profitable
+# work in a matcher is network, not database: four TCGdex round trips against two
+# short synchronous reads. Two positions overlap those waits without multiplying
+# the burst aimed at a free public API, and without needing a single extra
+# database connection - see default_composite_processor.
+COMPOSITE_MATCH_CONCURRENCY = 2
 TRANSIENT_BACKOFF_SECONDS = (30, 120, 600, 1800, 3600, 21600)
 RECOGNITION_BACKOFF_SECONDS = (2, 10, 30)
 TERMINAL_ITEM_STATUSES = {"done", "failed"}
@@ -386,6 +392,7 @@ async def default_composite_processor(
 ) -> list[dict | None]:
     """Recognize a small grid and flag unclear positions for individual work."""
     from api.recognize import (
+        TCGDEX_REQUEST_BURST,
         CompositeRecognitionError,
         match_composite_card_info,
         recognize_composite_card_info,
@@ -437,27 +444,74 @@ async def default_composite_processor(
                     trace.record_error(str(exc))
                 recognized_by_position = {}
 
-            results: list[dict | None] = []
+            # The one paid extraction above already covered every position. What
+            # is left per position is catalogue matching, which is independent
+            # work dominated by TCGdex round trips, so positions overlap.
+            results: list[dict | None] = [None] * len(images)
+            pending: list[tuple[int, dict]] = []
             for position in range(len(images)):
                 card_info = recognized_by_position.get(position)
                 has_name = bool(str((card_info or {}).get("name") or "").strip())
                 if not has_name:
                     traces[position].record_decision("individual_fallback")
-                    results.append(None)
                     continue
-                result = await match_composite_card_info(
-                    db,
-                    card_info,
-                    photo_bytes=images[position],
-                    trace=traces[position],
+                pending.append((position, card_info))
+
+            if pending:
+                # Both created per call, never at module scope: an asyncio
+                # primitive binds to the loop that first awaits it, and this
+                # module is imported once but run under many loops.
+                slots = asyncio.Semaphore(COMPOSITE_MATCH_CONCURRENCY)
+                # Shared by every matcher in this claim, so the group aims no
+                # more concurrent requests at TCGdex than a single matcher
+                # already does today.
+                request_gate = asyncio.Semaphore(TCGDEX_REQUEST_BURST)
+
+                async def match_position(position: int, card_info: dict) -> dict:
+                    async with slots:
+                        # Deliberately the coordinator's own session. Every
+                        # query this reaches is issued and fully consumed
+                        # between two awaits, so the single-threaded event loop
+                        # serialises them for free. Giving each matcher its own
+                        # Session instead would check out a second and third
+                        # pooled connection, and each of those checkouts is a
+                        # synchronous blocking wait made from inside the event
+                        # loop while this coordinator already holds one - which
+                        # under pool pressure stalls the whole application and
+                        # fails a claim that sequential code would have
+                        # completed.
+                        return await match_composite_card_info(
+                            db,
+                            card_info,
+                            photo_bytes=images[position],
+                            trace=traces[position],
+                            request_gate=request_gate,
+                        )
+
+                settled = await asyncio.gather(
+                    *(
+                        match_position(position, card_info)
+                        for position, card_info in pending
+                    ),
+                    # Collect every outcome rather than propagating whichever
+                    # failure happens to arrive first. process_claimed_scan_item
+                    # maps the exception class to permanent / transient /
+                    # recognition, so letting completion order pick the
+                    # exception would make an item's terminal status and retry
+                    # counters depend on network timing. Raising the lowest
+                    # position's exception below reproduces exactly what the
+                    # sequential loop did. Waiting for all of them also
+                    # guarantees no matcher is still touching db when the
+                    # coordinator moves on to fail the claim.
+                    return_exceptions=True,
                 )
-                if not bool(result.get("_identity_confident")):
-                    traces[position].record_decision("individual_fallback")
-                results.append(
-                    result
-                    if bool(result.get("_identity_confident"))
-                    else None
-                )
+                for (position, _card_info), outcome in zip(pending, settled):
+                    if isinstance(outcome, BaseException):
+                        raise outcome
+                    if bool(outcome.get("_identity_confident")):
+                        results[position] = outcome
+                    else:
+                        traces[position].record_decision("individual_fallback")
             return results
     except Exception as exc:
         for trace in traces:
