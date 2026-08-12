@@ -575,6 +575,26 @@ describe('reviewing the items on a job', () => {
 })
 
 describe('confirming a destructive action', () => {
+  it('wires the header control to the discard the page performs', () => {
+    // The seam this commit introduced. The test below seeds `confirmation`
+    // directly and the header test only counts the button, so neither presses
+    // it: onDiscard could be a no-op and both would still pass, leaving the
+    // page's only destructive control dead with a green suite.
+    showDetail()
+    seedDetailState()
+
+    renderScanQueue()
+    expectSeedsWentWhereIntended()
+    // Found by aria-label, not by text: its only child is an icon.
+    const discard = rendered.find(entry => (
+      entry.type === 'button' && entry.props?.['aria-label'] === 'scanner.discardJob'
+    ))
+    expect(discard, 'no discard control was rendered').toBeDefined()
+    discard.props.onClick({ stopPropagation: () => {} })
+
+    expect(setConfirmation).toHaveBeenCalledWith({ type: 'discard' })
+  })
+
   it('asks before discarding the job, and discards it on confirmation', () => {
     showDetail()
     seedDetailState({ confirmation: { type: 'discard' } })
