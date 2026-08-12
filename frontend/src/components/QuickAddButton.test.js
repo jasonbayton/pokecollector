@@ -19,8 +19,9 @@ const { scannerValue } = vi.hoisted(() => ({
   },
 }))
 
-// Only the hook is replaced. The action constants stay real, so a renamed
-// action breaks these tests instead of quietly matching a stale string.
+// Only the hook is replaced. The action constants and the route policy stay
+// real, so a renamed action or a changed rule breaks these tests instead of
+// quietly matching a stale string.
 vi.mock('../contexts/ScannerContext', async (importOriginal) => ({
   ...(await importOriginal()),
   useScanner: () => scannerValue,
@@ -33,6 +34,7 @@ vi.mock('../contexts/SettingsContext', () => ({
 const renderMenu = (props = {}) => renderToStaticMarkup(createElement(QuickAddMenu, {
   open: false,
   onToggle: () => {},
+  onClose: () => {},
   onSelect: () => {},
   ...props,
 }))
@@ -43,9 +45,16 @@ const renderMenu = (props = {}) => renderToStaticMarkup(createElement(QuickAddMe
 const menuTree = (props = {}) => [...walk(QuickAddMenu({
   open: true,
   onToggle: () => {},
+  onClose: () => {},
   onSelect: () => {},
   ...props,
 }))]
+
+const renderControl = pathname => renderToStaticMarkup(createElement(
+  MemoryRouter,
+  { initialEntries: [pathname] },
+  createElement(QuickAddButton),
+))
 
 function* walk(node) {
   if (Array.isArray(node)) {
@@ -82,12 +91,27 @@ describe('QuickAddMenu', () => {
     expect(markup).not.toContain('role="menu"')
   })
 
-  it('stays under the dialog layer', () => {
+  it('stays under the dialog layer while closed', () => {
     // Dialogs own z-50. A floating button drawn over an open sheet reads as a
     // rendering fault, which is why the public home button was lowered to 40.
     const markup = renderMenu()
 
     expect(markup).toContain('z-40')
+    expect(markup).not.toContain('z-50')
+  })
+
+  it('stacks the open menu over the page, over its backdrop, and still under dialogs', () => {
+    // The state that actually matters, and the one the closed render cannot
+    // speak for: the backdrop has to cover the page but not the menu, and the
+    // whole control has to stay below the dialog layer.
+    const markup = renderMenu({ open: true })
+    const backdropIndex = markup.indexOf('fixed inset-0 z-30')
+    const controlIndex = markup.indexOf('fixed z-40')
+
+    expect(backdropIndex).toBeGreaterThanOrEqual(0)
+    expect(controlIndex).toBeGreaterThan(backdropIndex)
+    expect(markup).toContain('role="menu"')
+    expect(markup).toContain('aria-expanded="true"')
     expect(markup).not.toContain('z-50')
   })
 
@@ -116,11 +140,43 @@ describe('QuickAddMenu', () => {
     ])
   })
 
+  it('dismisses rather than toggles when the backdrop is clicked', () => {
+    // The click that reaches the backdrop has already blurred the menu, and the
+    // blur closes it. A toggle here would reopen what the blur just closed.
+    const onClose = vi.fn()
+    const onToggle = vi.fn()
+    const backdrop = menuTree({ onClose, onToggle })
+      .find(node => node.props?.['aria-label'] === 'common.close')
+
+    expect(backdrop).toBeDefined()
+    backdrop.props.onClick()
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(onToggle).not.toHaveBeenCalled()
+  })
+
+  it('closes when focus leaves the control, and stays open while it moves inside it', () => {
+    // A menu is not a dialog: tab out of it and it goes away, rather than
+    // trapping the user in four items.
+    const onClose = vi.fn()
+    const container = menuTree({ onClose }).find(node => typeof node.props?.onBlur === 'function')
+    const inside = { id: 'menu-item' }
+    const currentTarget = { contains: node => node === inside }
+
+    container.props.onBlur({ currentTarget, relatedTarget: inside })
+    expect(onClose).not.toHaveBeenCalled()
+
+    container.props.onBlur({ currentTarget, relatedTarget: { id: 'somewhere-else' } })
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   it('shows the number of scans waiting for a decision', () => {
     const markup = renderMenu({ attention: 7 })
 
     expect(markup).toContain('>7</span>')
-    expect(markup).toContain('title="scanner.needReview"')
+    // The queue writes this key after a count, and it reads as a fragment
+    // without one. The tooltip carries the same count.
+    expect(markup).toContain('title="7 scanner.needReview"')
     expect(markup).not.toContain('animate-pulse')
   })
 
@@ -142,7 +198,7 @@ describe('QuickAddMenu', () => {
 
     expect(markup).not.toContain('animate-pulse')
     expect(markup).not.toContain('bg-yellow')
-    expect(markup).not.toContain('title="scanner.needReview"')
+    expect(markup).not.toContain('scanner.needReview')
   })
 })
 
@@ -150,14 +206,20 @@ describe('QuickAddButton', () => {
   it('renders the control closed, with the queue state the provider published', () => {
     scannerValue.scanAttention = 4
 
-    const markup = renderToStaticMarkup(createElement(
-      MemoryRouter,
-      { initialEntries: ['/collection'] },
-      createElement(QuickAddButton),
-    ))
+    const markup = renderControl('/collection')
 
     expect(markup).toContain('aria-label="quickAdd.title"')
     expect(markup).toContain('aria-expanded="false"')
     expect(markup).toContain('>4</span>')
+  })
+
+  it('draws nothing at all on the scan queue', () => {
+    // The queue is a route that renders itself as a modal over the page. The
+    // control would sit under its backdrop: visible, unclickable, and clicking
+    // it would dismiss the queue and land the user on /search.
+    scannerValue.scanAttention = 4
+
+    expect(renderControl('/scans')).toBe('')
+    expect(renderControl('/scans/12')).toBe('')
   })
 })

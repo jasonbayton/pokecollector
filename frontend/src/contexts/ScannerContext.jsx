@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { getScanJobs } from '../api/client'
-import UnifiedCardScanner from '../components/UnifiedCardScanner'
 import {
   SCAN_JOBS_QUERY_KEY,
   hasActiveScanJobs,
@@ -16,6 +15,12 @@ import {
 const CustomCardModal = lazy(() => import('../components/CardItem').then(module => ({
   default: module.CustomCardModal,
 })))
+
+// Likewise deferred. App.jsx imports this module for its provider, so a static
+// import here put the scanner, its confirm dialog and its sheet into the chunk
+// the entry point loads - which is every visit, including the login screen and
+// the public /u share pages, neither of which can scan anything.
+const UnifiedCardScanner = lazy(() => import('../components/UnifiedCardScanner'))
 
 const ScannerContext = createContext(null)
 
@@ -36,9 +41,35 @@ export function quickAddDestination(action, pathname) {
   return null
 }
 
+// Which panel a quick-add action opens over the current page, or null when the
+// action only moves the user. Exported so the control's promise - "scan card"
+// opens the scanner, "create card manually" opens the manual card form - is a
+// fact a test can hold the provider to.
+export function quickAddPanel(action) {
+  if (action === QUICK_ADD_SCAN) return 'scanner'
+  if (action === QUICK_ADD_CUSTOM) return 'custom'
+  return null
+}
+
+// The scan queue is a route that renders itself as a modal, so it draws its own
+// full-screen backdrop over the page. The quick-add control sits below the
+// dialog layer by design, which on these two routes leaves it visible through
+// the backdrop but unclickable: the click lands on the backdrop, and the queue
+// closes itself by navigating to /search. A control that cannot be used and
+// throws the user off the page they are on is worse than no control, so it is
+// not drawn here. Quick add is one dismissal away - closing the queue lands on
+// the card search, which has it.
+export function quickAddHiddenOn(pathname) {
+  return pathname === '/scans' || pathname.startsWith('/scans/')
+}
+
+// The provider's whole visible state, in one object so it moves atomically:
+// which panel owns the screen, and whether the scanner has been mounted yet.
+// scannerMounted is set by the first open and never cleared - see the mount.
+const CLOSED = { panel: null, scannerMounted: false }
+
 export function ScannerProvider({ children }) {
-  // One panel at a time: null, 'scanner' or 'custom'.
-  const [panel, setPanel] = useState(null)
+  const [{ panel, scannerMounted }, setPanelState] = useState(CLOSED)
   const navigate = useNavigate()
   const location = useLocation()
   const queryClient = useQueryClient()
@@ -53,21 +84,28 @@ export function ScannerProvider({ children }) {
   })
   const scanJobs = scanData?.jobs || []
 
-  const openScanner = useCallback(() => setPanel('scanner'), [])
-  const closeScanner = useCallback(() => {
-    setPanel(current => (current === 'scanner' ? null : current))
-  }, [])
-  const openCustomCard = useCallback(() => setPanel('custom'), [])
-  const closeCustomCard = useCallback(() => {
-    setPanel(current => (current === 'custom' ? null : current))
-  }, [])
+  const showPanel = useCallback(next => setPanelState(current => ({
+    panel: next,
+    scannerMounted: current.scannerMounted || next === 'scanner',
+  })), [])
+
+  // Closing names the panel it closes, so a stale handler cannot shut the panel
+  // that replaced it.
+  const closePanel = useCallback(kind => setPanelState(current => (
+    current.panel === kind ? { ...current, panel: null } : current
+  )), [])
+
+  const openScanner = useCallback(() => showPanel('scanner'), [showPanel])
+  const closeScanner = useCallback(() => closePanel('scanner'), [closePanel])
+  const openCustomCard = useCallback(() => showPanel('custom'), [showPanel])
+  const closeCustomCard = useCallback(() => closePanel('custom'), [closePanel])
 
   const runQuickAdd = useCallback(action => {
     const destination = quickAddDestination(action, location.pathname)
     if (destination) navigate(destination)
-    if (action === QUICK_ADD_SCAN) setPanel('scanner')
-    else if (action === QUICK_ADD_CUSTOM) setPanel('custom')
-  }, [location.pathname, navigate])
+    const next = quickAddPanel(action)
+    if (next) showPanel(next)
+  }, [location.pathname, navigate, showPanel])
 
   const handleCustomCreated = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['custom-cards'] })
@@ -79,6 +117,10 @@ export function ScannerProvider({ children }) {
     openCustomCard,
     runQuickAdd,
     isScannerOpen: panel === 'scanner',
+    // The card search suppresses its arrow-key pagination while something owns
+    // the screen. Its own modals it knows about; the two this provider opens
+    // over it, it can only know from here.
+    isCustomCardOpen: panel === 'custom',
     scanAttention: scanAttentionCount(scanJobs),
     scansActive: hasActiveScanJobs(scanJobs),
   }), [closeScanner, openCustomCard, openScanner, panel, runQuickAdd, scanJobs])
@@ -86,17 +128,26 @@ export function ScannerProvider({ children }) {
   return (
     <ScannerContext.Provider value={value}>
       {children}
-      {/* Mounted for the whole session rather than only while open: the scanner
-          bumps a generation counter on every open and close so a submission
-          that resolves after the user walked away cannot navigate them to the
-          new job. Unmounting on close would throw that guard away. */}
-      <UnifiedCardScanner isOpen={panel === 'scanner'} onClose={closeScanner} />
+      {/* Mounted from the first open until the session ends rather than only
+          while open: the scanner bumps a generation counter on every open and
+          close so a submission that resolves after the user walked away cannot
+          navigate them to the new job. Unmounting on close would throw that
+          guard away. Before the first open there is nothing to guard, and not
+          mounting keeps its chunk off every page that never scans. */}
+      {(scannerMounted || panel === 'scanner') && (
+        <Suspense fallback={null}>
+          <UnifiedCardScanner isOpen={panel === 'scanner'} onClose={closeScanner} />
+        </Suspense>
+      )}
       {panel === 'custom' && (
         <Suspense fallback={null}>
           <CustomCardModal
             onClose={closeCustomCard}
             onCreated={handleCustomCreated}
-            autoAddCollection={false}
+            /* Quick add is an add-to-collection control. Creating the card and
+               stopping there would leave the user on a page that shows no sign
+               of it: the manual card exists in the catalogue only. */
+            autoAddCollection
           />
         </Suspense>
       )}

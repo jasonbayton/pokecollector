@@ -6,12 +6,14 @@ import { SCAN_JOBS_QUERY_KEY } from '../utils/scanJobs'
 import UnifiedCardScanner from '../components/UnifiedCardScanner'
 import CardSearch from './CardSearch'
 
-const { useQuery, useMutation, openScanner, navigate, location } = vi.hoisted(() => ({
+const { useQuery, useMutation, openScanner, navigate, location, keysSuspended, scannerState } = vi.hoisted(() => ({
   useQuery: vi.fn(),
   useMutation: vi.fn(),
   openScanner: vi.fn(),
   navigate: vi.fn(),
   location: { pathname: '/search', search: '?q=charizard&rarity=Rare' },
+  keysSuspended: vi.fn(() => false),
+  scannerState: { openScanner: null, isScannerOpen: false, isCustomCardOpen: false },
 }))
 
 vi.mock('@tanstack/react-query', () => ({
@@ -30,8 +32,14 @@ vi.mock('../contexts/SettingsContext', () => ({
 }))
 
 vi.mock('../contexts/ScannerContext', () => ({
-  useScanner: () => ({ openScanner, isScannerOpen: false }),
+  useScanner: () => ({ ...scannerState, openScanner }),
 }))
+
+// Stubbed so the arguments the page hands it can be read back. The rule itself
+// is tested in utils/cardSearchOverlays.test.js; what matters here is which
+// surfaces the page actually declares, because the guard runs in an effect and
+// effects do not run in a server render.
+vi.mock('../utils/cardSearchOverlays', () => ({ cardSearchKeysSuspended: keysSuspended }))
 
 vi.mock('../api/client', () => ({
   searchCards: vi.fn(),
@@ -84,6 +92,9 @@ const searchTree = () => {
 }
 
 beforeEach(() => {
+  keysSuspended.mockClear()
+  scannerState.isScannerOpen = false
+  scannerState.isCustomCardOpen = false
   openScanner.mockReset()
   navigate.mockReset()
   useQuery.mockReset()
@@ -113,6 +124,26 @@ describe('CardSearch scanner entry point', () => {
       .filter(options => options.queryKey === SCAN_JOBS_QUERY_KEY)
 
     expect(scanQueries).toHaveLength(0)
+  })
+
+  it('declares both panels the global control opens, not only its own modals', () => {
+    // Its own modals the page knows about. The scanner and the manual card form
+    // opened from the quick-add menu it can only learn about from the provider,
+    // and while either owns the screen the left and right keys must not turn
+    // the page behind it.
+    scannerState.isScannerOpen = true
+    scannerState.isCustomCardOpen = true
+
+    searchTree()
+
+    expect(keysSuspended).toHaveBeenCalled()
+    expect(keysSuspended.mock.calls.at(-1)[0]).toMatchObject({
+      scannerOpen: true,
+      quickAddCustomCardOpen: true,
+      cardDialogOpen: false,
+      filtersOpen: false,
+      pageCustomCardOpen: false,
+    })
   })
 
   it('keeps its own scanner state out of the page', () => {

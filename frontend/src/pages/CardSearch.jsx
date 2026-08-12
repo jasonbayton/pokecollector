@@ -11,6 +11,7 @@ import Sheet from '../components/ui/Sheet'
 import { getDefaultVariantOrNull } from '../utils/cardVariants'
 import { cardNumberMatches } from '../utils/cardNumbers'
 import { normalizeSearchText, textIncludes } from '../utils/textSearch'
+import { cardSearchKeysSuspended } from '../utils/cardSearchOverlays'
 import { useVisibleTcgdexLanguages } from '../hooks/useVisibleTcgdexLanguages'
 import TcgdexLanguageSelect from '../components/TcgdexLanguageSelect'
 import { normalizeTcgdexLanguage, tcgdexLanguageLabel } from '../utils/tcgdexLanguages'
@@ -127,7 +128,7 @@ function FilterForm({ filters, setFilter, allSeries, setsForSeries, toggleSortOr
 
 export default function CardSearch() {
   const { t, settings, formatPrice } = useSettings()
-  const { openScanner, isScannerOpen } = useScanner()
+  const { openScanner, isScannerOpen, isCustomCardOpen } = useScanner()
   const visibleLanguages = useVisibleTcgdexLanguages()
   const queryClient = useQueryClient()
   const location = useLocation()
@@ -279,7 +280,13 @@ export default function CardSearch() {
     navigate({ pathname: location.pathname, search: search ? `?${search}` : '' })
   }
 
-  const hasOpenOverlay = Boolean(selectedCard || showFilters || showCustomModal || isScannerOpen)
+  const hasOpenOverlay = cardSearchKeysSuspended({
+    cardDialogOpen: Boolean(selectedCard),
+    filtersOpen: showFilters,
+    pageCustomCardOpen: showCustomModal,
+    scannerOpen: isScannerOpen,
+    quickAddCustomCardOpen: isCustomCardOpen,
+  })
 
   useEffect(() => {
     setSearchInput(filters.name)

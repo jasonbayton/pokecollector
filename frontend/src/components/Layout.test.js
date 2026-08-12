@@ -73,6 +73,14 @@ describe('Layout', () => {
     expect(markup).toContain('aria-label="quickAdd.title"')
   })
 
+  it('leaves the scan queue to draw its own screen', () => {
+    // /scans is a route rendered as a modal. The control sits below the dialog
+    // layer, so there it would be visible through the backdrop, unclickable,
+    // and any click on it would dismiss the queue and land on /search.
+    expect(render('/scans')).not.toContain('aria-label="quickAdd.title"')
+    expect(render('/scans/12')).not.toContain('aria-label="quickAdd.title"')
+  })
+
   it('drops the whole nav bar on the home route', () => {
     // This is why the control cannot live in AppNav: the home screen has none.
     const home = render('/')

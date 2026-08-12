@@ -127,6 +127,30 @@ Defined in `frontend/src/components/TabNav.jsx`.
 - `components/Layout.jsx` wraps protected routes
 - `components/AppNav.jsx` shows the current page title and multi-user logout control
 
+### Quick add
+
+`contexts/ScannerContext.jsx` owns the scanner, the manual-card form and the one
+scan-queue query for the whole app. It is mounted inside `ProtectedRoutes`, so it
+is inside the router it navigates with and absent from the login screen and the
+public `/u` pages. Both panels are loaded on demand: nothing of the scanner is in
+the chunk the entry point loads, and once opened it stays mounted so its
+generation guard survives every later close.
+
+`components/QuickAddButton.jsx` is the floating control `Layout` renders on every
+page, mirroring the bottom-left pokeball. It offers four actions - scan, card
+search, create a card manually, scan queue - carries the outstanding-review count
+that used to sit on the home screen's search tile, and:
+
+- opens the scanner and the manual-card form over the current page, and walks to
+  `/search` or `/scans` only when the user is not already there
+- creates a manual card **with** the add-to-collection step, because quick add is
+  an add-to-collection control
+- is not drawn on `/scans` or `/scans/:jobId`: the queue is a route rendered as a
+  modal, so the control would sit under its backdrop, unusable, and a click on it
+  would dismiss the queue
+- closes on Escape from anywhere, on a click outside, and when focus leaves it,
+  returning focus to the button it was opened with
+
 ## Key Screens
 
 ### `pages/Login.jsx`
@@ -193,7 +217,7 @@ See [`CARD_SYSTEM.md`](CARD_SYSTEM.md) for usage, design tokens, review guidance
 
 `components/UnifiedCardScanner.jsx` is the capture-only entry point. It supports the native device camera and gallery uploads, stages one or more photos, allows per-photo individual recognition overrides, and includes an optional positioning guide beside **Take photo**. Every submission enqueues a persistent job and routes to the same review inbox, including a one-photo scan.
 
-`pages/ScanQueue.jsx` and `components/ScanReview.jsx` show job progress, retry countdowns/reasons, sanitized source photos, ranked candidates, failed items, individual retry, dismissal, and collection-add review. The navigation badge counts outstanding items. A confirmed candidate id is sent when resolving an item so opted-in diagnostics can be labelled with human-reviewed ground truth.
+`pages/ScanQueue.jsx` and `components/ScanReview.jsx` show job progress, retry countdowns/reasons, sanitized source photos, ranked candidates, failed items, individual retry, dismissal, and collection-add review. The quick-add control carries the badge counting outstanding items. A confirmed candidate id is sent when resolving an item so opted-in diagnostics can be labelled with human-reviewed ground truth.
 
 `components/ScanAddModal.jsx` is the single add-to-collection step for a confirmed match. It defaults to quantity `1`, condition `Mint`, and the card's advertised default variant, takes the language from the recognised card and falls back to the review item's detected language, and stays disabled until the exchange rate is ready so a purchase price is never stored at the wrong rate.
 

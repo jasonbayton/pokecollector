@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { Camera, PenLine, Plus, ScanLine, Search, X } from 'lucide-react'
 
@@ -8,6 +8,7 @@ import {
   QUICK_ADD_QUEUE,
   QUICK_ADD_SCAN,
   QUICK_ADD_SEARCH,
+  quickAddHiddenOn,
   useScanner,
 } from '../contexts/ScannerContext'
 
@@ -18,7 +19,16 @@ const FLOATING_SHADOW = '0 4px 20px rgba(0,0,0,0.5), 0 0 0 2px rgba(0,0,0,0.8), 
 
 // Presentational half, exported so its two states can be rendered directly. The
 // container below owns the open/closed state and the context wiring.
-export function QuickAddMenu({ open, onToggle, onSelect, attention = 0, active = false }) {
+export function QuickAddMenu({
+  open,
+  onToggle,
+  onClose,
+  onSelect,
+  attention = 0,
+  active = false,
+  toggleRef = null,
+  menuRef = null,
+}) {
   const { t } = useSettings()
 
   const items = [
@@ -31,12 +41,15 @@ export function QuickAddMenu({ open, onToggle, onSelect, attention = 0, active =
   return (
     <>
       {/* Only drawn while the menu is open. A permanent full-screen layer would
-          swallow clicks meant for the page and for the home button. */}
+          swallow clicks meant for the page and for the home button. Closing
+          rather than toggling: the click that reaches this layer has already
+          moved focus off the menu, and a toggle would reopen what the blur
+          just closed. */}
       {open && (
         <button
           type="button"
           aria-label={t('common.close')}
-          onClick={onToggle}
+          onClick={onClose}
           className="fixed inset-0 z-30 cursor-default bg-black/20"
         />
       )}
@@ -48,12 +61,16 @@ export function QuickAddMenu({ open, onToggle, onSelect, attention = 0, active =
           bottom: 'max(1.5rem, env(safe-area-inset-bottom))',
           right: 'max(1rem, env(safe-area-inset-right))',
         }}
-        onKeyDown={event => {
-          if (event.key === 'Escape' && open) onToggle()
+        onBlur={event => {
+          // A menu is not a dialog: tabbing out of it dismisses it rather than
+          // trapping the user inside four items. Focus has already moved where
+          // the user asked, so it is not pulled back to the button.
+          if (open && !event.currentTarget.contains(event.relatedTarget)) onClose()
         }}
       >
         {open && (
           <div
+            ref={menuRef}
             role="menu"
             aria-label={t('quickAdd.title')}
             className="quick-add-menu w-64 overflow-hidden rounded-2xl border border-border bg-bg-surface/95 shadow-2xl backdrop-blur"
@@ -79,6 +96,7 @@ export function QuickAddMenu({ open, onToggle, onSelect, attention = 0, active =
         )}
 
         <button
+          ref={toggleRef}
           type="button"
           onClick={onToggle}
           aria-haspopup="menu"
@@ -94,7 +112,10 @@ export function QuickAddMenu({ open, onToggle, onSelect, attention = 0, active =
           {open ? <X size={20} /> : <Plus size={22} />}
           {attention > 0 && (
             <span
-              title={t('scanner.needReview')}
+              // scanner.needReview is a sentence fragment the queue completes
+              // with a count. On its own it read as "need review", so it is
+              // given the same count here.
+              title={`${attention} ${t('scanner.needReview')}`}
               className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-yellow px-1 text-[10px] font-bold leading-none text-black"
             >
               {attention > 99 ? '99+' : attention}
@@ -119,21 +140,56 @@ export default function QuickAddButton() {
   const { runQuickAdd, scanAttention, scansActive } = useScanner()
   const location = useLocation()
   const [open, setOpen] = useState(false)
+  const toggleRef = useRef(null)
+  const menuRef = useRef(null)
+
+  const close = useCallback(({ restoreFocus = false } = {}) => {
+    setOpen(false)
+    if (restoreFocus) toggleRef.current?.focus()
+  }, [])
 
   // A quick-add action can change route. Leaving the menu open over the page
   // the user just landed on would hide the thing they asked for.
   useEffect(() => { setOpen(false) }, [location.pathname])
 
+  // On the document rather than on the control: the menu is dismissible from
+  // wherever the user is looking, and by the time they reach for Escape their
+  // focus may well have left the four items.
+  useEffect(() => {
+    if (!open) return undefined
+    const handleKeyDown = event => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      close({ restoreFocus: true })
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [close, open])
+
+  // Opening moves focus into the menu, so a keyboard user does not have to tab
+  // through the page to reach what they just opened, and closing puts it back
+  // on the button they opened it with.
+  useEffect(() => {
+    if (!open) return
+    menuRef.current?.querySelector('[role="menuitem"]')?.focus()
+  }, [open])
+
+  // Hooks first: the control is absent on the scan-queue routes, not disabled.
+  if (quickAddHiddenOn(location.pathname)) return null
+
   return (
     <QuickAddMenu
       open={open}
       onToggle={() => setOpen(current => !current)}
+      onClose={close}
       onSelect={action => {
-        setOpen(false)
+        close({ restoreFocus: true })
         runQuickAdd(action)
       }}
       attention={scanAttention}
       active={scansActive}
+      toggleRef={toggleRef}
+      menuRef={menuRef}
     />
   )
 }
