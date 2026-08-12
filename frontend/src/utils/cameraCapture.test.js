@@ -260,17 +260,36 @@ describe('createCameraSession', () => {
       .rejects.toMatchObject({ reason: CAMERA_FAILURE.INTERRUPTED })
   })
 
-  it('does not ask a second time after the user refuses', async () => {
+  it('asks again after a refusal, because the user can grant it in between', async () => {
+    // The refusal message tells the user to allow the camera in their browser
+    // settings. If the session then refuses to call getUserMedia again, acting
+    // on that instruction does nothing and the only way back in is closing the
+    // whole scanner. start() is only reached from the button, so a second call
+    // is a deliberate gesture, and a browser still blocking rejects it
+    // instantly without re-prompting.
+    env.mediaDevices.getUserMedia.mockRejectedValueOnce(namedError('NotAllowedError'))
+    const session = newSession()
+
+    const first = await session.start()
+    expect(first.failure).toBe(CAMERA_FAILURE.DENIED)
+    expect(session.isDenied()).toBe(true)
+
+    const second = await session.start()
+
+    expect(env.mediaDevices.getUserMedia).toHaveBeenCalledTimes(2)
+    expect(second.status).toBe(CAMERA_STATUS.LIVE)
+    expect(second.failure).toBe(null)
+  })
+
+  it('reports the refusal again when the user has not actually granted it', async () => {
     env.mediaDevices.getUserMedia.mockRejectedValue(namedError('NotAllowedError'))
     const session = newSession()
 
     const first = await session.start()
     const second = await session.start()
 
-    expect(env.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1)
     expect(first.failure).toBe(CAMERA_FAILURE.DENIED)
     expect(second.failure).toBe(CAMERA_FAILURE.DENIED)
-    expect(session.isDenied()).toBe(true)
   })
 
   it('does keep retrying a busy camera, because that one clears on its own', async () => {

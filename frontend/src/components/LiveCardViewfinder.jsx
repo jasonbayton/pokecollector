@@ -38,13 +38,18 @@ export function cameraFailureMessage(t, failure) {
 }
 
 /**
- * A refusal, a missing camera, an insecure origin and an unsupported browser
- * are all standing conditions: another getUserMedia call changes nothing and,
- * for a refusal, re-prompts the user who just said no. Only a transient failure
- * is worth a retry button.
+ * A missing camera, an insecure origin and an unsupported browser are standing
+ * conditions that another getUserMedia call cannot change, so they get no retry.
+ *
+ * A refusal is different, and used not to be offered one. The message tells the
+ * user to allow the camera in their browser settings; without a retry the only
+ * way to act on that was to close the whole scanner and reopen it. Re-prompting
+ * is not a risk: a browser that is still blocking rejects immediately and
+ * silently, so the worst case is the same message again.
  */
 export function canRetryCameraFailure(failure) {
   return failure === CAMERA_FAILURE.BUSY
+    || failure === CAMERA_FAILURE.DENIED
     || failure === CAMERA_FAILURE.INTERRUPTED
     || failure === CAMERA_FAILURE.CAPTURE_FAILED
     || failure === CAMERA_FAILURE.UNKNOWN

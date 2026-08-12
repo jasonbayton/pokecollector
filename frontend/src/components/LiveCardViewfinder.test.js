@@ -159,11 +159,13 @@ describe('canRetryCameraFailure', () => {
       Object.entries(CAMERA_FAILURE).map(([name, failure]) => [name, canRetryCameraFailure(failure)]),
     )).toEqual({
       // Standing conditions: another getUserMedia call cannot change any of
-      // these, and for a refusal it re-prompts the user who just said no.
+      // these.
       UNSUPPORTED: false,
       INSECURE: false,
-      DENIED: false,
       NOT_FOUND: false,
+      // A refusal looks standing but is not: the message sends the user to
+      // their browser settings, so they need a way back in afterwards.
+      DENIED: true,
       // Transients: the other app closes, the track comes back, the next frame
       // encodes.
       BUSY: true,
@@ -265,7 +267,7 @@ describe('LiveCardViewfinder', () => {
     expect(session().stop).not.toHaveBeenCalled()
   })
 
-  it('explains a refusal and offers no way to ask again', () => {
+  it('explains a refusal and offers the retry that message depends on', () => {
     render()
     session().publish({ status: CAMERA_STATUS.ERROR, failure: CAMERA_FAILURE.DENIED, stream: null })
     const tree = render()
@@ -273,9 +275,10 @@ describe('LiveCardViewfinder', () => {
     const text = textOf(tree)
     expect(text).toContain('scanner.cameraErrorDenied')
     expect(text).toContain('scanner.cameraFallbackHint')
-    expect(text).not.toContain('scanner.retryCamera')
-    expect(text).not.toContain('scanner.startCamera')
-    expect(buttonsWithText(tree)).toEqual([])
+    // The message says to allow the camera in browser settings. Without this
+    // button there is nothing to press once they have.
+    expect(text).toContain('scanner.retryCamera')
+    expect(buttonsWithText(tree)).not.toEqual([])
   })
 
   it('offers a retry for a camera that is merely busy', async () => {

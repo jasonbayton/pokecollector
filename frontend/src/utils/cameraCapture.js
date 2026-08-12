@@ -240,14 +240,6 @@ export function createCameraSession({
   async function start() {
     if (disposed) return getState()
 
-    if (deniedOnce) {
-      // Asking a second time after a refusal either re-prompts or silently
-      // rejects, depending on the browser. Neither helps, and the first is the
-      // nag the user just said no to. Report the standing denial instead.
-      publish({ status: CAMERA_STATUS.ERROR, failure: CAMERA_FAILURE.DENIED, stream: null })
-      return getState()
-    }
-
     const blocked = detectCameraSupport(resolveEnv())
     if (blocked) {
       publish({ status: CAMERA_STATUS.ERROR, failure: blocked, stream: null })
@@ -265,6 +257,10 @@ export function createCameraSession({
     } catch (error) {
       if (token !== generation || disposed) return getState()
       const failure = classifyCameraError(error)
+      // Recorded, not enforced. A refusal must not veto a later attempt: the
+      // message tells the user to grant the camera in browser settings, and
+      // they need a way back in afterwards. If they are still blocked the
+      // browser rejects immediately without re-prompting, so this cannot nag.
       if (failure === CAMERA_FAILURE.DENIED) deniedOnce = true
       publish({ status: CAMERA_STATUS.ERROR, failure, stream: null })
       return getState()

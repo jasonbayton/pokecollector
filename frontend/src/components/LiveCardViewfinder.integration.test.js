@@ -222,7 +222,7 @@ describe('LiveCardViewfinder against the real camera session', () => {
     expect(textOf(tree)).toContain('scanner.startCamera')
   })
 
-  it('still explains a refusal after the tab has been hidden, and never re-prompts', async () => {
+  it('still explains a refusal after the tab has been hidden, and never re-prompts by itself', async () => {
     getUserMedia.mockRejectedValue(Object.assign(new Error('no'), { name: 'NotAllowedError' }))
     let tree = render()
     await buttonsOf(tree)[0].props.onClick()
@@ -235,8 +235,9 @@ describe('LiveCardViewfinder against the real camera session', () => {
     const text = textOf(tree)
     expect(text).toContain('scanner.cameraErrorDenied')
     expect(text).toContain('scanner.cameraFallbackHint')
-    expect(text).not.toContain('scanner.startCamera')
-    expect(buttonsOf(tree)).toEqual([])
+    // A retry is offered, but only the user may spend it: coming back to a
+    // hidden tab must not silently re-prompt someone who just said no.
+    expect(text).toContain('scanner.retryCamera')
     expect(getUserMedia).toHaveBeenCalledTimes(1)
   })
 
