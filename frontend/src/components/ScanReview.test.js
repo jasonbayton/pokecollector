@@ -114,6 +114,40 @@ beforeEach(() => {
   fetchScanJobItemImage.mockReset()
 })
 
+describe('an item with a re-take already in flight', () => {
+  it('withdraws the candidates belonging to the photo being replaced', () => {
+    // A re-take resets the scan server-side the moment the request lands, but
+    // the panel kept rendering the previous result until the refetch caught up.
+    // ScanAddModal writes to the collection BEFORE the scan is resolved, so
+    // picking one of these added the wrong card and then failed to resolve it,
+    // leaving a card in the collection that nothing had matched.
+    renderPanel({ isBusy: true })
+
+    expect(candidateCards()).toEqual([])
+  })
+
+  it('still shows them when nothing is in flight', () => {
+    // The bystander. Suppressing the grid unconditionally would also pass the
+    // test above while breaking the entire review inbox.
+    renderPanel({ isBusy: false })
+
+    expect(candidateCards()).not.toEqual([])
+  })
+
+  it('reports the item as working rather than looking idle', () => {
+    renderPanel({ isBusy: true })
+
+    expect(textOf({ props: { children: rendered.map(e => e.props?.children) } }))
+      .toContain('scanner.itemProcessing')
+  })
+
+  it('does not offer a second re-take while one is in flight', () => {
+    renderPanel({ isBusy: true })
+
+    expect(buttonLabelled('scanner.retakePhoto')?.props?.disabled).toBe(true)
+  })
+})
+
 describe('picking a candidate from a scan item', () => {
   it('renders one selectable card per match', () => {
     renderPanel()

@@ -195,6 +195,13 @@ function JobDetail({ jobId }) {
     onError: error => toast.error(error?.response?.data?.detail || t('scanner.actionFailed')),
   })
 
+  // The item a re-take or retry is currently in flight for. Both reset the
+  // scan server-side, so its panel must stop offering the previous result the
+  // moment the request leaves, not when the refetch lands.
+  const busyItemId = retakeMutation.isPending
+    ? retakeMutation.variables?.item?.id
+    : retryMutation.isPending ? retryMutation.variables?.id : null
+
   const deleteMutation = useMutation({
     mutationFn: () => deleteScanJob(jobId),
     onSuccess: () => {
@@ -311,6 +318,7 @@ function JobDetail({ jobId }) {
             onAdd={(scanItem, match) => setAddSelection({ item: scanItem, match })}
             onRetry={itemToRetry => retryMutation.mutate(itemToRetry)}
             onRetake={setRetakeItem}
+            isBusy={busyItemId === item.id}
             onDismiss={dismiss}
             retryNow={retryNow}
             t={t}

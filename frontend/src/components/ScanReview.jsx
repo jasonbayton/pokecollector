@@ -52,7 +52,14 @@ export function useScanItemPhoto(jobId, item) {
         objectUrl = nextUrl
         setUrl(nextUrl)
       })
-      .catch(() => setUrl(null))
+      .catch(() => {
+        // Guarded like the success path. Without this, a superseded fetch that
+        // rejects later clears the URL the newer one already set, blanking a
+        // preview that loaded perfectly well. A re-take makes exactly that
+        // ordering likely, because the old file is deleted once it lands.
+        if (disposed) return
+        setUrl(null)
+      })
     return () => {
       disposed = true
       if (objectUrl) URL.revokeObjectURL(objectUrl)
@@ -140,11 +147,17 @@ function CandidateGrid({ item, matches, photoUrl, onSelect, t }) {
   )
 }
 
-export function ScanItemPanel({ jobId, item, onAdd, onRetry, onRetake, onDismiss, retryNow, t }) {
+export function ScanItemPanel({ jobId, item, onAdd, onRetry, onRetake, onDismiss, retryNow, isBusy = false, t }) {
   const photoUrl = useScanItemPhoto(jobId, item)
   const [photoExpanded, setPhotoExpanded] = useState(false)
-  const active = ['pending', 'processing', 'retrying'].includes(item.status)
-  const noMatches = item.status === 'done' && !item.matches?.length
+  // isBusy covers the gap between submitting a re-take or a retry and the
+  // refetch that reports the item as pending again. In that window the server
+  // has already reset the scan, so the candidates on screen belong to a photo
+  // that is no longer attached to it. ScanAddModal writes to the collection
+  // before the scan is resolved, so acting on one added the wrong card and
+  // then failed to resolve with a 409.
+  const active = isBusy || ['pending', 'processing', 'retrying'].includes(item.status)
+  const noMatches = !isBusy && item.status === 'done' && !item.matches?.length
 
   return (
     <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
@@ -201,7 +214,7 @@ export function ScanItemPanel({ jobId, item, onAdd, onRetry, onRetake, onDismiss
               }`}>
                 {item.error || t(noMatches ? 'scanner.noMatches' : 'scanner.recognitionFailed')}
               </p>
-              <button type="button" onClick={() => onRetry(item)} disabled={!item.has_image}
+              <button type="button" onClick={() => onRetry(item)} disabled={!item.has_image || isBusy}
                 className="btn-secondary justify-center">
                 <RefreshCw size={14} /> {t('scanner.retryIndividually')}
               </button>
@@ -217,7 +230,7 @@ export function ScanItemPanel({ jobId, item, onAdd, onRetry, onRetake, onDismiss
         </div>
       </div>
 
-      {item.status === 'done' && item.matches?.length > 0 && (
+      {!isBusy && item.status === 'done' && item.matches?.length > 0 && (
         <div className="mt-4">
           <p className="mb-3 text-[10px] font-black uppercase tracking-[0.2em] text-text-muted">
             {t('scanner.bestMatches')} ({item.matches.length})
