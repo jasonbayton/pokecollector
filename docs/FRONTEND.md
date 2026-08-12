@@ -191,7 +191,11 @@ See [`CARD_SYSTEM.md`](CARD_SYSTEM.md) for usage, design tokens, review guidance
 
 ### Scanner and review inbox
 
-`components/UnifiedCardScanner.jsx` is the capture-only entry point. It supports the native device camera and gallery uploads, stages one or more photos, allows per-photo individual recognition overrides, and includes an optional positioning guide beside **Take photo**. Every submission enqueues a persistent job and routes to the same review inbox, including a one-photo scan.
+`components/UnifiedCardScanner.jsx` is the capture-only entry point. It supports a live viewfinder, the native device camera and gallery uploads, stages one or more photos, allows per-photo individual recognition overrides, and includes an optional positioning guide beside **Take photo**. Every submission enqueues a persistent job and routes to the same review inbox, including a one-photo scan.
+
+`components/LiveCardViewfinder.jsx` is the fast path for a pile of cards: **Start camera** opens a `getUserMedia` preview and each **Capture card** tap stages one JPEG drawn at the stream's own resolution, with no operating-system camera round trip between cards. It is an addition, not a replacement - **Take photo** and **Choose from gallery** stay wired for every browser, permission state and device the viewfinder cannot serve, and the panel names the reason and points at them when it cannot start. A refusal is reported once and never re-prompted.
+
+`utils/cameraCapture.js` holds the media plumbing behind that component: support detection (an insecure origin is reported as such rather than as an unsupported browser), error classification, frame capture, and a session object that owns at most one stream. Every abandonment path - stop, replacement, hidden tab, unmount, and a stream that resolves after the owner has gone - stops the tracks, because a leaked track leaves the camera indicator on.
 
 `pages/ScanQueue.jsx` and `components/ScanReview.jsx` show job progress, retry countdowns/reasons, sanitized source photos, ranked candidates, failed items, individual retry, dismissal, and collection-add review. The navigation badge counts outstanding items. A confirmed candidate id is sent when resolving an item so opted-in diagnostics can be labelled with human-reviewed ground truth.
 
