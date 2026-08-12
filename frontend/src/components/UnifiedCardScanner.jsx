@@ -356,15 +356,23 @@ export default function UnifiedCardScanner({ isOpen, onClose }) {
             </button>
           )}
 
-          <button
-            type="button"
-            onClick={startScanning}
-            disabled={!stagedFiles.length || submitting}
-            className="btn-primary flex w-full items-center justify-center gap-2 py-3"
-          >
-            {submitting ? <Loader2 size={16} className="animate-spin" /> : <ImagePlus size={16} />}
-            <span>{submitting ? t('scanner.submittingBatch') : t('scanner.startScanning')}</span>
-          </button>
+          {/* Sticky, because with the viewfinder open the thumbnails push this
+              off the bottom of the sheet: on a handset you capture several
+              cards and then have to scroll back past your own photos to send
+              them. The whole point of the viewfinder is not having to leave
+              what you are doing between cards, and hunting for the submit
+              undoes that at the last step. */}
+          <div className="sticky bottom-0 -mx-4 -mb-4 bg-bg-surface px-4 pb-4 pt-3 sm:-mx-5 sm:-mb-5 sm:px-5 sm:pb-5">
+            <button
+              type="button"
+              onClick={startScanning}
+              disabled={!stagedFiles.length || submitting}
+              className="btn-primary flex w-full items-center justify-center gap-2 py-3"
+            >
+              {submitting ? <Loader2 size={16} className="animate-spin" /> : <ImagePlus size={16} />}
+              <span>{submitting ? t('scanner.submittingBatch') : t('scanner.startScanning')}</span>
+            </button>
+          </div>
         </div>
       </Modal>
 
