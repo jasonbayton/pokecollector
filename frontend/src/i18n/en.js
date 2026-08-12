@@ -164,6 +164,11 @@ const en = {
     welcomeBack: 'Welcome back',
   },
 
+  // Floating quick-add control, present on every page
+  quickAdd: {
+    title: 'Quick add',
+  },
+
   // Home Screen
   home: {
     welcomeBack: 'Welcome back',
@@ -245,6 +250,7 @@ const en = {
     allSeries: 'All Series',
     setCodeSearch: 'Search by set code + number',
     setCode: 'Set code',
+    openingCustomCard: 'Opening card form…',
     createCustomCard: 'Create card manually',
     customCard: 'Custom card',
     shareAsTemplate: 'Share as template',
@@ -1290,6 +1296,7 @@ const en = {
     addAllConfidentConfirm: 'Add {count} confidently matched cards using Mint condition and each card\'s default available print?',
     addAllConfidentConfirmLabel: 'Add confident cards',
     confidentCardsFiled: '{count} confident cards added to collection.',
+    opening: 'Opening scanner…',
     retryIndividually: 'Retry individually',
     scanIndividually: 'Scan individually',
     scanAllIndividually: 'Scan all individually',

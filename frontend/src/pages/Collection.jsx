@@ -1477,7 +1477,6 @@ export default function Collection() {
       {showCustomModal && (
         <CustomCardModal
           onClose={() => setShowCustomModal(false)}
-          onCreated={() => { setShowCustomModal(false) }}
           sets={allSets}
           autoAddCollection={true}
         />

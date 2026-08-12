@@ -1,16 +1,17 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
-import { Search, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, SortAsc, Hash, PenLine, SlidersHorizontal, Camera, CheckSquare, Plus, ScanLine } from 'lucide-react'
+import { Search, X, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, SortAsc, Hash, PenLine, SlidersHorizontal, Camera, CheckSquare, Plus } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { searchCards, getSets, getCustomCards, bulkAddToCollection, getScanJobs } from '../api/client'
+import { searchCards, getSets, getCustomCards, bulkAddToCollection } from '../api/client'
 import { CardItem, CustomCardModal, CardModal } from '../components/CardItem'
 import { useSettings } from '../contexts/SettingsContext'
+import { useScanner } from '../contexts/ScannerContext'
 import Sheet from '../components/ui/Sheet'
-import UnifiedCardScanner from '../components/UnifiedCardScanner'
 import { getDefaultVariantOrNull } from '../utils/cardVariants'
 import { cardNumberMatches } from '../utils/cardNumbers'
 import { normalizeSearchText, textIncludes } from '../utils/textSearch'
+import { cardSearchKeysSuspended } from '../utils/cardSearchOverlays'
 import { useVisibleTcgdexLanguages } from '../hooks/useVisibleTcgdexLanguages'
 import TcgdexLanguageSelect from '../components/TcgdexLanguageSelect'
 import { normalizeTcgdexLanguage, tcgdexLanguageLabel } from '../utils/tcgdexLanguages'
@@ -23,11 +24,6 @@ import {
   resetCardSearchFilters,
   updateCardSearchParams,
 } from '../utils/cardSearchUrlState'
-import {
-  SCAN_JOBS_QUERY_KEY,
-  hasActiveScanJobs,
-  scanAttentionCount,
-} from '../utils/scanJobs'
 
 const CODE_NUMBER_RE = /^([A-Za-z]+\d*)\s+(\d+)$/
 
@@ -132,6 +128,7 @@ function FilterForm({ filters, setFilter, allSeries, setsForSeries, toggleSortOr
 
 export default function CardSearch() {
   const { t, settings, formatPrice } = useSettings()
+  const { openScanner, isScannerOpen, isCustomCardOpen } = useScanner()
   const visibleLanguages = useVisibleTcgdexLanguages()
   const queryClient = useQueryClient()
   const location = useLocation()
@@ -140,7 +137,6 @@ export default function CardSearch() {
   const [searchInput, setSearchInput] = useState('')
   const [showFilters, setShowFilters] = useState(false)
   const [showCustomModal, setShowCustomModal] = useState(false)
-  const [showScanner, setShowScanner] = useState(false)
   const [selectedCard, setSelectedCard] = useState(null)
   const [selectedCardTab, setSelectedCardTab] = useState('add')
   const [selectMode, setSelectMode] = useState(false)
@@ -151,15 +147,6 @@ export default function CardSearch() {
     queryKey: ['custom-cards'],
     queryFn: () => getCustomCards().then(r => r.data),
   })
-
-  const { data: scanData } = useQuery({
-    queryKey: SCAN_JOBS_QUERY_KEY,
-    queryFn: getScanJobs,
-    refetchInterval: query => hasActiveScanJobs(query.state.data?.jobs || []) ? 3000 : false,
-  })
-  const scanJobs = scanData?.jobs || []
-  const scanAttention = scanAttentionCount(scanJobs)
-  const scansActive = hasActiveScanJobs(scanJobs)
 
   const { data: allSets = [] } = useQuery({
     queryKey: ['sets', settings.language || 'en'],
@@ -293,7 +280,13 @@ export default function CardSearch() {
     navigate({ pathname: location.pathname, search: search ? `?${search}` : '' })
   }
 
-  const hasOpenOverlay = Boolean(selectedCard || showFilters || showCustomModal || showScanner)
+  const hasOpenOverlay = cardSearchKeysSuspended({
+    cardDialogOpen: Boolean(selectedCard),
+    filtersOpen: showFilters,
+    pageCustomCardOpen: showCustomModal,
+    scannerOpen: isScannerOpen,
+    quickAddCustomCardOpen: isCustomCardOpen,
+  })
 
   useEffect(() => {
     setSearchInput(filters.name)
@@ -477,33 +470,16 @@ export default function CardSearch() {
           <p className="text-sm text-text-secondary mt-1">{t('cardSearch.subtitle')}</p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
+          {/* The scanner itself is mounted once, globally. The queue button and
+              its badge moved to the quick-add control for the same reason: one
+              queue query for the whole app instead of one per page. */}
           <button
-            onClick={() => setShowScanner(true)}
+            onClick={openScanner}
             className="w-10 h-10 rounded-xl flex items-center justify-center transition-colors"
             style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
             title={t('scanner.title')}
           >
             <Camera size={18} className="text-text-muted" />
-          </button>
-          <button
-            onClick={() => navigate('/scans')}
-            className="relative flex h-10 items-center gap-2 rounded-xl px-3 text-sm text-text-muted transition-colors hover:text-text-primary"
-            style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}
-            title={t('scanner.queueTitle')}
-            aria-label={t('scanner.queueTitle')}
-          >
-            <span className="relative">
-              <ScanLine size={18} />
-              {scanAttention > 0 && (
-                <span className="absolute -right-2 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-yellow px-1 text-[9px] font-bold leading-none text-black">
-                  {scanAttention > 99 ? '99+' : scanAttention}
-                </span>
-              )}
-              {scanAttention === 0 && scansActive && (
-                <span className="absolute -right-1.5 -top-1.5 h-2.5 w-2.5 animate-pulse rounded-full bg-brand-red" />
-              )}
-            </span>
-            <span className="hidden sm:inline">{t('scanner.queueTitle')}</span>
           </button>
           <button
             onClick={() => setShowCustomModal(true)}
@@ -807,11 +783,6 @@ export default function CardSearch() {
           initialTab={selectedCardTab}
         />
       )}
-
-      <UnifiedCardScanner
-        isOpen={showScanner}
-        onClose={() => setShowScanner(false)}
-      />
     </div>
   )
 }

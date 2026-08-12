@@ -22,6 +22,8 @@ vi.mock('../api/client', () => ({ enqueueScanJob: stubs.enqueueScanJob }))
 vi.mock('react-hot-toast', () => ({ default: stubs.toast }))
 vi.mock('react-router-dom', () => ({ useNavigate: () => stubs.navigate }))
 vi.mock('../contexts/SettingsContext', () => ({ useSettings: () => ({ t: key => key }) }))
+// The scanner now invalidates the shared queue on enqueue.
+vi.mock('@tanstack/react-query', () => ({ useQueryClient: () => ({ invalidateQueries: () => {} }) }))
 
 const LiveCardViewfinder = (await import('./LiveCardViewfinder')).default
 const UnifiedCardScanner = (await import('./UnifiedCardScanner')).default

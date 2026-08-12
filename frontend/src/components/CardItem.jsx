@@ -104,10 +104,13 @@ export function CustomCardModal({ onClose, onCreated, sets: setsProp = [], autoA
     mutationFn: (data) => createCustomCard(data),
     onSuccess: (res) => {
       toast.success(t('cardSearch.customCardCreated'))
+      // A card exists as soon as this request succeeds. Notify catalogue
+      // consumers now, before the optional collection step, so dismissing that
+      // second step cannot hide a successfully created manual card from search.
+      onCreated && onCreated(res.data)
       if (autoAddCollection) {
         setCreatedCard(res.data)
       } else {
-        onCreated && onCreated(res.data)
         onClose()
       }
     },
@@ -153,7 +156,6 @@ export function CustomCardModal({ onClose, onCreated, sets: setsProp = [], autoA
       toast.success(`${createdCard.name} ${t('card.addedToCollection')}`)
       invalidateCardState(queryClient)
       invalidateTcgdexFilterLanguages(queryClient)
-      onCreated && onCreated(createdCard)
       onClose()
     },
     onError: () => toast.error(t('card.addFailed')),
