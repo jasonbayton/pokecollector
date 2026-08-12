@@ -1169,6 +1169,7 @@ const de = {
     actionFailed: 'Die Scan-Aktion ist fehlgeschlagen.',
     yourPhoto: 'Dein Foto',
     compareCandidate: 'Mit deinem Foto vergleichen',
+    suggestedMatch: 'Vorschlag',
     photoNumber: 'Foto',
     dismissScan: 'Scan verwerfen',
     dismissScanConfirm: 'Diesen Scan verwerfen und das gespeicherte Foto endgültig löschen?',
