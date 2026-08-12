@@ -245,6 +245,21 @@ describe('LiveCardViewfinder', () => {
     expect(session().stop).not.toHaveBeenCalled()
   })
 
+  it('closes after one capture in single-shot mode', async () => {
+    const file = new File(['one'], 'retake.jpg', { type: 'image/jpeg' })
+    const onClose = vi.fn()
+    let tree = render({ singleShot: true, onClose })
+    attachVideo(tree)
+    session().publish({ status: CAMERA_STATUS.LIVE, failure: null, stream: { id: 'stream-1' } })
+    tree = render({ singleShot: true, onClose })
+    session().capture.mockResolvedValueOnce(file)
+
+    await buttonsWithText(tree)[0].props.onClick()
+
+    expect(props.onCapture).toHaveBeenCalledWith(file)
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   it('offers no shutter at all until the camera is live', () => {
     const tree = render()
 

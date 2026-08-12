@@ -884,6 +884,10 @@ const fr = {
     addedToCollection: 'ajouté à la collection',
     adding: 'Ajout...',
     recognitionFailed: 'La carte n\'a pas pu être reconnue',
+    retryIndividually: 'Réessayer avec cette photo',
+    retakePhoto: 'Reprendre la photo',
+    retakePhotoTitle: 'Reprendre la photo',
+    retakePhotoHint: 'Prenez une nouvelle photo pour remplacer ce scan.',
   },
 
   // Language filter / card language

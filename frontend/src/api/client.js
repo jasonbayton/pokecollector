@@ -127,6 +127,13 @@ export const addAllConfidentScanJobItems = jobId =>
   api.post(`/cards/recognize/jobs/${jobId}/add-all-confident`).then(r => r.data)
 export const retryScanJobItem = (jobId, itemId) =>
   api.post(`/cards/recognize/jobs/${jobId}/items/${itemId}/retry`).then(r => r.data)
+export const replaceScanJobItemPhoto = (jobId, itemId, imageFile) => {
+  const formData = new FormData()
+  formData.append('file', imageFile)
+  return api.post(`/cards/recognize/jobs/${jobId}/items/${itemId}/photo`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }).then(r => r.data)
+}
 export const deleteScanJob = jobId =>
   api.delete(`/cards/recognize/jobs/${jobId}`).then(r => r.data)
 export const fetchScanJobItemImage = (jobId, itemId) =>

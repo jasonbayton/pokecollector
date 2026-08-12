@@ -57,7 +57,10 @@ export function useScanItemPhoto(jobId, item) {
       disposed = true
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [jobId, item.id, item.has_image])
+    // image_token, not just the id: a re-take replaces the stored file while
+    // the id and has_image both stay put, so without it this effect never
+    // re-ran and the panel showed the photo the user had just replaced.
+  }, [jobId, item.id, item.has_image, item.image_token])
 
   return url
 }
@@ -137,7 +140,7 @@ function CandidateGrid({ item, matches, photoUrl, onSelect, t }) {
   )
 }
 
-export function ScanItemPanel({ jobId, item, onAdd, onRetry, onDismiss, retryNow, t }) {
+export function ScanItemPanel({ jobId, item, onAdd, onRetry, onRetake, onDismiss, retryNow, t }) {
   const photoUrl = useScanItemPhoto(jobId, item)
   const [photoExpanded, setPhotoExpanded] = useState(false)
   const active = ['pending', 'processing', 'retrying'].includes(item.status)
@@ -203,6 +206,13 @@ export function ScanItemPanel({ jobId, item, onAdd, onRetry, onDismiss, retryNow
                 <RefreshCw size={14} /> {t('scanner.retryIndividually')}
               </button>
             </div>
+          )}
+
+          {!item.resolved && (
+            <button type="button" onClick={() => onRetake?.(item)} disabled={active}
+              className="btn-secondary mt-3 justify-center">
+              <Camera size={14} /> {t('scanner.retakePhoto')}
+            </button>
           )}
         </div>
       </div>

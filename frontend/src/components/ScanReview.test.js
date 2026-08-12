@@ -89,6 +89,7 @@ const renderPanel = (props = {}) => {
     item: reviewItem,
     onAdd: () => {},
     onRetry: () => {},
+    onRetake: () => {},
     onDismiss: () => {},
     retryNow: Date.now(),
     t: key => key,
@@ -97,6 +98,17 @@ const renderPanel = (props = {}) => {
 }
 
 const candidateCards = () => rendered.filter(entry => entry.type === CardDisplay)
+
+const textOf = node => {
+  if (node === null || node === undefined || typeof node === 'boolean') return ''
+  if (Array.isArray(node)) return node.map(textOf).join('')
+  if (typeof node === 'object') return textOf(node.props?.children)
+  return String(node)
+}
+
+const buttonLabelled = label => rendered.find(entry => (
+  entry.type === 'button' && textOf(entry.props?.children).includes(label)
+))
 
 beforeEach(() => {
   fetchScanJobItemImage.mockReset()
@@ -144,5 +156,37 @@ describe('picking a candidate from a scan item', () => {
     overlay.props.onClick({ stopPropagation: () => {} })
 
     expect(onAdd).not.toHaveBeenCalled()
+  })
+})
+
+describe('retaking a scan photo', () => {
+  it('offers Retake photo for a confident match that could still be wrong', () => {
+    const onRetake = vi.fn()
+    renderPanel({
+      item: { ...reviewItem, identity_confident: true, suggested_match_id: starmie.id },
+      onRetake,
+    })
+
+    const retake = buttonLabelled('scanner.retakePhoto')
+    expect(retake, 'no Retake photo control was rendered for a confident match').toBeDefined()
+    retake.props.onClick()
+
+    expect(onRetake).toHaveBeenCalledWith(expect.objectContaining({ id: reviewItem.id }))
+  })
+
+  it('does not offer Retake photo for an item that has already been resolved', () => {
+    renderPanel({ item: { ...reviewItem, resolved: true } })
+
+    expect(buttonLabelled('scanner.retakePhoto')).toBeUndefined()
+  })
+
+  it('keeps Try again with this photo distinct from Retake photo', () => {
+    renderPanel({ item: { ...reviewItem, status: 'failed', matches: [], has_image: true } })
+
+    const retry = buttonLabelled('scanner.retryIndividually')
+    const retake = buttonLabelled('scanner.retakePhoto')
+    expect(retry, 'no retry control was rendered').toBeDefined()
+    expect(retake, 'no retake control was rendered').toBeDefined()
+    expect(textOf(retry.props.children)).not.toBe(textOf(retake.props.children))
   })
 })

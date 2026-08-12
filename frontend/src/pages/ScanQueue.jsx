@@ -9,11 +9,14 @@ import {
   getScanJob,
   getScanJobs,
   resolveScanJobItem,
+  replaceScanJobItemPhoto,
   retryScanJobItem,
 } from '../api/client'
 import ScanAddModal from '../components/ScanAddModal'
+import LiveCardViewfinder from '../components/LiveCardViewfinder'
 import { ScanItemPanel } from '../components/ScanReview'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
+import Modal from '../components/ui/Modal'
 import { useScanner } from '../contexts/ScannerContext'
 import { useSettings } from '../contexts/SettingsContext'
 import {
@@ -122,6 +125,22 @@ function JobDetailShell({ onBack, onDiscard, isDiscarding, t, children }) {
   )
 }
 
+function RetakePhotoModal({ item, onCapture, onClose, t }) {
+  if (!item) return null
+  return (
+    <Modal isOpen onClose={onClose} title={t('scanner.retakePhotoTitle')} size="lg">
+      <div className="space-y-4 p-4 sm:p-5">
+        <p className="text-sm text-text-secondary">{t('scanner.retakePhotoHint')}</p>
+        <LiveCardViewfinder
+          singleShot
+          onCapture={onCapture}
+          onClose={onClose}
+        />
+      </div>
+    </Modal>
+  )
+}
+
 function JobDetail({ jobId }) {
   const { t } = useSettings()
   const { openScanner } = useScanner()
@@ -130,6 +149,7 @@ function JobDetail({ jobId }) {
   const queryClient = useQueryClient()
   const [addSelection, setAddSelection] = useState(null)
   const [confirmation, setConfirmation] = useState(null)
+  const [retakeItem, setRetakeItem] = useState(null)
 
   // The list is not always the previous entry: the scanner pushes straight to a
   // freshly enqueued job from the search page. Only a detail opened from a queue
@@ -165,6 +185,12 @@ function JobDetail({ jobId }) {
 
   const retryMutation = useMutation({
     mutationFn: item => retryScanJobItem(jobId, item.id),
+    onSuccess: invalidate,
+    onError: error => toast.error(error?.response?.data?.detail || t('scanner.actionFailed')),
+  })
+
+  const retakeMutation = useMutation({
+    mutationFn: ({ item, file }) => replaceScanJobItemPhoto(jobId, item.id, file),
     onSuccess: invalidate,
     onError: error => toast.error(error?.response?.data?.detail || t('scanner.actionFailed')),
   })
@@ -284,6 +310,7 @@ function JobDetail({ jobId }) {
             item={item}
             onAdd={(scanItem, match) => setAddSelection({ item: scanItem, match })}
             onRetry={itemToRetry => retryMutation.mutate(itemToRetry)}
+            onRetake={setRetakeItem}
             onDismiss={dismiss}
             retryNow={retryNow}
             t={t}
@@ -305,6 +332,13 @@ function JobDetail({ jobId }) {
           }}
         />
       )}
+
+      <RetakePhotoModal
+        item={retakeItem}
+        onCapture={file => retakeMutation.mutate({ item: retakeItem, file })}
+        onClose={() => setRetakeItem(null)}
+        t={t}
+      />
 
       <ConfirmDialog
         isOpen={Boolean(confirmation)}

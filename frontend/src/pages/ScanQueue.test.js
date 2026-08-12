@@ -42,6 +42,7 @@ const {
     addAllConfidentScanJobItems: vi.fn(),
     resolveScanJobItem: vi.fn(),
     retryScanJobItem: vi.fn(),
+    replaceScanJobItemPhoto: vi.fn(),
     fetchScanJobItemImage: vi.fn(),
     addToCollection: vi.fn(),
   },

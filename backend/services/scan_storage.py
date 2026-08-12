@@ -40,6 +40,17 @@ class ScanUploadError(ValueError):
     """An uploaded file is unsafe or outside the scanner limits."""
 
 
+class ScanJobBytesExceeded(ScanUploadError):
+    """The job would outgrow MAX_JOB_BYTES, as opposed to one photo being bad.
+
+    A subclass rather than a message the caller string-matches: the re-take
+    endpoint answers 409 for this and 400 for every other upload complaint, and
+    keying that on wording meant a rephrased message would silently change the
+    status code. Subclassing keeps every existing `except ScanUploadError`
+    working unchanged.
+    """
+
+
 @dataclass(frozen=True)
 class SanitizedScanImage:
     data: bytes
@@ -56,7 +67,7 @@ def scan_upload_root() -> Path:
 async def read_limited_upload(upload, *, remaining_job_bytes: int) -> bytes:
     """Read one UploadFile without allowing it or the whole job to grow unbounded."""
     if remaining_job_bytes <= 0:
-        raise ScanUploadError("The scan job exceeds the 200 MB upload limit.")
+        raise ScanJobBytesExceeded("The scan job exceeds the 200 MB upload limit.")
 
     limit = min(MAX_FILE_BYTES, remaining_job_bytes)
     chunks: list[bytes] = []
@@ -69,7 +80,7 @@ async def read_limited_upload(upload, *, remaining_job_bytes: int) -> bytes:
         if size > MAX_FILE_BYTES:
             raise ScanUploadError("Each scan photo must be 15 MB or smaller.")
         if size > remaining_job_bytes:
-            raise ScanUploadError("The scan job exceeds the 200 MB upload limit.")
+            raise ScanJobBytesExceeded("The scan job exceeds the 200 MB upload limit.")
         chunks.append(chunk)
 
     if not chunks:

@@ -1,4 +1,5 @@
 import datetime
+import io
 import os
 import tempfile
 import unittest
@@ -21,6 +22,7 @@ try:
         recover_expired_leases,
         resolve_scan_item,
         retry_scan_item,
+        replace_scan_item_photo,
         job_progress,
         complete_claim_group,
     )
@@ -415,6 +417,29 @@ class ScanQueueTests(unittest.TestCase):
         self.assertFalse(item.batch_mode)
         self.assertEqual(job.status, "pending")
         self.assertIsNone(job.finished_at)
+
+    def test_retake_commit_failure_preserves_the_old_photo_and_path(self):
+        from PIL import Image
+
+        job = self._job(self.users[0])
+        item = self.db.query(ScanJobItem).one()
+        old_file = scan_storage.resolve_scan_path(item.image_path)
+        old_file.parent.mkdir(exist_ok=True)
+        old_file.write_bytes(b"old photo")
+        item.status = "done"
+        self.db.commit()
+
+        output = io.BytesIO()
+        Image.new("RGB", (400, 560), "#385898").save(output, format="JPEG")
+        with patch.object(self.db, "commit", side_effect=RuntimeError("commit failed")):
+            with self.assertRaisesRegex(RuntimeError, "commit failed"):
+                replace_scan_item_photo(self.db, item, output.getvalue())
+
+        self.db.expire_all()
+        persisted = self.db.get(ScanJobItem, item.id)
+        self.assertEqual(persisted.image_path, f"{job.id}/0.jpg")
+        self.assertTrue(old_file.is_file())
+        self.assertEqual(old_file.read_bytes(), b"old photo")
 
     def test_progress_counts_only_reviewable_items_as_attention(self):
         job = self._job(self.users[0], positions=(0, 1, 2, 3))

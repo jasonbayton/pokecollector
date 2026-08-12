@@ -24,8 +24,8 @@ except ModuleNotFoundError:
     DEPS_AVAILABLE = False
 
 
-def _jpeg_bytes():
-    image = Image.new("RGB", (80, 112), "#d92828")
+def _jpeg_bytes(*, size=(80, 112), color="#d92828"):
+    image = Image.new("RGB", size, color)
     output = io.BytesIO()
     image.save(output, format="JPEG")
     return output.getvalue()
@@ -296,6 +296,172 @@ class ScanJobsApiTests(unittest.TestCase):
         self.assertEqual(response.json()["status"], "pending")
         self.assertEqual(response.json()["attempts"], 0)
         self.assertTrue(stored.exists())
+
+    def test_retake_changes_the_image_token_so_the_panel_refetches(self):
+        # The review panel fetches each photo into a blob URL once, keyed on
+        # what the payload says identifies the image. Keyed on the item id
+        # alone it never refetched, so a re-take left the user looking at the
+        # photo they had just replaced while the scan ran on the new one.
+        created = self._enqueue()
+        item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
+        item.status = "done"
+        self.db.commit()
+        before = self.client.get(
+            f"/api/cards/recognize/jobs/{created['id']}"
+        ).json()["items"][0]["image_token"]
+        self.assertIsNotNone(before)
+
+        with patch("api.scan_jobs.drain_scan_queue", new=AsyncMock(return_value=0)):
+            response = self.client.post(
+                f"/api/cards/recognize/jobs/{created['id']}/items/{item.id}/photo",
+                files={"file": ("retake.jpg", _jpeg_bytes(size=(400, 560), color="#385898"), "image/jpeg")},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertNotEqual(response.json()["image_token"], before)
+
+    def test_image_token_survives_a_status_change_that_leaves_the_photo_alone(self):
+        # The bystander for the test above. A token that changed on every
+        # status transition would also make it pass, while refetching the same
+        # image on every poll.
+        created = self._enqueue()
+        item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
+        item.status = "done"
+        self.db.commit()
+        before = self.client.get(
+            f"/api/cards/recognize/jobs/{created['id']}"
+        ).json()["items"][0]["image_token"]
+
+        item.status = "failed"
+        item.error = "provider timeout"
+        item.updated_at = datetime.datetime.utcnow()
+        self.db.commit()
+
+        after = self.client.get(
+            f"/api/cards/recognize/jobs/{created['id']}"
+        ).json()["items"][0]["image_token"]
+        self.assertEqual(after, before)
+
+    def test_a_job_byte_overflow_is_raised_as_its_own_type(self):
+        # The re-take endpoint answers 409 for this and 400 for every other
+        # upload complaint. That used to be decided by string-matching the
+        # message, so rephrasing it would silently have changed the status
+        # code. The distinction is now carried by the type.
+        import asyncio
+
+        from services.scan_storage import (
+            ScanJobBytesExceeded,
+            ScanUploadError,
+            read_limited_upload,
+        )
+
+        self.assertTrue(issubclass(ScanJobBytesExceeded, ScanUploadError))
+        # It refuses on the budget before it reads anything, so there is no
+        # upload to supply here.
+        with self.assertRaises(ScanJobBytesExceeded):
+            asyncio.run(read_limited_upload(None, remaining_job_bytes=0))
+
+    def test_retake_rejects_an_item_that_was_already_resolved(self):
+        created = self._enqueue()
+        item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
+        item.status = "done"
+        item.resolved = True
+        self.db.commit()
+
+        with patch("api.scan_jobs.drain_scan_queue", new=AsyncMock(return_value=0)):
+            response = self.client.post(
+                f"/api/cards/recognize/jobs/{created['id']}/items/{item.id}/photo",
+                files={"file": ("retake.jpg", _jpeg_bytes(color="#385898"), "image/jpeg")},
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"], "This scan has already been handled.")
+
+    def test_retake_rejects_a_processing_item_without_touching_its_photo(self):
+        created = self._enqueue()
+        item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
+        old_path = item.image_path
+        old_file = resolve_scan_path(old_path)
+        old_bytes = old_file.read_bytes()
+        item.status = "processing"
+        self.db.commit()
+
+        with patch("api.scan_jobs.drain_scan_queue", new=AsyncMock(return_value=0)):
+            response = self.client.post(
+                f"/api/cards/recognize/jobs/{created['id']}/items/{item.id}/photo",
+                files={"file": ("retake.jpg", _jpeg_bytes(color="#385898"), "image/jpeg")},
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"], "This scan is still being processed.")
+        self.db.refresh(item)
+        self.assertEqual(item.image_path, old_path)
+        self.assertEqual(old_file.read_bytes(), old_bytes)
+
+    def test_retake_rejects_a_photo_that_would_exceed_the_job_byte_limit(self):
+        created = self._enqueue()
+        item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
+        item.status = "done"
+        self.db.commit()
+
+        with patch("api.scan_jobs.MAX_JOB_BYTES", item.byte_size), \
+                patch("api.scan_jobs.drain_scan_queue", new=AsyncMock(return_value=0)):
+            response = self.client.post(
+                f"/api/cards/recognize/jobs/{created['id']}/items/{item.id}/photo",
+                files={"file": ("retake.jpg", _jpeg_bytes(size=(400, 560)), "image/jpeg")},
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"], "The scan job exceeds the 200 MB upload limit.")
+
+    def test_retake_replaces_the_photo_and_clears_the_previous_scan_result(self):
+        created = self._enqueue()
+        job = self.db.get(ScanJob, created["id"])
+        item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
+        old_path = item.image_path
+        old_file = resolve_scan_path(old_path)
+        item.status = "done"
+        item.attempts = 3
+        item.transient_failures = 2
+        item.batch_mode = True
+        item.recognized = {"name": "Wrong"}
+        item.matches = [{"id": "wrong-card"}]
+        item.identity_confident = True
+        item.identity_decision = "number_unique"
+        item.suggested_match_id = "wrong-card"
+        item.error = "old error"
+        job.status = "done"
+        job.finished_at = datetime.datetime.utcnow()
+        job.error_message = "old job error"
+        self.db.commit()
+
+        with patch("api.scan_jobs.drain_scan_queue", new=AsyncMock(return_value=0)):
+            response = self.client.post(
+                f"/api/cards/recognize/jobs/{created['id']}/items/{item.id}/photo",
+                files={"file": ("retake.jpg", _jpeg_bytes(size=(400, 560), color="#385898"), "image/jpeg")},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.db.refresh(item)
+        self.db.refresh(job)
+        self.assertNotEqual(item.image_path, old_path)
+        self.assertEqual(item.content_type, "image/jpeg")
+        self.assertGreater(item.byte_size, 0)
+        self.assertEqual(item.status, "pending")
+        self.assertEqual(item.attempts, 0)
+        self.assertEqual(item.transient_failures, 0)
+        self.assertIsNone(item.recognized)
+        self.assertIsNone(item.matches)
+        self.assertIsNone(item.identity_confident)
+        self.assertIsNone(item.identity_decision)
+        self.assertIsNone(item.suggested_match_id)
+        self.assertIsNone(item.error)
+        self.assertFalse(item.batch_mode)
+        self.assertEqual(job.status, "pending")
+        self.assertIsNone(job.finished_at)
+        self.assertIsNone(job.error_message)
+        self.assertFalse(old_file.exists())
+        self.assertTrue(resolve_scan_path(item.image_path).is_file())
 
     def test_deleting_job_removes_database_rows_and_photo_directory(self):
         created = self._enqueue()

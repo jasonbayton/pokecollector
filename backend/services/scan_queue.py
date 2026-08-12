@@ -19,6 +19,8 @@ from services.scan_storage import (
     delete_job_directory,
     delete_scan_image,
     resolve_scan_path,
+    sanitize_image_bytes,
+    store_sanitized_image,
 )
 from services.scan_bulk_add import confident_addable_count
 
@@ -701,6 +703,14 @@ def retry_scan_item(db: Session, item: ScanJobItem) -> ScanJobItem:
         raise ValueError("The stored scan photo is no longer available.")
 
     now = datetime.datetime.utcnow()
+    _reset_item_for_rescan(item, now)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+def _reset_item_for_rescan(item: ScanJobItem, now: datetime.datetime) -> None:
+    """Clear one completed item's result before it is recognised again."""
     item.status = "pending"
     item.attempts = 0
     item.transient_failures = 0
@@ -718,8 +728,32 @@ def retry_scan_item(db: Session, item: ScanJobItem) -> ScanJobItem:
     item.job.finished_at = None
     item.job.error_message = None
     item.job.updated_at = now
-    db.commit()
+
+
+def replace_scan_item_photo(db: Session, item: ScanJobItem, raw_image: bytes) -> ScanJobItem:
+    """Replace a reviewable item's photo and queue a fresh individual scan.
+
+    Raw bytes keep validation and metadata stripping in the storage service. The
+    old file is deleted only after the commit, so a failed commit leaves its row
+    and file together.
+    """
+    sanitized = sanitize_image_bytes(raw_image)
+    new_path, byte_size = store_sanitized_image(item.job.id, sanitized)
+    old_path = item.image_path
+    now = datetime.datetime.utcnow()
+
+    item.image_path = new_path
+    item.content_type = sanitized.content_type
+    item.byte_size = byte_size
+    _reset_item_for_rescan(item, now)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        delete_scan_image(new_path)
+        raise
     db.refresh(item)
+    delete_scan_image(old_path)
     return item
 
 

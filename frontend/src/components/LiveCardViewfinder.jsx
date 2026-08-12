@@ -64,7 +64,7 @@ export function canRetryCameraFailure(failure) {
  * It is an addition, never a replacement: the file inputs it sits beside stay
  * as the fallback for every device and permission state this cannot serve.
  */
-export default function LiveCardViewfinder({ onCapture, isFull = false }) {
+export default function LiveCardViewfinder({ onCapture, isFull = false, singleShot = false, onClose }) {
   const { t } = useSettings()
   const videoRef = useRef(null)
   const sessionRef = useRef(null)
@@ -135,6 +135,7 @@ export default function LiveCardViewfinder({ onCapture, isFull = false }) {
       const settled = getSession().getState()
       setCamera({ status: settled.status, failure: settled.failure })
       onCapture?.(file)
+      if (singleShot) onClose?.()
     } catch (error) {
       // The session's own status, not a hardcoded live: a frame can fail
       // because the stream died under us, and that leaves the session in error

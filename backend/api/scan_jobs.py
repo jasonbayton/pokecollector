@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import List
 
@@ -16,6 +17,7 @@ from models import ScanJob, ScanJobItem, User
 from services.scan_queue import (
     drain_scan_queue,
     job_progress,
+    replace_scan_item_photo,
     resolve_scan_item,
     retry_scan_item,
 )
@@ -24,9 +26,12 @@ from services.scan_bulk_add import (
     candidate_ids_to_prepare,
 )
 from services.scan_storage import (
+    MAX_JOB_BYTES,
+    ScanJobBytesExceeded,
     ScanUploadError,
     create_scan_job,
     delete_job_directory,
+    read_limited_upload,
     resolve_scan_path,
 )
 
@@ -84,6 +89,15 @@ def _item_payload(item: ScanJobItem) -> dict:
         "suggested_match_id": item.suggested_match_id,
         "error": item.error,
         "has_image": bool(item.image_path),
+        # Changes when, and only when, the stored file changes. The review
+        # panel fetches each photo into a blob URL once and keyed that fetch on
+        # the item id, so a re-take left it showing the photo it had just
+        # replaced while the scan ran against the new one. Hashed rather than
+        # sent raw so the payload never carries the storage layout.
+        "image_token": (
+            hashlib.sha256(item.image_path.encode()).hexdigest()[:16]
+            if item.image_path else None
+        ),
         "next_attempt_at": (
             item.next_attempt_at.isoformat() if item.next_attempt_at else None
         ),
@@ -275,6 +289,42 @@ async def retry_scan_job_item(
         retry_scan_item(db, item)
     except (ValueError, ScanUploadError) as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+    background_tasks.add_task(drain_scan_queue, max_items=1)
+    return _item_payload(item)
+
+
+@router.post("/recognize/jobs/{job_id}/items/{item_id}/photo")
+async def replace_scan_job_item_photo(
+    job_id: int,
+    item_id: int,
+    background_tasks: BackgroundTasks,
+    files: List[UploadFile] = File(..., alias="file"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Replace one completed scan photo and schedule it for a fresh scan."""
+    item = _get_own_item(db, job_id, item_id, current_user)
+    if item.resolved:
+        raise HTTPException(status_code=409, detail="This scan has already been handled.")
+    if item.status not in {"done", "failed"}:
+        raise HTTPException(status_code=409, detail="This scan is still being processed.")
+    if len(files) != 1:
+        raise HTTPException(status_code=400, detail="Exactly one scan photo is required.")
+
+    current_bytes = sum(int(candidate.byte_size or 0) for candidate in item.job.items)
+    remaining_bytes = MAX_JOB_BYTES - (current_bytes - int(item.byte_size or 0))
+    try:
+        raw_image = await read_limited_upload(files[0], remaining_job_bytes=remaining_bytes)
+    except ScanJobBytesExceeded as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ScanUploadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    try:
+        replace_scan_item_photo(db, item, raw_image)
+    except ScanUploadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     background_tasks.add_task(drain_scan_queue, max_items=1)
     return _item_payload(item)
 
