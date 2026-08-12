@@ -1112,9 +1112,11 @@ const de = {
   // Card Scanner
   scanner: {
     title: 'Karte scannen',
-    subtitle: 'Foto aufnehmen',
+    subtitle: 'Fotografiere deine Karten oder wähle vorhandene Fotos aus.',
     alignCard: 'Karte gerade ausrichten, gut beleuchtet',
-    takePhoto: 'Foto aufnehmen',
+    useCameraApp: 'Kamera-App verwenden',
+    otherWaysToAdd: 'Weitere Möglichkeiten',
+    scanMoreCards: 'Weitere Karten scannen',
     photoGuide: 'Hilfe zur Fotoausrichtung',
     photoGuideTitle: 'Eine vollständige Karte ausrichten',
     photoGuideDescription: 'Alle vier Ränder sichtbar lassen, den Rahmen gut ausfüllen und Überlappungen oder starke Spiegelungen vermeiden.',

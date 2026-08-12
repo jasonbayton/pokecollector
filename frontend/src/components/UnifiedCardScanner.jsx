@@ -283,8 +283,17 @@ export default function UnifiedCardScanner({ isOpen, onClose }) {
             </div>
           )}
 
-          <div className="grid gap-2 sm:grid-cols-2">
-            <div className="flex gap-2">
+          {/* Grouped and labelled rather than left as peers of the viewfinder's
+              own button. Both routes reach the same staging tray, but the
+              viewfinder stages a card per tap while these hand off to the
+              phone's camera app or the gallery, so presenting all three as
+              equal buttons read as three ways to do one thing. */}
+          <div className="space-y-2">
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-text-muted">
+              {t('scanner.otherWaysToAdd')}
+            </p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="flex gap-2">
               <button
                 type="button"
                 onClick={() => cameraRef.current?.click()}
@@ -292,7 +301,7 @@ export default function UnifiedCardScanner({ isOpen, onClose }) {
                 className="btn-secondary flex flex-1 items-center justify-center gap-2"
               >
                 <Camera size={16} />
-                <span>{t('scanner.takePhoto')}</span>
+                <span>{t('scanner.useCameraApp')}</span>
               </button>
               <div
                 className="group relative z-20"
@@ -334,15 +343,16 @@ export default function UnifiedCardScanner({ isOpen, onClose }) {
                 </div>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => galleryRef.current?.click()}
-              disabled={stagedFiles.length >= 50}
-              className="btn-secondary flex items-center justify-center gap-2"
-            >
-              <Upload size={16} />
-              <span>{t('scanner.chooseFromGallery')}</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => galleryRef.current?.click()}
+                disabled={stagedFiles.length >= 50}
+                className="btn-secondary flex items-center justify-center gap-2"
+              >
+                <Upload size={16} />
+                <span>{t('scanner.chooseFromGallery')}</span>
+              </button>
+            </div>
           </div>
 
           {stagedFiles.length > 1 && (

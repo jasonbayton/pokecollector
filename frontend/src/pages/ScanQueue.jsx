@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Clock3, Loader2, ScanLine, Trash2 } from 'lucide-react'
+import { ArrowLeft, Camera, Clock3, Loader2, ScanLine, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
   deleteScanJob,
@@ -14,6 +14,7 @@ import {
 import ScanAddModal from '../components/ScanAddModal'
 import { ScanItemPanel } from '../components/ScanReview'
 import ConfirmDialog from '../components/ui/ConfirmDialog'
+import { useScanner } from '../contexts/ScannerContext'
 import { useSettings } from '../contexts/SettingsContext'
 import {
   SCAN_JOBS_QUERY_KEY,
@@ -123,6 +124,7 @@ function JobDetailShell({ onBack, onDiscard, isDiscarding, t, children }) {
 
 function JobDetail({ jobId }) {
   const { t } = useSettings()
+  const { openScanner } = useScanner()
   const navigate = useNavigate()
   const location = useLocation()
   const queryClient = useQueryClient()
@@ -252,14 +254,26 @@ function JobDetail({ jobId }) {
           {job.pending + job.processing + job.retrying} {t('scanner.remaining')}
           {job.failed > 0 && ` · ${job.failed} ${t('scanner.failed')}`}
         </p>
-        {Number(job.confident_addable || 0) > 0 && (
-          <button type="button" onClick={addAllConfident} disabled={addAllConfidentMutation.isPending}
-            className="btn-primary mt-4 w-full justify-center sm:w-auto">
-            {job.confident_addable === 1
-              ? t('scanner.addAllConfidentOne')
-              : t('scanner.addAllConfident').replace('{count}', job.confident_addable)}
+        <div className="mt-4 flex flex-wrap gap-2">
+          {Number(job.confident_addable || 0) > 0 && (
+            <button type="button" onClick={addAllConfident} disabled={addAllConfidentMutation.isPending}
+              className="btn-primary w-full justify-center sm:w-auto">
+              {job.confident_addable === 1
+                ? t('scanner.addAllConfidentOne')
+                : t('scanner.addAllConfident').replace('{count}', job.confident_addable)}
+            </button>
+          )}
+          {/* Submitting a batch lands here and stopped there. A job's photo list
+              is fixed once queued, but nothing stops a second job running
+              alongside it, so the way to carry on is simply the staging panel
+              again. Without this the only route was the nav quick-add, which
+              nothing on this page points at. */}
+          <button type="button" onClick={openScanner}
+            className="btn-secondary w-full justify-center sm:w-auto">
+            <Camera size={15} />
+            <span>{t('scanner.scanMoreCards')}</span>
           </button>
-        )}
+        </div>
       </div>
 
       <div className="space-y-3">

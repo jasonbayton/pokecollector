@@ -140,7 +140,7 @@ describe('UnifiedCardScanner file-input fallbacks', () => {
     expect(thumbnailsOf(tree)).toHaveLength(1)
   })
 
-  it('opens the OS camera app from Take photo, and the picker from Choose from gallery', () => {
+  it('opens the OS camera app from Use camera app, and the picker from Choose from gallery', () => {
     // These two buttons are the whole fallback: on a device where the live
     // viewfinder cannot run - a refused permission, a managed device with the
     // camera blocked by policy, a browser without getUserMedia - they are the
@@ -148,7 +148,7 @@ describe('UnifiedCardScanner file-input fallbacks', () => {
     const tree = render()
     const [cameraInput, galleryInput] = armFileInputs(tree)
 
-    buttonByText(tree, 'scanner.takePhoto').props.onClick()
+    buttonByText(tree, 'scanner.useCameraApp').props.onClick()
 
     expect(cameraInput.click).toHaveBeenCalledTimes(1)
     expect(galleryInput.click).not.toHaveBeenCalled()
@@ -181,14 +181,14 @@ describe('UnifiedCardScanner file-input fallbacks', () => {
     selectFromInput(inputsOf(tree)[1], Array.from({ length: 49 }, (_, index) => jpeg(`bulk-${index}.jpg`)))
     tree = render()
 
-    expect(buttonByText(tree, 'scanner.takePhoto').props.disabled).toBe(false)
+    expect(buttonByText(tree, 'scanner.useCameraApp').props.disabled).toBe(false)
     expect(buttonByText(tree, 'scanner.chooseFromGallery').props.disabled).toBe(false)
 
     selectFromInput(inputsOf(tree)[0], [jpeg('fiftieth.jpg')])
     tree = render()
 
     expect(stagedCountOf(tree)).toBe('50/50 scanner.photos')
-    expect(buttonByText(tree, 'scanner.takePhoto').props.disabled).toBe(true)
+    expect(buttonByText(tree, 'scanner.useCameraApp').props.disabled).toBe(true)
     expect(buttonByText(tree, 'scanner.chooseFromGallery').props.disabled).toBe(true)
   })
 

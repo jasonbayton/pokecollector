@@ -864,9 +864,11 @@ const fr = {
   // Card Scanner
   scanner: {
     title: 'Scanner une carte',
-    subtitle: 'Prendre une photo',
+    subtitle: 'Photographiez vos cartes ou choisissez des photos existantes.',
     alignCard: 'Alignez la carte droite et bien éclairée',
-    takePhoto: 'Prendre une photo',
+    useCameraApp: 'Utiliser l\'appareil photo',
+    otherWaysToAdd: 'Autres façons d\'ajouter',
+    scanMoreCards: 'Scanner d\'autres cartes',
     uploadImage: 'Uploader une image',
     aiHint: 'Reconnaissance par IA - détecte automatiquement les langues TCGdex prises en charge',
     recognizing: 'Reconnaissance de la carte...',

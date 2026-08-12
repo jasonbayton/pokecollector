@@ -143,6 +143,9 @@ vi.mock('../contexts/SettingsContext', () => ({ useSettings: () => settings }))
 
 vi.mock('../contexts/AuthContext', () => ({ useAuth: () => auth }))
 
+const openScanner = vi.fn()
+vi.mock('../contexts/ScannerContext', () => ({ useScanner: () => ({ openScanner }) }))
+
 vi.mock('react-hot-toast', () => ({ default: toastMock }))
 
 vi.mock('../utils/queryInvalidation', () => ({
@@ -292,6 +295,7 @@ let documentStub
 
 beforeEach(() => {
   navigate.mockReset()
+  openScanner.mockReset()
   queryResults.clear()
   stateSeeds.length = 0
   seedsConsumed.length = 0
@@ -366,6 +370,18 @@ describe('list to detail navigation', () => {
     clickButton('scanner.processed')
 
     expect(navigate).toHaveBeenCalledWith('/scans/7', { state: { fromScanQueue: true } })
+  })
+
+  it('offers a way back to staging, because a queued job cannot take more photos', () => {
+    // A job's photo list is fixed at submit, so carrying on means a second job.
+    // Submitting used to land the user here with no route onward except the nav
+    // quick-add, which nothing on this page points at.
+    showDetail()
+    renderScanQueue()
+
+    clickButton('scanner.scanMoreCards')
+
+    expect(openScanner).toHaveBeenCalled()
   })
 
   it('sends the detail back button to the queue, never to the search fallback', () => {
