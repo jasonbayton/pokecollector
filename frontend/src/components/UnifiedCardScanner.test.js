@@ -4,8 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import UnifiedCardScanner from './UnifiedCardScanner'
 
-const { enqueueScanJob, navigate, toastMock, stagedFiles } = vi.hoisted(() => ({
+const { enqueueScanJob, navigate, toastMock, stagedFiles, invalidateQueries } = vi.hoisted(() => ({
   enqueueScanJob: vi.fn(),
+  invalidateQueries: vi.fn(),
   navigate: vi.fn(),
   toastMock: { success: vi.fn(), error: vi.fn() },
   stagedFiles: [],
@@ -29,6 +30,7 @@ vi.mock('../api/client', () => ({ enqueueScanJob }))
 vi.mock('react-router-dom', () => ({ useNavigate: () => navigate }))
 vi.mock('react-hot-toast', () => ({ default: toastMock }))
 vi.mock('../contexts/SettingsContext', () => ({ useSettings: () => ({ t: key => key }) }))
+vi.mock('@tanstack/react-query', () => ({ useQueryClient: () => ({ invalidateQueries }) }))
 
 function* walk(node) {
   if (Array.isArray(node)) {
@@ -63,6 +65,7 @@ beforeEach(() => {
   navigate.mockReset()
   toastMock.success.mockReset()
   toastMock.error.mockReset()
+  invalidateQueries.mockReset()
 })
 
 describe('UnifiedCardScanner submission', () => {
@@ -77,6 +80,28 @@ describe('UnifiedCardScanner submission', () => {
     expect(enqueueScanJob).toHaveBeenCalledWith(['file-a', 'file-b'], [1])
     expect(onClose).toHaveBeenCalledTimes(1)
     expect(navigate).toHaveBeenCalledWith('/scans/job-7')
+  })
+
+  it('tells the shared queue a job now exists, so the badge can find it', async () => {
+    // The queue query only polls while its cached list already holds an active
+    // job. A list fetched empty a moment ago stays cached, so without this the
+    // new job is invisible in the badge until some unrelated refetch.
+    stagedFiles.push(photo('a', false))
+
+    await findStartButton(scannerTree()).props.onClick()
+
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['scan-jobs'] })
+  })
+
+  it('still tells the queue when the user abandoned the scanner mid-submit', async () => {
+    // The job exists either way, and on this path the user is never taken to
+    // it, so the badge is the only thing that can tell them.
+    stagedFiles.push(photo('a', false))
+    const tree = scannerTree({ isOpen: false })
+
+    await findStartButton(tree).props.onClick()
+
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['scan-jobs'] })
   })
 
   it('reports a rejected batch instead of navigating away', async () => {

@@ -3,7 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { Camera, Check, HelpCircle, ImagePlus, Loader2, Trash2, Upload, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 
+import { useQueryClient } from '@tanstack/react-query'
+
 import { enqueueScanJob } from '../api/client'
+import { SCAN_JOBS_QUERY_KEY } from '../utils/scanJobs'
 import { useSettings } from '../contexts/SettingsContext'
 import { isSupportedScannerImage, SCANNER_IMAGE_ACCEPT } from '../utils/scannerImages'
 import ConfirmDialog from './ui/ConfirmDialog'
@@ -46,6 +49,7 @@ export default function UnifiedCardScanner({ isOpen, onClose }) {
   const stagedFilesRef = useRef([])
   const { t } = useSettings()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
 
   useEffect(() => {
     stagedFilesRef.current = stagedFiles
@@ -153,6 +157,13 @@ export default function UnifiedCardScanner({ isOpen, onClose }) {
         stagedFiles.map(item => item.file),
         individualPositions,
       )
+      // The job exists now, so the shared queue query must be told. It only
+      // polls while its cached list already holds an active job, so a list
+      // fetched empty a moment ago stays cached and the new job never appears
+      // in the badge until some unrelated refetch. That is worst on the
+      // abandoned path below, where the user is not taken to the job and the
+      // badge is all they have.
+      queryClient.invalidateQueries({ queryKey: SCAN_JOBS_QUERY_KEY })
       if (generationRef.current !== generation) {
         // Abandoned while in flight. The job was still created, so say so rather
         // than vanishing silently, but leave the reopened scanner alone.
