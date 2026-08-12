@@ -510,6 +510,48 @@ describe('createCameraSession', () => {
     expect(session.getState().status).toBe(CAMERA_STATUS.IDLE)
   })
 
+  it('throws away a frame whose session closed while it was still encoding', async () => {
+    // Encoding is asynchronous. Without a generation check the shutter tap that
+    // was in flight when the user closed the scanner still resolves, and its
+    // file is staged into a scanner that is no longer open - a photo the user
+    // never knowingly took, appearing on the next open.
+    let release
+    const session = newSession({
+      createCanvas: () => ({
+        width: 0,
+        height: 0,
+        getContext: () => ({ drawImage: () => {} }),
+        toBlob: (callback) => { release = () => callback(new Blob(['late'], { type: 'image/jpeg' })) },
+      }),
+    })
+    await session.start()
+
+    const pending = session.capture({ videoWidth: 1280, videoHeight: 720 })
+    session.dispose()
+    release()
+
+    await expect(pending).rejects.toMatchObject({ reason: CAMERA_FAILURE.INTERRUPTED })
+  })
+
+  it('throws away a frame whose session was stopped while it was still encoding', async () => {
+    let release
+    const session = newSession({
+      createCanvas: () => ({
+        width: 0,
+        height: 0,
+        getContext: () => ({ drawImage: () => {} }),
+        toBlob: (callback) => { release = () => callback(new Blob(['late'], { type: 'image/jpeg' })) },
+      }),
+    })
+    await session.start()
+
+    const pending = session.capture({ videoWidth: 1280, videoHeight: 720 })
+    session.stop()
+    release()
+
+    await expect(pending).rejects.toMatchObject({ reason: CAMERA_FAILURE.INTERRUPTED })
+  })
+
   it('will not reopen the camera after dispose', async () => {
     const session = newSession()
     session.dispose()

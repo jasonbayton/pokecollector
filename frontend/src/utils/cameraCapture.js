@@ -316,9 +316,20 @@ export function createCameraSession({
     if (state.status !== CAMERA_STATUS.LIVE) {
       throw new CameraError(CAMERA_FAILURE.INTERRUPTED, 'The viewfinder is not live.')
     }
+    // Encoding is asynchronous, so the session can be stopped or disposed while
+    // a blob is still being produced. Without this the shutter tap that was in
+    // flight when the user closed the scanner still resolves, and its file is
+    // staged into a scanner that is no longer open - a photo the user never
+    // knowingly took, surfacing on the next open. The same generation token
+    // start() already uses is what tells us the world moved on.
+    const token = generation
     // Deliberately leaves the stream running: the whole point of the viewfinder
     // is that the next card can be captured without reopening anything.
-    return captureJpegFromVideo(video, { createCanvas, now })
+    const file = await captureJpegFromVideo(video, { createCanvas, now })
+    if (token !== generation || disposed) {
+      throw new CameraError(CAMERA_FAILURE.INTERRUPTED, 'The viewfinder closed before the frame was ready.')
+    }
+    return file
   }
 
   function bindVisibility(target) {
