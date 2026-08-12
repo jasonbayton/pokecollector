@@ -1201,7 +1201,7 @@ const en = {
     alignCard: 'Align card straight, well-lit',
     takePhoto: 'Take photo',
     liveViewfinderTitle: 'Live viewfinder',
-    liveViewfinderHint: 'Start the camera to capture a card per tap, without leaving the app between cards.',
+    liveViewfinderHint: 'Line a card up and tap once to add it. Keep going for as many cards as you like.',
     startCamera: 'Start camera',
     startingCamera: 'Starting camera…',
     stopCamera: 'Stop camera',

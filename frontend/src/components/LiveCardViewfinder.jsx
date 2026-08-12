@@ -88,6 +88,12 @@ export default function LiveCardViewfinder({ onCapture, isFull = false }) {
       unbindVisibility()
       if (videoRef.current) videoRef.current.srcObject = null
       session.dispose()
+      // Drop the ref as well as disposing. A disposed session refuses start()
+      // silently, and sessionRef outlives this cleanup, so keeping it would
+      // hand the next mount a session that can never open the camera again.
+      // StrictMode makes that the very first thing that happens in
+      // development, but any remount does it in production too.
+      if (sessionRef.current === session) sessionRef.current = null
     }
   }, [])
 
