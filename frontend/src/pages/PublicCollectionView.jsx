@@ -101,6 +101,8 @@ export default function PublicCollectionView() {
                   price={card.market_value != null ? formatEur(card.market_value) : null}
                   variantEffectSource={card.variant}
                   onClick={() => setZoomedCard(displayCard)}
+                  actionName={`${t('card.viewArtwork')}: ${card.name}`}
+                  actionHasPopup="dialog"
                   stateIndicatorProps={{
                     // getCardState reads owned_variants; a bare quantity renders nothing.
                     card: { owned_variants: [{ variant: card.variant || 'Normal', quantity: card.quantity }] },

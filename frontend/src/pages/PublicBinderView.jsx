@@ -92,6 +92,8 @@ export default function PublicBinderView() {
                 variantEffectSource={tile.prints}
                 interactive
                 onClick={() => setZoomedCard({ ...tile, set_id: tile.set_name })}
+                actionName={`${t('card.viewArtwork')}: ${tile.name}`}
+                actionHasPopup="dialog"
                 stateIndicatorProps={{
                   card: { ...tile, owned_variants: tile.prints },
                   showWishlist: false,

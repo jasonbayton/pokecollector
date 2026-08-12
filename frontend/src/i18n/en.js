@@ -1160,6 +1160,7 @@ const en = {
   },
 
   card: {
+    viewArtwork: 'View artwork',
     printings: 'Printings that exist',
     printing_normal: 'Normal',
     printing_reverse: 'Reverse holo',

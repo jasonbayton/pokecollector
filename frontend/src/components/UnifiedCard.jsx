@@ -101,6 +101,8 @@ export function CardArtworkFrame({
   onClick,
   onSelect,
   onAdd,
+  actionName,
+  actionHasPopup,
   selected = false,
   unavailableReason = '',
   showStateIndicators = true,
@@ -116,7 +118,9 @@ export function CardArtworkFrame({
   const { t } = useSettings()
   const kinds = getCardFallbackKinds(card)
   const label = fallbackAriaLabel(t, kinds)
-  const actionLabel = [alt, label].filter(Boolean).join(' · ') || undefined
+  // The card name alone announces as "Pikachu, button", which says nothing
+  // about what activating it does. Callers that know the action name it.
+  const actionLabel = [actionName || alt, label].filter(Boolean).join(' · ') || undefined
 
   return (
     <div
@@ -170,6 +174,7 @@ export function CardArtworkFrame({
             disabled={Boolean(unavailableReason)}
             aria-disabled={unavailableReason ? true : undefined}
             aria-label={actionLabel}
+            aria-haspopup={actionHasPopup}
           />
         )}
         {onAdd && !unavailableReason && (
@@ -446,6 +451,8 @@ export default function UnifiedCard({
   onClick,
   onSelect,
   onAdd,
+  actionName,
+  actionHasPopup,
   interactive = Boolean(onClick || onSelect),
   selected = false,
   unavailableReason = '',
@@ -470,6 +477,8 @@ export default function UnifiedCard({
         onClick={onClick}
         onSelect={onSelect}
         onAdd={onAdd}
+        actionName={actionName}
+        actionHasPopup={actionHasPopup}
         selected={selected}
         unavailableReason={unavailableReason}
         showStateIndicators={showStateIndicators}
