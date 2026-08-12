@@ -68,8 +68,13 @@ TRUSTED_REFERENCE_IMAGE_HOSTS = {"assets.tcgdex.net"}
 # the peak of any one of them, which is the opposite of the point.
 #
 # Sharing a gate of this size across several matchers therefore holds the group
-# at one matcher's peak instead of multiplying it. Measured, not asserted from
-# this comment, in test_composite_match_concurrency.
+# at one matcher's fan-out instead of multiplying it.
+#
+# What the tests actually establish: that the gate is used, and that removing it
+# lets the in-flight count double. They cannot establish the peak a real TCGdex
+# client reaches, because they drive a fake one. Two earlier tests claimed to
+# pin that peak and were deleted: they asserted on numbers their own fixture
+# produced, so they would have passed whatever the real path did.
 TCGDEX_REQUEST_BURST = max(PHASH_CANDIDATE_LIMIT, CANDIDATE_DETAIL_LIMIT)
 
 
