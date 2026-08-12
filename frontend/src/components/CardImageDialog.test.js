@@ -50,13 +50,22 @@ describe('CardImageDialog', () => {
   })
 
   it('sizes the artwork from its width so the ratio survives a clamped phone', () => {
-    // A fixed height plus max-w-full silently stops matching the card once the
-    // width clamps, and then overflows the bottom sheet.
+    // A fixed height plus max-w-full silently stops matching the artwork once
+    // the width clamps, and then overflows the bottom sheet.
     const markup = render({ card: { id: 'base1-64_en', name: 'Starmie' } })
 
-    expect(markup).toContain('aspect-[2.5/3.5]')
     expect(markup).toContain('w-full')
     expect(markup).not.toMatch(/\bh-\[/)
+  })
+
+  it('matches the box to the artwork ratio, not to a physical card', () => {
+    // Card scans are 600x825, or 8/11, because they carry bleed. Using the
+    // 2.5/3.5 of a real card leaves a band above and below the image, which
+    // reads as the card being cut off.
+    const markup = render({ card: { id: 'base1-64_en', name: 'Starmie' } })
+
+    expect(markup).toContain('aspect-[8/11]')
+    expect(markup).not.toContain('aspect-[2.5/3.5]')
   })
 
   it('renders nothing without a card', () => {

@@ -24,12 +24,17 @@ export default function CardImageDialog({ card, image, onClose }) {
   return (
     <Modal isOpen onClose={onClose} title={card.name} size="md">
       <div className="space-y-3 p-4 sm:p-5">
-        {/* Width-driven, so the aspect ratio always holds. Setting the height
-            instead looks fine until a narrow phone clamps the width: CSS keeps
-            the explicit height, the box stops matching the card, and it
+        {/* 8/11 is the artwork's ratio, not the 2.5/3.5 of a physical card:
+            the scans are 600x825 because they carry bleed. Sizing the box to
+            the card instead leaves a band above and below the image that the
+            surrounding frame turns into an apparent crop.
+
+            Width-driven, so the ratio always holds. Setting the height instead
+            looks fine until a narrow phone clamps the width: CSS keeps the
+            explicit height, the box stops matching the artwork, and it
             overflows the sheet. The cap is in dvh to match the sheet's own
             max-h-[85dvh] and leave room for its header and this caption. */}
-        <div className="mx-auto aspect-[2.5/3.5] w-full max-w-[min(22rem,40dvh)] overflow-hidden rounded-xl border border-white/10 bg-bg-primary/50">
+        <div className="mx-auto aspect-[8/11] w-full max-w-[min(22rem,40dvh)] overflow-hidden rounded-xl bg-bg-primary/50">
           <CardImage
             src={resolveCardImageUrl(card, 'large') || image}
             alt={card.name}
