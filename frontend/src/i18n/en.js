@@ -164,6 +164,11 @@ const en = {
     welcomeBack: 'Welcome back',
   },
 
+  // Floating quick-add control, present on every page
+  quickAdd: {
+    title: 'Quick add',
+  },
+
   // Home Screen
   home: {
     welcomeBack: 'Welcome back',

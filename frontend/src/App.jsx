@@ -9,6 +9,7 @@ import Layout from './components/Layout'
 import { useSettings } from './contexts/SettingsContext'
 import PublicHomeButton from './components/PublicHomeButton'
 import { ConfirmDialogProvider } from './contexts/ConfirmDialogContext'
+import { ScannerProvider } from './contexts/ScannerContext'
 
 const HomeScreen = lazy(() => import('./pages/HomeScreen'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
@@ -156,35 +157,41 @@ function ProtectedRoutes() {
     return <ForcePasswordChangeScreen />
   }
 
+  // The scanner provider sits here rather than beside ConfirmDialogProvider:
+  // it reads and changes the route, so it has to be inside BrowserRouter, and
+  // it polls the signed-in user's scan queue, so it must not mount for the
+  // login screen or the public share pages.
   return (
-    <Routes>
-      <Route path="/" element={<Layout />}>
-        <Route index element={lazyRoute(<HomeScreen />)} />
-        <Route path="dashboard" element={lazyRoute(<Dashboard />)} />
-        <Route path="search" element={lazyRoute(<CardSearch />)} />
-        <Route path="collection" element={lazyRoute(<Collection />)} />
-        <Route path="pokedex" element={lazyRoute(<Pokedex />)} />
-        <Route path="pokedex/:dexId" element={lazyRoute(<PokedexSpecies />)} />
-        <Route path="collection/user/:userId" element={lazyRoute(<UserCollection />)} />
-        <Route path="sets" element={lazyRoute(<Sets />)} />
-        <Route path="sets/:setId" element={lazyRoute(<SetDetail />)} />
-        <Route path="wishlist" element={lazyRoute(<Wishlist />)} />
-        <Route path="binders" element={lazyRoute(<Binders />)} />
-        <Route path="binders/:binderId" element={lazyRoute(<BinderDetail />)} />
-        <Route path="analytics" element={lazyRoute(<Analytics />)} />
-        <Route path="products" element={lazyRoute(<Products />)} />
-        <Route path="trades" element={lazyRoute(<Trades />)} />
-        <Route path="leaderboard" element={lazyRoute(<Leaderboard />)} />
-        <Route path="social/server" element={lazyRoute(<ServerCollection />)} />
-        <Route path="leaderboard/compare/:userId" element={lazyRoute(<Compare />)} />
-        <Route path="achievements" element={lazyRoute(<Achievements />)} />
-        <Route path="achievements/:userId" element={lazyRoute(<Achievements />)} />
-        <Route path="settings" element={lazyRoute(<Settings />)} />
-        <Route path="migration" element={lazyRoute(<CardMigration />)} />
-        <Route path="scans" element={lazyRoute(<ScanQueue />)} />
-        <Route path="scans/:jobId" element={lazyRoute(<ScanQueue />)} />
-      </Route>
-    </Routes>
+    <ScannerProvider>
+      <Routes>
+        <Route path="/" element={<Layout />}>
+          <Route index element={lazyRoute(<HomeScreen />)} />
+          <Route path="dashboard" element={lazyRoute(<Dashboard />)} />
+          <Route path="search" element={lazyRoute(<CardSearch />)} />
+          <Route path="collection" element={lazyRoute(<Collection />)} />
+          <Route path="pokedex" element={lazyRoute(<Pokedex />)} />
+          <Route path="pokedex/:dexId" element={lazyRoute(<PokedexSpecies />)} />
+          <Route path="collection/user/:userId" element={lazyRoute(<UserCollection />)} />
+          <Route path="sets" element={lazyRoute(<Sets />)} />
+          <Route path="sets/:setId" element={lazyRoute(<SetDetail />)} />
+          <Route path="wishlist" element={lazyRoute(<Wishlist />)} />
+          <Route path="binders" element={lazyRoute(<Binders />)} />
+          <Route path="binders/:binderId" element={lazyRoute(<BinderDetail />)} />
+          <Route path="analytics" element={lazyRoute(<Analytics />)} />
+          <Route path="products" element={lazyRoute(<Products />)} />
+          <Route path="trades" element={lazyRoute(<Trades />)} />
+          <Route path="leaderboard" element={lazyRoute(<Leaderboard />)} />
+          <Route path="social/server" element={lazyRoute(<ServerCollection />)} />
+          <Route path="leaderboard/compare/:userId" element={lazyRoute(<Compare />)} />
+          <Route path="achievements" element={lazyRoute(<Achievements />)} />
+          <Route path="achievements/:userId" element={lazyRoute(<Achievements />)} />
+          <Route path="settings" element={lazyRoute(<Settings />)} />
+          <Route path="migration" element={lazyRoute(<CardMigration />)} />
+          <Route path="scans" element={lazyRoute(<ScanQueue />)} />
+          <Route path="scans/:jobId" element={lazyRoute(<ScanQueue />)} />
+        </Route>
+      </Routes>
+    </ScannerProvider>
   )
 }
 
