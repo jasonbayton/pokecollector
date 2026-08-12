@@ -163,7 +163,10 @@ export async function captureJpegFromVideo(video, {
   const width = Math.round(video?.videoWidth || 0)
   const height = Math.round(video?.videoHeight || 0)
   if (!width || !height) {
-    throw new CameraError(CAMERA_FAILURE.INTERRUPTED, 'The viewfinder has no frame to capture.')
+    // getUserMedia resolves before the video element necessarily receives
+    // loadedmetadata. The session is still live, but there is no frame yet.
+    // Keep this as a frame failure so the live shutter remains a useful retry.
+    throw new CameraError(CAMERA_FAILURE.CAPTURE_FAILED, 'The viewfinder has no frame to capture.')
   }
 
   const canvas = createCanvas(width, height)

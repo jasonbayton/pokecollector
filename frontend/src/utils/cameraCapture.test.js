@@ -170,7 +170,7 @@ describe('captureJpegFromVideo', () => {
     const { createCanvas, record } = createCanvasFactory()
 
     await expect(captureJpegFromVideo({ videoWidth: 0, videoHeight: 0 }, { createCanvas }))
-      .rejects.toMatchObject({ reason: CAMERA_FAILURE.INTERRUPTED })
+      .rejects.toMatchObject({ reason: CAMERA_FAILURE.CAPTURE_FAILED })
     expect(record.created).toEqual([])
   })
 

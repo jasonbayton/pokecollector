@@ -197,7 +197,8 @@ describe('LiveCardViewfinder against the real camera session', () => {
     tree = render()
 
     expect(props.onCapture).not.toHaveBeenCalled()
-    expect(textOf(tree)).toContain('scanner.cameraErrorInterrupted')
+    expect(textOf(tree)).toContain('scanner.cameraErrorCaptureFailed')
+    expect(textOf(tree)).not.toContain('scanner.cameraErrorInterrupted')
     expect(textOf(tree)).toContain('scanner.captureCard')
 
     fakeVideo.videoWidth = 1280
@@ -206,7 +207,7 @@ describe('LiveCardViewfinder against the real camera session', () => {
     tree = render()
 
     expect(props.onCapture).toHaveBeenCalledTimes(1)
-    expect(textOf(tree)).not.toContain('scanner.cameraErrorInterrupted')
+    expect(textOf(tree)).not.toContain('scanner.cameraErrorCaptureFailed')
     expect(track.stopCount).toBe(0)
   })
 
