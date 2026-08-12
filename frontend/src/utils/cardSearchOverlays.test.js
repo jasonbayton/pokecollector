@@ -11,6 +11,7 @@ describe('cardSearchKeysSuspended', () => {
       pageCustomCardOpen: false,
       scannerOpen: false,
       quickAddCustomCardOpen: false,
+      quickAddMenuOpen: false,
     })).toBe(false)
   })
 
@@ -20,6 +21,9 @@ describe('cardSearchKeysSuspended', () => {
     'pageCustomCardOpen',
     'scannerOpen',
     'quickAddCustomCardOpen',
+    // The bare menu counts as much as a dialog: it dims the page and holds
+    // focus, so paging the results underneath it is the same defect.
+    'quickAddMenuOpen',
   ])('suspends them while %s owns the screen', surface => {
     expect(cardSearchKeysSuspended({ [surface]: true })).toBe(true)
   })

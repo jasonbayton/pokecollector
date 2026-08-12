@@ -9,13 +9,17 @@ import {
   QUICK_ADD_SCAN,
   QUICK_ADD_SEARCH,
 } from '../contexts/ScannerContext'
-import QuickAddButton, { QuickAddMenu } from './QuickAddButton'
+import QuickAddButton, { QuickAddMenu, escapeDismisses } from './QuickAddButton'
 
 const { scannerValue } = vi.hoisted(() => ({
   scannerValue: {
     runQuickAdd: vi.fn(),
     scanAttention: 0,
     scansActive: false,
+    // The menu's open state lives in the provider so the card search can
+    // suspend its arrow keys while the menu covers it.
+    quickAddMenuOpen: false,
+    setQuickAddMenuOpen: vi.fn(),
   },
 }))
 
@@ -30,6 +34,20 @@ vi.mock('../contexts/ScannerContext', async (importOriginal) => ({
 vi.mock('../contexts/SettingsContext', () => ({
   useSettings: () => ({ t: key => key }),
 }))
+
+// z-40 is the nav layer (AppNav's sticky strip and the floating home button),
+// z-50 the dialog layer (Modal and Sheet).
+const NAV_LAYER = 40
+const DIALOG_LAYER = 50
+
+// Reads the z value out of a class string, whether written z-40 or z-[46].
+const zOf = (markup, prefix) => {
+  const at = markup.indexOf(prefix)
+  if (at < 0) return -1
+  const rest = markup.slice(at + prefix.length)
+  const match = rest.match(/^\[?(\d+)\]?/)
+  return match ? Number(match[1]) : -1
+}
 
 const renderMenu = (props = {}) => renderToStaticMarkup(createElement(QuickAddMenu, {
   open: false,
@@ -93,10 +111,10 @@ describe('QuickAddMenu', () => {
 
   it('stays under the dialog layer while closed', () => {
     // Dialogs own z-50. A floating button drawn over an open sheet reads as a
-    // rendering fault, which is why the public home button was lowered to 40.
+    // rendering fault, which is why the public home button was lowered too.
     const markup = renderMenu()
 
-    expect(markup).toContain('z-40')
+    expect(zOf(markup, 'fixed z-')).toBeLessThan(50)
     expect(markup).not.toContain('z-50')
   })
 
@@ -105,11 +123,16 @@ describe('QuickAddMenu', () => {
     // speak for: the backdrop has to cover the page but not the menu, and the
     // whole control has to stay below the dialog layer.
     const markup = renderMenu({ open: true })
-    const backdropIndex = markup.indexOf('fixed inset-0 z-30')
-    const controlIndex = markup.indexOf('fixed z-40')
+    const backdrop = zOf(markup, 'fixed inset-0 z-')
+    const control = zOf(markup, 'fixed z-')
 
-    expect(backdropIndex).toBeGreaterThanOrEqual(0)
-    expect(controlIndex).toBeGreaterThan(backdropIndex)
+    // Asserted as an ordering rather than as literal class names, so
+    // renumbering the scale does not break a test about layering.
+    // NAV_LAYER is what the sticky header strip and the home button use; the
+    // backdrop must cover them, or they stay lit and clickable through the dim.
+    expect(backdrop).toBeGreaterThan(NAV_LAYER)
+    expect(control).toBeGreaterThan(backdrop)
+    expect(control).toBeLessThan(DIALOG_LAYER)
     expect(markup).toContain('role="menu"')
     expect(markup).toContain('aria-expanded="true"')
     expect(markup).not.toContain('z-50')
@@ -221,5 +244,31 @@ describe('QuickAddButton', () => {
 
     expect(renderControl('/scans')).toBe('')
     expect(renderControl('/scans/12')).toBe('')
+  })
+})
+
+describe('escape dismissal', () => {
+  const press = key => {
+    const close = vi.fn()
+    const event = { key, preventDefault: vi.fn() }
+    escapeDismisses(close)(event)
+    return { close, event }
+  }
+
+  it('closes the menu and puts focus back on the button that opened it', () => {
+    const { close, event } = press('Escape')
+
+    expect(close).toHaveBeenCalledWith({ restoreFocus: true })
+    expect(event.preventDefault).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves every other key to the page', () => {
+    // The listener is on the document, so swallowing anything else would take
+    // keys away from whatever the user is actually typing into.
+    for (const key of ['Enter', 'ArrowLeft', 'a', 'Tab']) {
+      const { close, event } = press(key)
+      expect(close, `${key} should not dismiss`).not.toHaveBeenCalled()
+      expect(event.preventDefault, `${key} should not be swallowed`).not.toHaveBeenCalled()
+    }
   })
 })

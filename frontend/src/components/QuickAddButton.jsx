@@ -50,13 +50,14 @@ export function QuickAddMenu({
           type="button"
           aria-label={t('common.close')}
           onClick={onClose}
-          className="fixed inset-0 z-30 cursor-default bg-black/20"
+          className="fixed inset-0 z-[45] cursor-default bg-black/20"
         />
       )}
-      {/* Below the dialog layer (z-50) on purpose: a floating button drawn over
+      {/* Above the backdrop, and above the nav strip and home button it dims,
+          but still below the dialog layer (z-50): a floating button drawn over
           an open sheet reads as a rendering fault. */}
       <div
-        className="fixed z-40 flex flex-col items-end gap-2"
+        className="fixed z-[46] flex flex-col items-end gap-2"
         style={{
           bottom: 'max(1.5rem, env(safe-area-inset-bottom))',
           right: 'max(1rem, env(safe-area-inset-right))',
@@ -136,32 +137,43 @@ export function QuickAddMenu({
   )
 }
 
+/**
+ * The menu's Escape handler, as a value rather than a closure inside an effect.
+ *
+ * The repository's component tests render on the server, where effects never
+ * run, so a listener registered inside one cannot be reached: removing it
+ * entirely left the whole suite green. Naming it here gives the behaviour a
+ * seam a test can hold without a DOM.
+ */
+export function escapeDismisses(close) {
+  return event => {
+    if (event.key !== 'Escape') return
+    event.preventDefault()
+    close({ restoreFocus: true })
+  }
+}
+
 export default function QuickAddButton() {
-  const { runQuickAdd, scanAttention, scansActive } = useScanner()
+  const { runQuickAdd, scanAttention, scansActive, quickAddMenuOpen: open, setQuickAddMenuOpen: setOpen } = useScanner()
   const location = useLocation()
-  const [open, setOpen] = useState(false)
   const toggleRef = useRef(null)
   const menuRef = useRef(null)
 
   const close = useCallback(({ restoreFocus = false } = {}) => {
     setOpen(false)
     if (restoreFocus) toggleRef.current?.focus()
-  }, [])
+  }, [setOpen])
 
   // A quick-add action can change route. Leaving the menu open over the page
   // the user just landed on would hide the thing they asked for.
-  useEffect(() => { setOpen(false) }, [location.pathname])
+  useEffect(() => { setOpen(false) }, [location.pathname, setOpen])
 
   // On the document rather than on the control: the menu is dismissible from
   // wherever the user is looking, and by the time they reach for Escape their
   // focus may well have left the four items.
   useEffect(() => {
     if (!open) return undefined
-    const handleKeyDown = event => {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      close({ restoreFocus: true })
-    }
+    const handleKeyDown = escapeDismisses(close)
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [close, open])

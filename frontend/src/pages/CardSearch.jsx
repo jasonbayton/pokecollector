@@ -128,7 +128,7 @@ function FilterForm({ filters, setFilter, allSeries, setsForSeries, toggleSortOr
 
 export default function CardSearch() {
   const { t, settings, formatPrice } = useSettings()
-  const { openScanner, isScannerOpen, isCustomCardOpen } = useScanner()
+  const { openScanner, isScannerOpen, isCustomCardOpen, quickAddMenuOpen } = useScanner()
   const visibleLanguages = useVisibleTcgdexLanguages()
   const queryClient = useQueryClient()
   const location = useLocation()
@@ -286,6 +286,7 @@ export default function CardSearch() {
     pageCustomCardOpen: showCustomModal,
     scannerOpen: isScannerOpen,
     quickAddCustomCardOpen: isCustomCardOpen,
+    quickAddMenuOpen,
   })
 
   useEffect(() => {

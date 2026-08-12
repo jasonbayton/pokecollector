@@ -86,6 +86,10 @@ export function quickAddHiddenOn(pathname) {
 const CLOSED = { panel: null, scannerMounted: false }
 
 export function ScannerProvider({ children }) {
+  // The menu's open state lives here rather than in QuickAddButton so the
+  // card search can suspend its arrow-key pagination while the menu covers it.
+  // Two copies of this would drift.
+  const [quickAddMenuOpen, setQuickAddMenuOpen] = useState(false)
   const [{ panel, scannerMounted }, setPanelState] = useState(CLOSED)
   const navigate = useNavigate()
   const location = useLocation()
@@ -138,9 +142,11 @@ export function ScannerProvider({ children }) {
     // the screen. Its own modals it knows about; the two this provider opens
     // over it, it can only know from here.
     isCustomCardOpen: panel === 'custom',
+    quickAddMenuOpen,
+    setQuickAddMenuOpen,
     scanAttention: scanAttentionCount(scanJobs),
     scansActive: hasActiveScanJobs(scanJobs),
-  }), [closeScanner, openCustomCard, openScanner, panel, runQuickAdd, scanJobs])
+  }), [closeScanner, openCustomCard, openScanner, panel, quickAddMenuOpen, runQuickAdd, scanJobs])
 
   return (
     <ScannerContext.Provider value={value}>
