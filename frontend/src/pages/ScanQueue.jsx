@@ -91,6 +91,34 @@ function JobRow({ job, onOpen, retryNow, t }) {
   )
 }
 
+// The outer Modal used to supply the X, the backdrop and Escape to every state
+// this component could be in. Nothing replaced that for the two states that hold
+// no job content to navigate from: a job is purged server-side at its expiry, so
+// the next GET answers 404 and the page became a bare error box with no control
+// on it at all. The way back therefore lives in the shell, above the branch, and
+// the heading with it - the Modal's own h2 was the page's only heading.
+function JobDetailShell({ onBack, onDiscard, isDiscarding, t, children }) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <button type="button" onClick={onBack}
+          className="btn-ghost px-3 py-1.5 text-sm">
+          <ArrowLeft size={16} /> {t('scanner.backToScans')}
+        </button>
+        {onDiscard && (
+          <button type="button" onClick={onDiscard} disabled={isDiscarding}
+            className="btn-ghost h-9 w-9 border-brand-red/30 p-0 text-brand-red hover:bg-brand-red/10"
+            aria-label={t('scanner.discardJob')} title={t('scanner.discardJob')}>
+            <Trash2 size={17} />
+          </button>
+        )}
+      </div>
+      <h1 className="text-xl font-bold text-text-primary">{t('scanner.queueTitle')}</h1>
+      {children}
+    </div>
+  )
+}
+
 function JobDetail({ jobId }) {
   const { t } = useSettings()
   const navigate = useNavigate()
@@ -156,31 +184,26 @@ function JobDetail({ jobId }) {
     else if (confirmation?.type === 'discard') deleteMutation.mutate()
   }
 
+  // No job to discard yet, so the shell renders the way back on its own.
   if (isLoading) {
-    return <div className="flex justify-center py-16"><Loader2 size={28} className="animate-spin text-brand-red" /></div>
+    return (
+      <JobDetailShell onBack={backToList} t={t}>
+        <div className="flex justify-center py-16"><Loader2 size={28} className="animate-spin text-brand-red" /></div>
+      </JobDetailShell>
+    )
   }
   if (isError || !job) {
     return (
-      <div role="alert" className="rounded-xl border border-brand-red/20 bg-brand-red/10 p-4 text-center text-sm text-brand-red">
-        {t('scanner.jobLoadFailed')}
-      </div>
+      <JobDetailShell onBack={backToList} t={t}>
+        <div role="alert" className="rounded-xl border border-brand-red/20 bg-brand-red/10 p-4 text-center text-sm text-brand-red">
+          {t('scanner.jobLoadFailed')}
+        </div>
+      </JobDetailShell>
     )
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <button type="button" onClick={backToList}
-          className="btn-ghost px-3 py-1.5 text-sm">
-          <ArrowLeft size={16} /> {t('scanner.backToScans')}
-        </button>
-        <button type="button" onClick={discardJob} disabled={deleteMutation.isPending}
-          className="btn-ghost h-9 w-9 border-brand-red/30 p-0 text-brand-red hover:bg-brand-red/10"
-          aria-label={t('scanner.discardJob')} title={t('scanner.discardJob')}>
-          <Trash2 size={17} />
-        </button>
-      </div>
-
+    <JobDetailShell onBack={backToList} onDiscard={discardJob} isDiscarding={deleteMutation.isPending} t={t}>
       <div className="rounded-2xl border border-border bg-bg-surface p-4">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -248,7 +271,7 @@ function JobDetail({ jobId }) {
         isPending={deleteMutation.isPending || resolveMutation.isPending}
         destructive
       />
-    </div>
+    </JobDetailShell>
   )
 }
 
@@ -285,7 +308,12 @@ export default function ScanQueue() {
               <ArrowLeft size={16} /> {t('common.back')}
             </button>
           </div>
-          <p className="text-sm text-text-secondary">{t('scanner.queueSubtitle')}</p>
+          {/* The page carried no heading at any level once the Modal's h2 went,
+              so screen-reader heading navigation found nothing on the route. */}
+          <div>
+            <h1 className="text-xl font-bold text-text-primary">{t('scanner.queueTitle')}</h1>
+            <p className="mt-1 text-sm text-text-secondary">{t('scanner.queueSubtitle')}</p>
+          </div>
 
           {isLoading ? (
             <div className="flex justify-center py-16"><Loader2 size={28} className="animate-spin text-brand-red" /></div>

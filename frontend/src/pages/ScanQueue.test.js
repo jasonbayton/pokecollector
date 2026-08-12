@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ScanQueue, { hasInAppPredecessor } from './ScanQueue'
 import ScanAddModal from '../components/ScanAddModal'
+import { ScanItemPanel } from '../components/ScanReview'
+import ConfirmDialog from '../components/ui/ConfirmDialog'
 import AppNav from '../components/AppNav'
 
 // The queue is a page now, so what has to be proven is which controls it renders
@@ -14,8 +16,9 @@ import AppNav from '../components/AppNav'
 // control was found, so that failure is loud rather than silent.
 const {
   rendered, portalTrees, portalTargets, navigate, route, settings, auth,
-  queryOptions, queryResults, mutationOptions, api, toastMock,
+  queryOptions, queryResults, mutations, api, toastMock,
   invalidateCardState, invalidateTcgdexFilterLanguages, parseMoneyInputValue,
+  stateSeeds, seedsConsumed, setAddSelection, setConfirmation,
 } = vi.hoisted(() => ({
   rendered: [],
   portalTrees: [],
@@ -26,7 +29,11 @@ const {
   auth: {},
   queryOptions: [],
   queryResults: new Map(),
-  mutationOptions: [],
+  mutations: [],
+  stateSeeds: [],
+  seedsConsumed: [],
+  setAddSelection: vi.fn(),
+  setConfirmation: vi.fn(),
   api: {
     getScanJobs: vi.fn(),
     getScanJob: vi.fn(),
@@ -94,12 +101,39 @@ vi.mock('@tanstack/react-query', () => ({
     queryOptions.push(options)
     return queryResults.get(String(options.queryKey)) || { data: undefined, isLoading: false, isError: false }
   },
+  // The mutate spy is kept next to the options that built it, so a test can
+  // both fire a mutation and run the callbacks the component gave it.
   useMutation: (options) => {
-    mutationOptions.push(options)
-    return { mutate: vi.fn(), isPending: false }
+    const mutate = vi.fn()
+    mutations.push({ ...options, mutate })
+    return { mutate, isPending: false }
   },
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }))
+
+// Some of what this page does is only reachable once a piece of its state is
+// set: the add dialog mounts on a chosen candidate, and the destructive
+// confirmation opens on a pending action. Nothing can click here, so the state
+// is seeded instead. JobDetail is the only component in this tree that
+// initialises state to null before its children render, and it does so twice -
+// the chosen candidate first, then the pending destructive action - so seeds are
+// handed only to null initialisers, in that order. The retry clock, the item
+// photo and the zoom state keep their real implementations, and a seeded test
+// asserts which seeds were taken, so a reordering fails loudly instead of
+// quietly moving a seed onto different state.
+vi.mock('react', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    useState: (initial) => {
+      const real = actual.useState(initial)
+      if (initial !== null || stateSeeds.length === 0) return real
+      const seed = stateSeeds.shift()
+      seedsConsumed.push(seed.name)
+      return [seed.value, seed.setter]
+    },
+  }
+})
 
 vi.mock('../api/client', () => api)
 
@@ -142,6 +176,17 @@ const jobDetail = {
   }],
 }
 
+// A second unresolved item: with one item every "the last item was resolved"
+// path is also the "some item was resolved" path, and a page that rendered only
+// its first item would look complete.
+const twoItemJob = {
+  ...jobDetail,
+  items: [
+    jobDetail.items[0],
+    { id: 32, position: 1, status: 'done', matches: [], has_image: true, recognized: { name: 'Staryu', language: 'de' } },
+  ],
+}
+
 const candidate = {
   id: 'base1-64_en',
   name: 'Starmie',
@@ -149,6 +194,7 @@ const candidate = {
   lang: 'en',
   number: '64',
   set_abbreviation: 'base1',
+  tcg_card_id: 'base1-64',
   variants_normal: true,
 }
 
@@ -171,16 +217,56 @@ const clickButton = (label) => {
   button.props.onClick({ stopPropagation: () => {} })
 }
 
+const elementsOf = (type) => rendered.filter(entry => entry.type === type)
+
+const onlyElementOf = (type, what) => {
+  const found = elementsOf(type)
+  expect(found, `expected exactly one ${what}`).toHaveLength(1)
+  return found[0]
+}
+
 const renderScanQueue = () => {
   rendered.length = 0
   portalTrees.length = 0
   portalTargets.length = 0
   queryOptions.length = 0
-  mutationOptions.length = 0
+  mutations.length = 0
   return renderToStaticMarkup(createElement(ScanQueue))
 }
 
 const optionsForKey = (key) => queryOptions.find(options => String(options.queryKey) === key)
+
+// Mutations are found by the endpoint their own mutationFn reaches rather than
+// by the order they were declared in, so moving one cannot silently point a test
+// at another. The probe runs the real mutationFn, so the API spies are cleared
+// afterwards and the caller starts from a clean slate.
+const mutationCalling = (apiFn, probe) => {
+  const match = mutations.find(mutation => {
+    apiFn.mockClear()
+    try {
+      mutation.mutationFn(probe)
+    } catch {
+      return false
+    }
+    return apiFn.mock.calls.length > 0
+  })
+  Object.values(api).forEach(spy => spy.mockClear())
+  expect(match, 'no mutation reached that endpoint').toBeDefined()
+  return match
+}
+
+const seedDetailState = ({ addSelection = null, confirmation = null } = {}) => {
+  stateSeeds.length = 0
+  seedsConsumed.length = 0
+  stateSeeds.push(
+    { name: 'addSelection', value: addSelection, setter: setAddSelection },
+    { name: 'confirmation', value: confirmation, setter: setConfirmation },
+  )
+}
+
+const expectSeedsWentWhereIntended = () => {
+  expect(seedsConsumed, 'JobDetail no longer takes its two null states first').toEqual(['addSelection', 'confirmation'])
+}
 
 const showList = (jobs = [activeJob]) => {
   route.params = {}
@@ -188,10 +274,16 @@ const showList = (jobs = [activeJob]) => {
   queryResults.set('scan-jobs', { data: { jobs }, isLoading: false, isError: false })
 }
 
-const showDetail = ({ fromScanQueue = false } = {}) => {
+const showDetail = ({ fromScanQueue = false, job = jobDetail } = {}) => {
   route.params = { jobId: '7' }
   route.location = { pathname: '/scans/7', state: fromScanQueue ? { fromScanQueue: true } : null }
-  queryResults.set('scan-job,7', { data: jobDetail, isLoading: false, isError: false })
+  queryResults.set('scan-job,7', { data: job, isLoading: false, isError: false })
+}
+
+const showUnloadableDetail = ({ fromScanQueue = false, isLoading = false, isError = false } = {}) => {
+  route.params = { jobId: '7' }
+  route.location = { pathname: '/scans/7', state: fromScanQueue ? { fromScanQueue: true } : null }
+  queryResults.set('scan-job,7', { data: undefined, isLoading, isError })
 }
 
 let documentStub
@@ -199,6 +291,11 @@ let documentStub
 beforeEach(() => {
   navigate.mockReset()
   queryResults.clear()
+  stateSeeds.length = 0
+  seedsConsumed.length = 0
+  setAddSelection.mockReset()
+  setConfirmation.mockReset()
+  Object.values(api).forEach(spy => spy.mockReset())
   Object.assign(settings, {
     t: key => key,
     exchangeRate: 1,
@@ -337,6 +434,246 @@ describe('leaving the queue', () => {
     clickButton('scanner.goScan')
 
     expect(navigate).toHaveBeenCalledWith('/search')
+  })
+})
+
+describe('a job that cannot be shown', () => {
+  it('keeps the way back to the queue while the job is still loading', () => {
+    showUnloadableDetail({ isLoading: true, fromScanQueue: true })
+
+    renderScanQueue()
+    clickButton('scanner.backToScans')
+
+    expect(navigate).toHaveBeenCalledWith(-1)
+  })
+
+  it('keeps the way back to the queue when the job is gone', () => {
+    // A job is deleted server-side at its expiry (purge_expired_scan_jobs), so
+    // GET /recognize/jobs/{id} answers 404 and this is the state a user returning
+    // to a bookmarked or historical /scans/:jobId lands in. Before, the outer
+    // modal's X, backdrop and Escape were the way out of it; the page has to
+    // carry its own.
+    showUnloadableDetail({ isError: true })
+
+    const markup = renderScanQueue()
+    expect(markup).toContain('scanner.jobLoadFailed')
+    clickButton('scanner.backToScans')
+
+    expect(navigate).toHaveBeenCalledWith('/scans', { replace: true })
+  })
+
+  it('offers nothing to discard until the job is known', () => {
+    // The control for the two above: the header is not simply pasted onto every
+    // state. Discarding a job that failed to load would delete by id on a page
+    // that cannot say what it is deleting.
+    const discardControls = () => rendered.filter(entry => (
+      entry.type === 'button' && entry.props?.['aria-label'] === 'scanner.discardJob'
+    ))
+
+    showUnloadableDetail({ isError: true })
+    renderScanQueue()
+    expect(discardControls()).toHaveLength(0)
+
+    showUnloadableDetail({ isLoading: true })
+    renderScanQueue()
+    expect(discardControls()).toHaveLength(0)
+
+    showDetail()
+    renderScanQueue()
+    expect(discardControls()).toHaveLength(1)
+  })
+})
+
+describe('the page heading', () => {
+  const topLevelHeadings = markup => markup.match(/<h1[\s>]/g) || []
+
+  it('titles the queue with exactly one first-level heading', () => {
+    showList()
+
+    const markup = renderScanQueue()
+
+    expect(topLevelHeadings(markup)).toHaveLength(1)
+    expect(markup).toContain('scanner.queueTitle')
+  })
+
+  it('titles a job the same way, in every state the job can be in', () => {
+    // Heading navigation is how a screen-reader user finds where they are, and
+    // the states with no job content are the ones that need it most.
+    showDetail()
+    expect(topLevelHeadings(renderScanQueue())).toHaveLength(1)
+
+    showUnloadableDetail({ isLoading: true })
+    expect(topLevelHeadings(renderScanQueue())).toHaveLength(1)
+
+    showUnloadableDetail({ isError: true })
+    const markup = renderScanQueue()
+    expect(topLevelHeadings(markup)).toHaveLength(1)
+    expect(markup).toContain('scanner.queueTitle')
+  })
+})
+
+describe('reviewing the items on a job', () => {
+  it('renders a review panel for every unresolved item, in order', () => {
+    showDetail({ job: twoItemJob })
+
+    renderScanQueue()
+
+    const panels = elementsOf(ScanItemPanel)
+    expect(panels).toHaveLength(twoItemJob.items.length)
+    expect(panels.map(panel => panel.props.item)).toEqual(twoItemJob.items)
+    expect(panels.every(panel => panel.props.jobId === twoItemJob.id)).toBe(true)
+  })
+
+  it('opens the add dialog on the candidate a panel reports', () => {
+    showDetail()
+    seedDetailState()
+
+    renderScanQueue()
+    expectSeedsWentWhereIntended()
+    const panel = onlyElementOf(ScanItemPanel, 'review panel')
+    panel.props.onAdd(jobDetail.items[0], candidate)
+
+    expect(setAddSelection).toHaveBeenCalledWith({ item: jobDetail.items[0], match: candidate })
+  })
+
+  it('mounts the add dialog on the chosen candidate and resolves the scan with it', () => {
+    // The add dialog is where the card actually enters the collection; the scan
+    // has to be resolved against the same card, or the item stays in the inbox
+    // and the user adds it twice.
+    const item = jobDetail.items[0]
+    showDetail()
+    seedDetailState({ addSelection: { item, match: candidate } })
+
+    renderScanQueue()
+    expectSeedsWentWhereIntended()
+    const dialog = onlyElementOf(ScanAddModal, 'add dialog')
+
+    expect(dialog.props.match).toBe(candidate)
+    // The scan's own language beats the candidate's, which is 'en' here.
+    expect(dialog.props.defaultLang).toBe('de')
+
+    dialog.props.onAdded()
+    const resolve = mutationCalling(api.resolveScanJobItem, { item: { id: 0 } })
+    expect(resolve.mutate).toHaveBeenCalledWith({ item, cardId: candidate.tcg_card_id })
+
+    resolve.mutationFn({ item, cardId: candidate.tcg_card_id })
+    expect(api.resolveScanJobItem).toHaveBeenCalledWith(7, item.id, candidate.tcg_card_id)
+
+    dialog.props.onClose()
+    expect(setAddSelection).toHaveBeenCalledWith(null)
+  })
+
+  it('mounts no add dialog until a candidate has been chosen', () => {
+    // The control for the test above: the dialog is mounted on the selection,
+    // not on the page.
+    showDetail()
+
+    renderScanQueue()
+
+    expect(elementsOf(ScanAddModal)).toHaveLength(0)
+  })
+})
+
+describe('confirming a destructive action', () => {
+  it('asks before discarding the job, and discards it on confirmation', () => {
+    showDetail()
+    seedDetailState({ confirmation: { type: 'discard' } })
+
+    renderScanQueue()
+    expectSeedsWentWhereIntended()
+    const dialog = onlyElementOf(ConfirmDialog, 'confirmation')
+
+    expect(dialog.props.isOpen).toBe(true)
+    expect(dialog.props.destructive).toBe(true)
+    expect(dialog.props.title).toBe('scanner.discardJob')
+    expect(dialog.props.message).toBe('scanner.discardJobConfirm')
+
+    dialog.props.onConfirm()
+
+    expect(mutationCalling(api.deleteScanJob, undefined).mutate).toHaveBeenCalledTimes(1)
+  })
+
+  it('asks before dismissing a single scan, and resolves it on confirmation', () => {
+    const item = jobDetail.items[0]
+    showDetail()
+    seedDetailState({ confirmation: { type: 'dismiss', item } })
+
+    renderScanQueue()
+    const dialog = onlyElementOf(ConfirmDialog, 'confirmation')
+
+    expect(dialog.props.isOpen).toBe(true)
+    expect(dialog.props.title).toBe('scanner.dismissScan')
+
+    dialog.props.onConfirm()
+
+    // No card id: dismissing deletes the photo and leaves the collection alone.
+    expect(mutationCalling(api.resolveScanJobItem, { item: { id: 0 } }).mutate).toHaveBeenCalledWith({ item })
+    expect(mutationCalling(api.deleteScanJob, undefined).mutate).not.toHaveBeenCalled()
+  })
+
+  it('leaves the confirmation closed, and confirming a nothing does nothing', () => {
+    // The control for both tests above: the dialog is driven by the pending
+    // action rather than standing open, and neither destructive path can fire
+    // without one.
+    showDetail()
+
+    renderScanQueue()
+    const dialog = onlyElementOf(ConfirmDialog, 'confirmation')
+    expect(dialog.props.isOpen).toBe(false)
+
+    dialog.props.onConfirm()
+
+    expect(mutationCalling(api.deleteScanJob, undefined).mutate).not.toHaveBeenCalled()
+    expect(mutationCalling(api.resolveScanJobItem, { item: { id: 0 } }).mutate).not.toHaveBeenCalled()
+  })
+})
+
+describe('leaving a job that no longer exists', () => {
+  const discardSucceeds = () => mutationCalling(api.deleteScanJob, undefined).onSuccess()
+
+  const resolveSucceeds = (item) => mutationCalling(api.resolveScanJobItem, { item: { id: 0 } })
+    .onSuccess(undefined, { item })
+
+  it('pops back to the queue entry the job was opened from once it is discarded', () => {
+    showDetail({ fromScanQueue: true })
+    renderScanQueue()
+
+    discardSucceeds()
+
+    expect(navigate).toHaveBeenCalledWith(-1)
+    expect(navigate).not.toHaveBeenCalledWith('/scans', { replace: true })
+  })
+
+  it('replaces a job the scanner pushed to with the queue instead', () => {
+    // The control for the pop: without the marker the queue is not behind us,
+    // and popping would leave the app or land on the scanner.
+    showDetail()
+    renderScanQueue()
+
+    discardSucceeds()
+
+    expect(navigate).toHaveBeenCalledWith('/scans', { replace: true })
+    expect(navigate).not.toHaveBeenCalledWith(-1)
+  })
+
+  it('leaves the same way when the last item on the job is resolved', () => {
+    showDetail({ fromScanQueue: true })
+    renderScanQueue()
+
+    resolveSucceeds(jobDetail.items[0])
+
+    expect(navigate).toHaveBeenCalledWith(-1)
+  })
+
+  it('stays on the job while other items still need review', () => {
+    // The control for the auto-exit: resolving one of several must not throw the
+    // user out of a job they are halfway through.
+    showDetail({ job: twoItemJob, fromScanQueue: true })
+    renderScanQueue()
+
+    resolveSucceeds(twoItemJob.items[0])
+
+    expect(navigate).not.toHaveBeenCalled()
   })
 })
 
