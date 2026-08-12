@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ScanAddModal from './ScanAddModal'
 
@@ -8,19 +8,38 @@ import ScanAddModal from './ScanAddModal'
 // environment does not have. Capturing the portal's tree instead of mounting it
 // keeps the markup renderable and, more importantly, hands the test the real
 // click handlers the component built during that render.
-const { portalTrees, addToCollection, settings } = vi.hoisted(() => ({
+const {
+  portalTrees, portalContainers, addToCollection, settings,
+  invalidateCardState, invalidateTcgdexFilterLanguages, parseMoneyInputValue, toastMock,
+} = vi.hoisted(() => ({
   portalTrees: [],
+  portalContainers: [],
   addToCollection: vi.fn(),
   settings: {},
+  invalidateCardState: vi.fn(),
+  invalidateTcgdexFilterLanguages: vi.fn(),
+  parseMoneyInputValue: vi.fn(),
+  toastMock: { success: vi.fn(), error: vi.fn() },
 }))
 
 vi.mock('react-dom', async (importOriginal) => ({
   ...(await importOriginal()),
-  createPortal: (node) => {
+  // The container is captured as well as the tree: createPortal(node, null)
+  // throws in a browser, and a test that ignores the second argument cannot
+  // tell that the target was lost while moving the component between modules.
+  createPortal: (node, container) => {
     portalTrees.push(node)
+    portalContainers.push(container)
     return node
   },
 }))
+
+vi.mock('../utils/queryInvalidation', () => ({
+  invalidateCardState,
+  invalidateTcgdexFilterLanguages,
+}))
+
+vi.mock('../utils/moneyInput', () => ({ parseMoneyInputValue }))
 
 vi.mock('../api/client', () => ({ addToCollection }))
 
@@ -28,9 +47,7 @@ vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }))
 
-vi.mock('react-hot-toast', () => ({
-  default: { success: vi.fn(), error: vi.fn() },
-}))
+vi.mock('react-hot-toast', () => ({ default: toastMock }))
 
 vi.mock('../contexts/SettingsContext', () => ({
   useSettings: () => settings,
@@ -63,6 +80,8 @@ function* walk(node) {
 const findSubmitButton = tree => [...walk(tree)]
   .find(node => node.type === 'button' && typeof node.props?.disabled === 'boolean')
 
+let documentStub
+
 const render = (props = {}) => renderToStaticMarkup(
   createElement(ScanAddModal, { match, defaultLang: 'de', onClose: () => {}, ...props })
 )
@@ -77,7 +96,21 @@ beforeEach(() => {
     exchangeRateReady: true,
     currencySymbol: '€',
   })
-  vi.stubGlobal('document', { body: {} })
+  invalidateCardState.mockReset()
+  invalidateTcgdexFilterLanguages.mockReset()
+  parseMoneyInputValue.mockReset()
+  parseMoneyInputValue.mockReturnValue(undefined)
+  toastMock.success.mockReset()
+  toastMock.error.mockReset()
+  portalContainers.length = 0
+  documentStub = { body: {} }
+  vi.stubGlobal('document', documentStub)
+})
+
+// Stated rather than inherited: without this the stub survives the file, and a
+// future non-isolated run would hand other node tests a document with a body.
+afterEach(() => {
+  vi.unstubAllGlobals()
 })
 
 describe('ScanAddModal', () => {
@@ -132,5 +165,82 @@ describe('ScanAddModal', () => {
     expect(submit.props.disabled).toBe(true)
     await submit.props.onClick()
     expect(addToCollection).not.toHaveBeenCalled()
+  })
+  it('hands the scan queue its completion callback, then closes', async () => {
+    // ScanQueue resolves the review item from onAdded. Losing it adds the card
+    // to the collection while the scan stays unresolved forever, so the user
+    // re-adds it and duplicates. onAdded must fire before onClose, or the
+    // parent unmounts the modal before its own callback runs.
+    const calls = []
+    render({ onAdded: () => calls.push('onAdded'), onClose: () => calls.push('onClose') })
+
+    await findSubmitButton(portalTrees[0]).props.onClick()
+
+    expect(calls).toEqual(['onAdded', 'onClose'])
+  })
+
+  it('refreshes the caches the new card invalidates', async () => {
+    render()
+
+    await findSubmitButton(portalTrees[0]).props.onClick()
+
+    expect(invalidateCardState).toHaveBeenCalledTimes(1)
+    expect(invalidateTcgdexFilterLanguages).toHaveBeenCalledTimes(1)
+  })
+
+  it('portals into the document body', () => {
+    // createPortal(node, null) throws "Target container is not a DOM element".
+    render()
+
+    expect(portalContainers).toHaveLength(1)
+    expect(portalContainers[0]).toBe(documentStub.body)
+  })
+
+  it('stores the typed price through the money parser, converted at the current rate', async () => {
+    // The payload must carry the parser's result. Hardcoding undefined passes a
+    // test that only ever leaves the price box empty.
+    parseMoneyInputValue.mockReturnValue(12.34)
+    settings.exchangeRate = 0.86
+    render()
+
+    await findSubmitButton(portalTrees[0]).props.onClick()
+
+    expect(parseMoneyInputValue).toHaveBeenCalledWith('', 0.86)
+    expect(addToCollection).toHaveBeenCalledWith(expect.objectContaining({ purchase_price: 12.34 }))
+  })
+
+  it('defaults to a print the card actually has when there is no Normal', async () => {
+    // Both branches of getDefaultVariant return Normal for a normal-capable
+    // card, so only a holo-only fixture can tell the helper from a constant.
+    render({ match: { ...match, variants_normal: false, variants_holo: true } })
+
+    await findSubmitButton(portalTrees[0]).props.onClick()
+
+    expect(addToCollection).toHaveBeenCalledWith(expect.objectContaining({ variant: 'Holo' }))
+  })
+
+  it('every dismiss control closes the modal', () => {
+    const onClose = vi.fn()
+    render({ onClose })
+
+    const closers = [...walk(portalTrees[0])]
+      .filter(node => node.props?.onClick === onClose)
+
+    // Backdrop, corner X and footer X.
+    expect(closers).toHaveLength(3)
+  })
+
+  it('surfaces the API reason when the add fails, and does not close', async () => {
+    addToCollection.mockRejectedValue({ response: { data: { detail: 'Quantity limit reached' } } })
+    const onClose = vi.fn()
+    const onAdded = vi.fn()
+    render({ onClose, onAdded })
+
+    await findSubmitButton(portalTrees[0]).props.onClick()
+
+    expect(toastMock.error).toHaveBeenCalledWith('Quantity limit reached')
+    expect(onAdded).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(invalidateCardState).not.toHaveBeenCalled()
   })
 })
