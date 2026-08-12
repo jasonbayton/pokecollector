@@ -1020,19 +1020,25 @@ async def match_card_info(
         {key: value for key, value in card.items() if key != "_number_extra"}
         for card in retain_ranked_candidates(candidates)
     ]
+    # candidates[0] is the matcher's pick: the ranked winner, or whichever
+    # candidate pHash or visual verification promoted to the front. Naming it
+    # here rather than only inside the trace is what lets a caller persist the
+    # decision instead of re-deriving it from list order, which stops meaning
+    # "chosen" the moment the matcher is not confident.
+    selected = (
+        str(candidates[0].get("tcg_card_id") or "") or None
+        if confident and candidates
+        else None
+    )
     if trace:
-        selected = (
-            str(candidates[0].get("tcg_card_id") or "")
-            if confident and candidates
-            else None
-        )
-        trace.record_decision(decision or "undecided", selected or None)
+        trace.record_decision(decision or "undecided", selected)
     return {
         "recognized": card_info,
         "matches": public_matches,
         "_number_match_count": number_match_count,
         "_identity_confident": confident,
         "_identity_decision": decision,
+        "_identity_suggested_match_id": selected,
     }
 
 

@@ -307,6 +307,62 @@ class PhashMatchingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["_identity_decision"], "phash")
         self.assertEqual(result["matches"][0]["id"], "near")
 
+    async def test_matcher_names_the_candidate_it_chose(self):
+        """The queue can only persist a suggestion the matcher states outright.
+
+        Reading it back off the top of the list would be a different claim: the
+        list is ranked whether or not anything was decided.
+        """
+        photo = self._image(7)
+        # tcg_card_id deliberately differs from the internal per-language id:
+        # the review UI and the resolve endpoint both key on tcg_card_id, so
+        # naming the wrong one would badge nothing at all.
+        candidates = [
+            {"id": "far", "tcg_card_id": "base1-1", "number": None, "image": "far.webp"},
+            {"id": "near", "tcg_card_id": "base1-2", "number": None, "image": "near.webp"},
+        ]
+        with patch(
+            "api.recognize._search_and_rank_candidates",
+            new=AsyncMock(return_value=(candidates, 0)),
+        ), patch(
+            "api.recognize._download_candidate_images",
+            new=AsyncMock(return_value={"far": self._image(99), "near": photo}),
+        ):
+            result = await match_card_info(
+                object(),
+                {"name": "Pikachu"},
+                photo_bytes=photo,
+            )
+
+        self.assertTrue(result["_identity_confident"])
+        self.assertEqual(result["_identity_suggested_match_id"], "base1-2")
+
+    async def test_matcher_names_no_candidate_when_it_is_not_confident(self):
+        """The negative control: an undecided match suggests nothing at all."""
+        photo = self._image(7)
+        candidates = [
+            {"id": "far", "tcg_card_id": "base1-1", "number": "3", "image": "far.webp"},
+            {"id": "near", "tcg_card_id": "base1-2", "number": "2", "image": "near.webp"},
+        ]
+        with patch(
+            "api.recognize._search_and_rank_candidates",
+            new=AsyncMock(return_value=(candidates, 0)),
+        ), patch(
+            "api.recognize._download_candidate_images",
+            new=AsyncMock(return_value={"far": self._image(99), "near": photo}),
+        ):
+            result = await match_card_info(
+                object(),
+                {"name": "Pikachu", "number_local": "1"},
+                photo_bytes=photo,
+            )
+
+        self.assertFalse(result["_identity_confident"])
+        self.assertIsNone(result["_identity_suggested_match_id"])
+        # The candidates are still returned and still ranked; only the claim
+        # about which one is right is withheld.
+        self.assertEqual(result["matches"][0]["tcg_card_id"], "base1-1")
+
     async def test_phash_does_not_override_known_metadata_contradiction(self):
         photo = self._image(7)
         trace = Mock()

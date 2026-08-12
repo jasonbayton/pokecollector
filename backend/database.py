@@ -494,6 +494,9 @@ def _run_migrations(conn):
             lease_expires_at TIMESTAMP,
             recognized JSON,
             matches JSON,
+            identity_confident BOOLEAN,
+            identity_decision VARCHAR,
+            suggested_match_id VARCHAR,
             error TEXT,
             created_at TIMESTAMP NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -525,6 +528,16 @@ def _run_migrations(conn):
         "ALTER TABLE gemini_quota_state ADD COLUMN IF NOT EXISTS consecutive_daily_failures INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE scan_job_items ADD COLUMN IF NOT EXISTS batch_mode BOOLEAN NOT NULL DEFAULT FALSE",
         "ALTER TABLE scan_job_items ADD COLUMN IF NOT EXISTS retry_reason VARCHAR",
+        # v61: persist the matcher's verdict the queue used to discard. The
+        # CREATE TABLE above only runs on an install that never had the table,
+        # and create_all skips a table that already exists, so an upgraded
+        # database gets these columns here and nowhere else. Left NULL with no
+        # backfill and no NOT NULL: a row scanned before this feature has no
+        # recorded verdict, and inventing FALSE for it would claim the matcher
+        # was unsure when in truth nothing was ever asked.
+        "ALTER TABLE scan_job_items ADD COLUMN IF NOT EXISTS identity_confident BOOLEAN",
+        "ALTER TABLE scan_job_items ADD COLUMN IF NOT EXISTS identity_decision VARCHAR",
+        "ALTER TABLE scan_job_items ADD COLUMN IF NOT EXISTS suggested_match_id VARCHAR",
         "CREATE INDEX IF NOT EXISTS ix_scan_jobs_user_id ON scan_jobs(user_id)",
         "CREATE INDEX IF NOT EXISTS ix_scan_jobs_status ON scan_jobs(status)",
         "CREATE INDEX IF NOT EXISTS ix_scan_jobs_expires_at ON scan_jobs(expires_at)",

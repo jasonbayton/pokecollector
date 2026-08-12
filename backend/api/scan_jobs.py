@@ -72,6 +72,12 @@ def _item_payload(item: ScanJobItem) -> dict:
         "transient_failures": item.transient_failures,
         "recognized": item.recognized,
         "matches": item.matches,
+        # Null means no verdict was ever recorded for this scan, which is not
+        # the same as the matcher having been unsure. The review UI needs the
+        # difference to stay honest about what it does and does not know.
+        "identity_confident": item.identity_confident,
+        "identity_decision": item.identity_decision,
+        "suggested_match_id": item.suggested_match_id,
         "error": item.error,
         "has_image": bool(item.image_path),
         "next_attempt_at": (

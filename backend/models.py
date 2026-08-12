@@ -645,6 +645,14 @@ class ScanJobItem(Base):
     lease_expires_at = Column(DateTime, nullable=True, index=True)
     recognized = Column(JSON)
     matches = Column(JSON)
+    # The matcher's own verdict, kept beside the candidates it ranked. All three
+    # are nullable on purpose: rows written before this existed must read as
+    # "unknown", never as "not confident" and never as confident. Only the
+    # review UI's Suggested badge depends on them, and it must stay silent
+    # rather than guess from rank order.
+    identity_confident = Column(Boolean, nullable=True)
+    identity_decision = Column(String, nullable=True)
+    suggested_match_id = Column(String, nullable=True)
     error = Column(Text)
     created_at = Column(DateTime, default=func.now(), nullable=False)
     updated_at = Column(DateTime, default=func.now(), nullable=False)

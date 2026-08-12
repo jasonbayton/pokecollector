@@ -104,6 +104,142 @@ class ScanQueueTests(unittest.TestCase):
         second_item = self.db.get(ScanJobItem, second.item_id)
         self.assertEqual(second_item.user_id, self.users[1].id)
 
+    def _matcher_result(self, *, confident, decision=None, suggested=None, matches=None):
+        """A result shaped exactly like api.recognize.match_card_info returns."""
+        return {
+            "recognized": {"name": "Pikachu", "number": "58"},
+            "matches": matches if matches is not None else [
+                {"id": "base1-58_en", "tcg_card_id": "base1-58", "name": "Pikachu"},
+                {"id": "base1-59_en", "tcg_card_id": "base1-59", "name": "Pikachu"},
+            ],
+            "_number_match_count": 1,
+            "_identity_confident": confident,
+            "_identity_decision": decision,
+            "_identity_suggested_match_id": suggested,
+        }
+
+    def test_confident_individual_scan_persists_the_matchers_verdict(self):
+        self._job(self.users[0])
+        claim = claim_next_scan_item(self.db)
+
+        self.assertTrue(complete_claim(
+            self.db,
+            claim,
+            # Deliberately not the first-ranked candidate: a suggestion read
+            # from rank order instead of from the matcher would record
+            # base1-58 here and the assertion below would catch it.
+            self._matcher_result(
+                confident=True, decision="number_unique", suggested="base1-59"
+            ),
+        ))
+
+        item = self.db.get(ScanJobItem, claim.item_id)
+        self.assertEqual(item.status, "done")
+        self.assertIs(item.identity_confident, True)
+        self.assertEqual(item.identity_decision, "number_unique")
+        self.assertEqual(item.suggested_match_id, "base1-59")
+
+    def test_inconclusive_individual_scan_persists_no_suggestion(self):
+        """The negative control: unsure must be recorded, not left unknown."""
+        self._job(self.users[0])
+        claim = claim_next_scan_item(self.db)
+
+        self.assertTrue(complete_claim(
+            self.db,
+            claim,
+            self._matcher_result(confident=False),
+        ))
+
+        item = self.db.get(ScanJobItem, claim.item_id)
+        self.assertEqual(item.status, "done")
+        self.assertIs(item.identity_confident, False)
+        self.assertIsNone(item.identity_decision)
+        self.assertIsNone(item.suggested_match_id)
+        # The candidates still arrive; only the claim about them is withheld.
+        self.assertEqual(len(item.matches), 2)
+
+    def test_an_unconfident_result_cannot_smuggle_a_suggested_id_through(self):
+        """A stray id without confidence must never reach the Suggested badge."""
+        self._job(self.users[0])
+        claim = claim_next_scan_item(self.db)
+
+        complete_claim(
+            self.db,
+            claim,
+            self._matcher_result(confident=False, suggested="base1-59"),
+        )
+
+        item = self.db.get(ScanJobItem, claim.item_id)
+        self.assertIs(item.identity_confident, False)
+        self.assertIsNone(item.suggested_match_id)
+
+    def test_composite_siblings_persist_and_clear_their_own_verdicts(self):
+        self._job(self.users[0], positions=(0, 1))
+        items = self.db.query(ScanJobItem).order_by(ScanJobItem.position).all()
+        for item in items:
+            item.batch_mode = True
+            # A verdict left over from an earlier pass over the same photo. If
+            # the fallback branch does not clear it, position 1 goes back to
+            # pending still advertising a match it no longer has.
+            item.identity_confident = True
+            item.identity_decision = "stale_decision"
+            item.suggested_match_id = "stale-card"
+        self.db.commit()
+        claim = claim_next_scan_item(self.db)
+        self.assertTrue(claim.composite)
+
+        self.assertTrue(complete_claim_group(
+            self.db,
+            claim,
+            [
+                self._matcher_result(
+                    confident=True, decision="phash", suggested="base1-59"
+                ),
+                None,
+            ],
+        ))
+
+        self.db.expire_all()
+        items = self.db.query(ScanJobItem).order_by(ScanJobItem.position).all()
+        self.assertEqual(items[0].status, "done")
+        self.assertIs(items[0].identity_confident, True)
+        self.assertEqual(items[0].identity_decision, "phash")
+        self.assertEqual(items[0].suggested_match_id, "base1-59")
+        # The negative control, in the same run: the unclear sibling.
+        self.assertEqual(items[1].status, "pending")
+        self.assertIsNone(items[1].identity_confident)
+        self.assertIsNone(items[1].identity_decision)
+        self.assertIsNone(items[1].suggested_match_id)
+
+    def test_retry_clears_the_previous_verdict_and_leaves_siblings_alone(self):
+        job = self._job(self.users[0], positions=(0, 1))
+        items = self.db.query(ScanJobItem).order_by(ScanJobItem.position).all()
+        job_dir = scan_storage.scan_upload_root() / str(job.id)
+        job_dir.mkdir()
+        for item in items:
+            (job_dir / f"{item.position}.jpg").write_bytes(b"jpeg")
+            item.status = "done"
+            item.recognized = {"name": "Wrong"}
+            item.matches = [{"id": "base1-58_en", "tcg_card_id": "base1-58"}]
+            item.identity_confident = True
+            item.identity_decision = "number_unique"
+            item.suggested_match_id = "base1-58"
+        self.db.commit()
+
+        retry_scan_item(self.db, items[0])
+
+        self.db.expire_all()
+        items = self.db.query(ScanJobItem).order_by(ScanJobItem.position).all()
+        self.assertEqual(items[0].status, "pending")
+        self.assertIsNone(items[0].identity_confident)
+        self.assertIsNone(items[0].identity_decision)
+        self.assertIsNone(items[0].suggested_match_id)
+        # The negative control: retrying one photo must not disturb the other.
+        self.assertEqual(items[1].status, "done")
+        self.assertIs(items[1].identity_confident, True)
+        self.assertEqual(items[1].identity_decision, "number_unique")
+        self.assertEqual(items[1].suggested_match_id, "base1-58")
+
     def test_batch_claim_groups_four_photos_and_keeps_forced_single_out(self):
         job = self._job(self.users[0], positions=(0, 1, 2, 3, 4))
         items = self.db.query(ScanJobItem).order_by(ScanJobItem.position).all()
@@ -431,6 +567,8 @@ class CompositeProcessorTests(unittest.IsolatedAsyncioTestCase):
                 "matches": [{"id": "card-25"}],
                 "_number_match_count": 1,
                 "_identity_confident": True,
+                "_identity_decision": "number_unique",
+                "_identity_suggested_match_id": "card-25",
             },
             {
                 "recognized": composite_info[2],
@@ -464,6 +602,10 @@ class CompositeProcessorTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(results[0]["matches"][0]["id"], "card-25")
+        # The verdict must survive the processor intact: complete_claim_group
+        # persists it straight off this dict.
+        self.assertEqual(results[0]["_identity_decision"], "number_unique")
+        self.assertEqual(results[0]["_identity_suggested_match_id"], "card-25")
         self.assertEqual(results[1:3], [None, None])
         self.assertEqual(results[3]["matches"][0]["id"], "card-jigglypuff")
         self.assertEqual(matcher.await_count, 3)
