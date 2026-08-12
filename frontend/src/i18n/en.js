@@ -1270,6 +1270,7 @@ const en = {
     retryingInHours: 'Retrying in {hours}h {minutes}m',
     dailyQuotaRetry: 'Daily quota reached · {countdown}',
     dailyQuotaWaiting: 'Daily quota reached · Waiting to retry…',
+    opening: 'Opening scanner…',
     retryIndividually: 'Retry individually',
     scanIndividually: 'Scan individually',
     scanAllIndividually: 'Scan all individually',

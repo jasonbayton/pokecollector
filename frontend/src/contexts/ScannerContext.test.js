@@ -1,4 +1,4 @@
-import { createElement } from 'react'
+import { Suspense, createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -253,6 +253,18 @@ describe('ScannerProvider', () => {
     expect(await loadLazy(mount.type)).toBe(UnifiedCardScanner)
   })
 
+  it('shows immediate feedback while the lazily loaded scanner is still pending', () => {
+    panelSeed.value = { panel: 'scanner', scannerMounted: true }
+
+    const suspense = scannerProviderTree().find(node => (
+      node.type === Suspense && 'isOpen' in (node.props.children?.props || {})
+    ))
+
+    expect(suspense).toBeDefined()
+    expect(suspense.props.fallback).not.toBeNull()
+    expect(renderToStaticMarkup(suspense.props.fallback)).toContain('scanner.opening')
+  })
+
   it('keeps the scanner mounted, closed, once it has been opened', async () => {
     // It bumps a generation counter on open and close so a batch that finishes
     // uploading after the user walked away cannot drag them to the new job.
@@ -288,6 +300,16 @@ describe('ScannerProvider', () => {
     expect(mount.props.autoAddCollection).toBe(true)
     expect(typeof mount.props.onClose).toBe('function')
     expect(await loadLazy(mount.type)).toBe(CustomCardModal)
+  })
+
+  it('invalidates custom-card search results when the global form reports a creation', () => {
+    panelSeed.value = { panel: 'custom', scannerMounted: false }
+
+    const mount = customCardMount(scannerProviderTree())
+
+    mount.props.onCreated({ id: 'manual-1' })
+
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['custom-cards'] })
   })
 
   it('cannot be mounted outside the router it navigates with', () => {

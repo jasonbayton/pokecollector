@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { getScanJobs } from '../api/client'
+import { useSettings } from './SettingsContext'
 import {
   SCAN_JOBS_QUERY_KEY,
   hasActiveScanJobs,
@@ -23,6 +24,22 @@ const CustomCardModal = lazy(() => import('../components/CardItem').then(module 
 const UnifiedCardScanner = lazy(() => import('../components/UnifiedCardScanner'))
 
 const ScannerContext = createContext(null)
+
+function ScannerLoadingFallback() {
+  const { t } = useSettings()
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6 md:bg-black/80 md:backdrop-blur-sm"
+    >
+      <div className="flex items-center gap-3 rounded-2xl border border-border bg-bg-surface px-5 py-4 text-sm font-medium text-text-primary shadow-2xl">
+        <span className="h-5 w-5 animate-spin rounded-full border-2 border-brand-red border-t-transparent" aria-hidden="true" />
+        {t('scanner.opening')}
+      </div>
+    </div>
+  )
+}
 
 export const QUICK_ADD_SCAN = 'scan'
 export const QUICK_ADD_SEARCH = 'search'
@@ -135,7 +152,7 @@ export function ScannerProvider({ children }) {
           guard away. Before the first open there is nothing to guard, and not
           mounting keeps its chunk off every page that never scans. */}
       {(scannerMounted || panel === 'scanner') && (
-        <Suspense fallback={null}>
+        <Suspense fallback={<ScannerLoadingFallback />}>
           <UnifiedCardScanner isOpen={panel === 'scanner'} onClose={closeScanner} />
         </Suspense>
       )}
