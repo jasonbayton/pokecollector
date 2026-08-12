@@ -20,6 +20,7 @@ from services.scan_storage import (
     delete_scan_image,
     resolve_scan_path,
 )
+from services.scan_bulk_add import confident_addable_count
 
 logger = logging.getLogger(__name__)
 
@@ -768,6 +769,9 @@ def job_progress(db: Session, job: ScanJob) -> dict:
         "processed": counts["done"] + counts["failed"],
         "active": active,
         "attention": attention,
+        # The client must not guess from a rank or a null-era scan row. This is
+        # the same full eligibility predicate the atomic bulk action uses.
+        "confident_addable": confident_addable_count(items),
         "failed_attention": failed_attention,
         "next_retry_at": (
             next_retry_item.next_attempt_at.isoformat() if next_retry_item else None

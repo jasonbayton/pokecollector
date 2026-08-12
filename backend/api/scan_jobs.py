@@ -19,6 +19,10 @@ from services.scan_queue import (
     resolve_scan_item,
     retry_scan_item,
 )
+from services.scan_bulk_add import (
+    add_all_confident_scan_items,
+    candidate_ids_to_prepare,
+)
 from services.scan_storage import (
     ScanUploadError,
     create_scan_job,
@@ -217,6 +221,45 @@ def resolve_scan_job_item(
 
         record_ground_truth(current_user.id, job_id, item_id, card_id)
     return _item_payload(resolve_scan_item(db, item))
+
+
+@router.post("/recognize/jobs/{job_id}/add-all-confident")
+def add_all_confident_scan_job_items(
+    job_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Atomically file this job's confidence-backed scan candidates.
+
+    ``ensure_card_exists`` may fetch from the catalogue and commit.  It must run
+    before the job's PostgreSQL row lock so an upstream delay never blocks scan
+    review or a duplicate request.  The locked write path validates candidates
+    again, so this preparation read cannot authorize a stale suggestion.
+    """
+    job = _get_own_job(db, job_id, current_user)
+    items = (
+        db.query(ScanJobItem)
+        .filter(ScanJobItem.job_id == job.id)
+        .order_by(ScanJobItem.position.asc())
+        .all()
+    )
+
+    from api.collection import ensure_card_exists
+
+    prepared_card_ids: set[str] = set()
+    for card_id in candidate_ids_to_prepare(items):
+        card = ensure_card_exists(db, card_id, user_id=current_user.id)
+        prepared_card_ids.add(card.id)
+
+    # Release any read transaction before the locking write path begins.
+    db.rollback()
+    added = add_all_confident_scan_items(
+        db,
+        job_id=job_id,
+        current_user=current_user,
+        prepared_card_ids=prepared_card_ids,
+    )
+    return {"added": added, "condition": "Mint"}
 
 
 @router.post("/recognize/jobs/{job_id}/items/{item_id}/retry")

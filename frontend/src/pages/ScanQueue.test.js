@@ -18,7 +18,7 @@ const {
   rendered, portalTrees, portalTargets, navigate, route, settings, auth,
   queryOptions, queryResults, mutations, api, toastMock,
   invalidateCardState, invalidateTcgdexFilterLanguages, parseMoneyInputValue,
-  stateSeeds, seedsConsumed, setAddSelection, setConfirmation,
+  stateSeeds, seedsConsumed, setAddSelection, setConfirmation, queryClientInvalidate,
 } = vi.hoisted(() => ({
   rendered: [],
   portalTrees: [],
@@ -34,10 +34,12 @@ const {
   seedsConsumed: [],
   setAddSelection: vi.fn(),
   setConfirmation: vi.fn(),
+  queryClientInvalidate: vi.fn(),
   api: {
     getScanJobs: vi.fn(),
     getScanJob: vi.fn(),
     deleteScanJob: vi.fn(),
+    addAllConfidentScanJobItems: vi.fn(),
     resolveScanJobItem: vi.fn(),
     retryScanJobItem: vi.fn(),
     fetchScanJobItemImage: vi.fn(),
@@ -108,7 +110,7 @@ vi.mock('@tanstack/react-query', () => ({
     mutations.push({ ...options, mutate })
     return { mutate, isPending: false }
   },
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQueryClient: () => ({ invalidateQueries: queryClientInvalidate }),
 }))
 
 // Some of what this page does is only reachable once a piece of its state is
@@ -295,6 +297,7 @@ beforeEach(() => {
   seedsConsumed.length = 0
   setAddSelection.mockReset()
   setConfirmation.mockReset()
+  queryClientInvalidate.mockReset()
   Object.values(api).forEach(spy => spy.mockReset())
   Object.assign(settings, {
     t: key => key,
@@ -571,6 +574,41 @@ describe('reviewing the items on a job', () => {
     renderScanQueue()
 
     expect(elementsOf(ScanAddModal)).toHaveLength(0)
+  })
+})
+
+describe('filing confident scan results', () => {
+  const confidentJob = { ...jobDetail, confident_addable: 1 }
+
+  it('states the exact confident count and asks for confirmation before filing', () => {
+    showDetail({ job: confidentJob })
+    seedDetailState()
+
+    renderScanQueue()
+    clickButton('scanner.addAllConfident')
+
+    expect(setConfirmation).toHaveBeenCalledWith({ type: 'add-all-confident', count: 1 })
+  })
+
+  it('confirms the count and defaults, then invalidates collection and scan queries', () => {
+    showDetail({ job: confidentJob })
+    seedDetailState({ confirmation: { type: 'add-all-confident', count: 1 } })
+
+    renderScanQueue()
+    const dialog = onlyElementOf(ConfirmDialog, 'bulk-add confirmation')
+    expect(dialog.props.title).toBe('scanner.addAllConfidentTitle')
+    expect(dialog.props.message).toBe('scanner.addAllConfidentConfirm')
+    expect(dialog.props.destructive).toBe(false)
+
+    dialog.props.onConfirm()
+    const mutation = mutationCalling(api.addAllConfidentScanJobItems, undefined)
+    expect(mutation.mutate).toHaveBeenCalledTimes(1)
+
+    mutation.onSuccess({ added: 1 })
+    expect(invalidateCardState).toHaveBeenCalledTimes(1)
+    expect(invalidateTcgdexFilterLanguages).toHaveBeenCalledTimes(1)
+    expect(queryClientInvalidate).toHaveBeenCalledWith({ queryKey: ['scan-job', 7] })
+    expect(queryClientInvalidate).toHaveBeenCalledWith({ queryKey: ['scan-jobs'] })
   })
 })
 

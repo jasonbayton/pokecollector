@@ -16,7 +16,7 @@ try:
     from api.scan_jobs import router
     from api.auth import get_current_user
     from database import Base, get_db
-    from models import ScanJob, ScanJobItem, User
+    from models import Card, CollectionItem, ScanJob, ScanJobItem, User
     from services.scan_storage import resolve_scan_path
 
     DEPS_AVAILABLE = True
@@ -216,6 +216,36 @@ class ScanJobsApiTests(unittest.TestCase):
         self.assertTrue(response.json()["resolved"])
         self.assertFalse(stored.exists())
         self.assertEqual(self.client.get("/api/cards/recognize/jobs").json()["jobs"], [])
+
+    def test_add_all_confident_files_only_validated_candidates(self):
+        created = self._enqueue()
+        item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
+        self.db.add(Card(
+            id="card-1_en",
+            tcg_card_id="card-1",
+            name="Confident card",
+            lang="en",
+            variants_normal=True,
+        ))
+        item.status = "done"
+        item.matches = [{"id": "card-1_en", "tcg_card_id": "card-1"}]
+        item.identity_confident = True
+        item.suggested_match_id = "card-1_en"
+        self.db.commit()
+
+        detail = self.client.get(f"/api/cards/recognize/jobs/{created['id']}")
+        self.assertEqual(detail.status_code, 200, detail.text)
+        self.assertEqual(detail.json()["confident_addable"], 1)
+
+        response = self.client.post(f"/api/cards/recognize/jobs/{created['id']}/add-all-confident")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {"added": 1, "condition": "Mint"})
+        self.assertTrue(self.db.get(ScanJobItem, item.id).resolved)
+        added = self.db.query(CollectionItem).one()
+        self.assertEqual((added.card_id, added.quantity, added.condition, added.variant), (
+            "card-1_en", 1, "Mint", "Normal",
+        ))
 
     def test_resolve_labels_diagnostics_only_with_a_returned_candidate(self):
         created = self._enqueue()
