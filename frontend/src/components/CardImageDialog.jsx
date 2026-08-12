@@ -24,9 +24,12 @@ export default function CardImageDialog({ card, image, onClose }) {
   return (
     <Modal isOpen onClose={onClose} title={card.name} size="md">
       <div className="space-y-3 p-4 sm:p-5">
-        {/* Sized from the height so the whole card fits the dialog without
-            scrolling, on a short desktop window as much as on a phone. */}
-        <div className="mx-auto aspect-[2.5/3.5] h-[min(66vh,34rem)] max-w-full overflow-hidden rounded-xl border border-white/10 bg-bg-primary/50">
+        {/* Width-driven, so the aspect ratio always holds. Setting the height
+            instead looks fine until a narrow phone clamps the width: CSS keeps
+            the explicit height, the box stops matching the card, and it
+            overflows the sheet. The cap is in dvh to match the sheet's own
+            max-h-[85dvh] and leave room for its header and this caption. */}
+        <div className="mx-auto aspect-[2.5/3.5] w-full max-w-[min(22rem,40dvh)] overflow-hidden rounded-xl border border-white/10 bg-bg-primary/50">
           <CardImage
             src={resolveCardImageUrl(card, 'large') || image}
             alt={card.name}

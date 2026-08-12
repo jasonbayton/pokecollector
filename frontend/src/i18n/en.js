@@ -1080,6 +1080,7 @@ const en = {
 
   // Card modal
   card: {
+    viewArtwork: 'View artwork',
     rarity: 'Rarity',
     availableVariants: 'Available',
     type: 'Type',

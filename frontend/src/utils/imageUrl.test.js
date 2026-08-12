@@ -26,8 +26,9 @@ describe('resolveCardImageUrl', () => {
   })
 
   it('encodes ids that are not URL safe', () => {
-    // Custom cards are keyed by name, and the backend percent-encodes the same
-    // id when it builds the public small URL.
+    // The backend percent-encodes the same id when it builds the public small
+    // URL, and test_public_binders.py covers a card id carrying a space and a
+    // hash. The two have to agree or the enlarged view 404s.
     expect(resolveCardImageUrl({ id: 'custom card#1' }, 'large'))
       .toBe('/api/images/card/custom%20card%231/large')
   })
