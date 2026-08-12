@@ -65,10 +65,15 @@ export function useScanItemPhoto(jobId, item) {
 // Only the matcher can say which candidate it chose, and only when it was
 // confident. Rank order is not that answer: the list is always sorted, so the
 // first card would wear the badge even when nothing was decided.
+//
+// The comparison is against match.id, not match.tcg_card_id. One card can be
+// listed once per language searched, so several candidates share a
+// tcg_card_id and matching on it badges all of them; match.id carries the
+// language and is unique within the list.
 function isSuggestedMatch(item, match) {
   if (item?.identity_confident !== true) return false
   const suggested = item?.suggested_match_id
-  return Boolean(suggested) && match?.tcg_card_id === suggested
+  return Boolean(suggested) && match?.id === suggested
 }
 
 function CandidateGrid({ item, matches, photoUrl, onSelect, onModalChange, t }) {
@@ -100,10 +105,16 @@ function CandidateGrid({ item, matches, photoUrl, onSelect, onModalChange, t }) 
                 // marking one candidate cannot push it out of line with the
                 // rest of the grid. Bottom left keeps it clear of the state
                 // indicators along the top and of the compare button.
+                //
+                // pointer-events-none is load-bearing, not decoration: the
+                // badge is painted at z-30 over the full-bleed select button at
+                // z-25, so without it the badge eats the click and tapping the
+                // thing labelled "Suggested" selects nothing. The design
+                // system's own .unified-card-selection marker does the same.
                 overlay={(suggested || match.image) ? (
                   <>
                     {suggested && (
-                      <p className="absolute bottom-2 left-2 z-30 inline-flex items-center gap-1 rounded-full border border-brand-red/40 bg-black/80 px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.14em] text-brand-red shadow-lg">
+                      <p className="pointer-events-none absolute bottom-2 left-2 z-30 inline-flex items-center gap-1 rounded-full border border-brand-red/40 bg-black/80 px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.14em] text-brand-red shadow-lg">
                         <Sparkles size={11} /> {t('scanner.suggestedMatch')}
                       </p>
                     )}

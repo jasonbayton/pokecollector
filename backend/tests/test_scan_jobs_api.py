@@ -129,7 +129,7 @@ class ScanJobsApiTests(unittest.TestCase):
         ]
         item.identity_confident = True
         item.identity_decision = "number_metadata"
-        item.suggested_match_id = "base1-59"
+        item.suggested_match_id = "base1-59_en"
         self.db.commit()
 
         payload = self.client.get(
@@ -138,7 +138,7 @@ class ScanJobsApiTests(unittest.TestCase):
 
         self.assertIs(payload["identity_confident"], True)
         self.assertEqual(payload["identity_decision"], "number_metadata")
-        self.assertEqual(payload["suggested_match_id"], "base1-59")
+        self.assertEqual(payload["suggested_match_id"], "base1-59_en")
 
     def test_detail_payload_reports_an_unjudged_scan_as_unknown_not_as_unsure(self):
         """The negative control: a row from before this feature has no verdict.

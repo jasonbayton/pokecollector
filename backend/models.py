@@ -652,6 +652,10 @@ class ScanJobItem(Base):
     # rather than guess from rank order.
     identity_confident = Column(Boolean, nullable=True)
     identity_decision = Column(String, nullable=True)
+    # Holds a matches[].id ("base1-4_en"), never a matches[].tcg_card_id. The
+    # same card can appear once per language in one candidate list, so the card
+    # id does not identify a candidate and badging on it marks every language
+    # copy at once. The per-language id is unique within the list.
     suggested_match_id = Column(String, nullable=True)
     error = Column(Text)
     created_at = Column(DateTime, default=func.now(), nullable=False)

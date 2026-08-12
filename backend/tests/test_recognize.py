@@ -314,9 +314,9 @@ class PhashMatchingTests(unittest.IsolatedAsyncioTestCase):
         list is ranked whether or not anything was decided.
         """
         photo = self._image(7)
-        # tcg_card_id deliberately differs from the internal per-language id:
-        # the review UI and the resolve endpoint both key on tcg_card_id, so
-        # naming the wrong one would badge nothing at all.
+        # The per-language id deliberately differs from tcg_card_id, because
+        # the two are not interchangeable: the review grid has to single out
+        # one candidate, and only the per-language id can.
         candidates = [
             {"id": "far", "tcg_card_id": "base1-1", "number": None, "image": "far.webp"},
             {"id": "near", "tcg_card_id": "base1-2", "number": None, "image": "near.webp"},
@@ -335,7 +335,47 @@ class PhashMatchingTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertTrue(result["_identity_confident"])
-        self.assertEqual(result["_identity_suggested_match_id"], "base1-2")
+        self.assertEqual(result["_identity_suggested_match_id"], "near")
+
+    async def test_suggestion_singles_out_one_of_two_rows_for_the_same_card(self):
+        """A card id cannot name a candidate; there can be one row per language.
+
+        The searches in _search_and_rank_candidates run per language and the
+        dedup that follows keys on the per-language id, so any card present in
+        two searched catalogues arrives twice with one tcg_card_id. Persisting
+        that card id makes the review grid badge both rows as "the" suggestion.
+        """
+        candidates = [
+            {
+                "id": "base1-4_de", "tcg_card_id": "base1-4", "_lang": "de",
+                "number": "4", "name": "Glurak", "image": "de.webp",
+            },
+            {
+                "id": "base1-4_en", "tcg_card_id": "base1-4", "_lang": "en",
+                "number": "4", "name": "Charizard", "image": "en.webp",
+            },
+        ]
+        with patch(
+            "api.recognize._search_and_rank_candidates",
+            new=AsyncMock(return_value=(candidates, 2)),
+        ):
+            result = await match_card_info(
+                object(),
+                {"name": "Glurak", "language": "de", "number_local": "4"},
+            )
+
+        self.assertTrue(result["_identity_confident"])
+        suggested = result["_identity_suggested_match_id"]
+        # Both rows survive into the review grid, sharing one tcg_card_id...
+        self.assertEqual(
+            [match["tcg_card_id"] for match in result["matches"]],
+            ["base1-4", "base1-4"],
+        )
+        # ...so the stored suggestion must match exactly one of them.
+        self.assertEqual(
+            [match["id"] for match in result["matches"] if match["id"] == suggested],
+            ["base1-4_de"],
+        )
 
     async def test_matcher_names_no_candidate_when_it_is_not_confident(self):
         """The negative control: an undecided match suggests nothing at all."""

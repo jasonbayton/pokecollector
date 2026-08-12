@@ -129,7 +129,7 @@ class ScanQueueTests(unittest.TestCase):
             # from rank order instead of from the matcher would record
             # base1-58 here and the assertion below would catch it.
             self._matcher_result(
-                confident=True, decision="number_unique", suggested="base1-59"
+                confident=True, decision="number_unique", suggested="base1-59_en"
             ),
         ))
 
@@ -137,7 +137,7 @@ class ScanQueueTests(unittest.TestCase):
         self.assertEqual(item.status, "done")
         self.assertIs(item.identity_confident, True)
         self.assertEqual(item.identity_decision, "number_unique")
-        self.assertEqual(item.suggested_match_id, "base1-59")
+        self.assertEqual(item.suggested_match_id, "base1-59_en")
 
     def test_inconclusive_individual_scan_persists_no_suggestion(self):
         """The negative control: unsure must be recorded, not left unknown."""
@@ -166,7 +166,7 @@ class ScanQueueTests(unittest.TestCase):
         complete_claim(
             self.db,
             claim,
-            self._matcher_result(confident=False, suggested="base1-59"),
+            self._matcher_result(confident=False, suggested="base1-59_en"),
         )
 
         item = self.db.get(ScanJobItem, claim.item_id)
@@ -193,7 +193,7 @@ class ScanQueueTests(unittest.TestCase):
             claim,
             [
                 self._matcher_result(
-                    confident=True, decision="phash", suggested="base1-59"
+                    confident=True, decision="phash", suggested="base1-59_en"
                 ),
                 None,
             ],
@@ -204,7 +204,7 @@ class ScanQueueTests(unittest.TestCase):
         self.assertEqual(items[0].status, "done")
         self.assertIs(items[0].identity_confident, True)
         self.assertEqual(items[0].identity_decision, "phash")
-        self.assertEqual(items[0].suggested_match_id, "base1-59")
+        self.assertEqual(items[0].suggested_match_id, "base1-59_en")
         # The negative control, in the same run: the unclear sibling.
         self.assertEqual(items[1].status, "pending")
         self.assertIsNone(items[1].identity_confident)
@@ -223,7 +223,7 @@ class ScanQueueTests(unittest.TestCase):
             item.matches = [{"id": "base1-58_en", "tcg_card_id": "base1-58"}]
             item.identity_confident = True
             item.identity_decision = "number_unique"
-            item.suggested_match_id = "base1-58"
+            item.suggested_match_id = "base1-58_en"
         self.db.commit()
 
         retry_scan_item(self.db, items[0])
@@ -238,7 +238,7 @@ class ScanQueueTests(unittest.TestCase):
         self.assertEqual(items[1].status, "done")
         self.assertIs(items[1].identity_confident, True)
         self.assertEqual(items[1].identity_decision, "number_unique")
-        self.assertEqual(items[1].suggested_match_id, "base1-58")
+        self.assertEqual(items[1].suggested_match_id, "base1-58_en")
 
     def test_batch_claim_groups_four_photos_and_keeps_forced_single_out(self):
         job = self._job(self.users[0], positions=(0, 1, 2, 3, 4))
