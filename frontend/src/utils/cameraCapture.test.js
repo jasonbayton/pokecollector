@@ -11,7 +11,7 @@ import {
   stopMediaStream,
 } from './cameraCapture'
 
-function createTrack({ throwOnStop = false } = {}) {
+function createTrack({ throwOnStop = false, unremovableListeners = false } = {}) {
   const listeners = new Map()
   const track = {
     stopCount: 0,
@@ -22,7 +22,9 @@ function createTrack({ throwOnStop = false } = {}) {
     addEventListener(type, handler) {
       listeners.set(type, [...(listeners.get(type) || []), handler])
     },
-    removeEventListener(type, handler) {
+    // The module guards for a track without one (`removeEventListener?.()`), so
+    // a track that keeps its listeners is a shape it has to survive.
+    removeEventListener: unremovableListeners ? undefined : (type, handler) => {
       listeners.set(type, (listeners.get(type) || []).filter(entry => entry !== handler))
     },
     emit(type) {
@@ -293,6 +295,26 @@ describe('createCameraSession', () => {
     expect(env.mediaDevices.getUserMedia).not.toHaveBeenCalled()
   })
 
+  it('records a blocked environment on probe, without touching the camera', () => {
+    env.isSecureContext = false
+    const session = newSession()
+
+    const state = session.probeSupport()
+
+    expect(state.status).toBe(CAMERA_STATUS.ERROR)
+    expect(state.failure).toBe(CAMERA_FAILURE.INSECURE)
+    expect(env.mediaDevices.getUserMedia).not.toHaveBeenCalled()
+    expect(changes.map(entry => entry.status)).toEqual([CAMERA_STATUS.ERROR])
+  })
+
+  it('says nothing on probe when the environment can open a camera', () => {
+    const session = newSession()
+
+    expect(session.probeSupport().status).toBe(CAMERA_STATUS.IDLE)
+    expect(changes).toEqual([])
+    expect(env.mediaDevices.getUserMedia).not.toHaveBeenCalled()
+  })
+
   it('stops every track on stop', async () => {
     const second = createTrack()
     env.mediaDevices.getUserMedia.mockResolvedValue(createStream([track, second]))
@@ -373,19 +395,46 @@ describe('createCameraSession', () => {
     expect(audioLikeSecondTrack.stopCount).toBe(1)
   })
 
-  it('ignores an ended track from a stream it already replaced', async () => {
+  it('unhooks the ended listener from the stream a start replaces', async () => {
     env.mediaDevices.getUserMedia
       .mockResolvedValueOnce(stream)
       .mockResolvedValueOnce(createStream([createTrack()]))
     const session = newSession()
     await session.start()
+    expect(track.listenerCount('ended')).toBe(1)
+
     await session.start()
     changes.length = 0
 
+    // The replaced stream is stopped and unhooked, so its ended event never
+    // reaches the session in the first place.
+    expect(track.listenerCount('ended')).toBe(0)
     track.emit('ended')
+    expect(changes).toEqual([])
+    expect(session.getState().status).toBe(CAMERA_STATUS.LIVE)
+  })
+
+  it('ignores an ended track from a replaced stream that could not be unhooked', async () => {
+    // A track that keeps its listeners outlives the unhook, so a stale ended
+    // event does still arrive. Without the identity check it would tear down
+    // the camera that is currently live and report an interruption that never
+    // happened - the user loses the viewfinder mid-batch for nothing.
+    const stubborn = createTrack({ unremovableListeners: true })
+    env.mediaDevices.getUserMedia
+      .mockResolvedValueOnce(createStream([stubborn]))
+      .mockResolvedValueOnce(stream)
+    const session = newSession()
+    await session.start()
+    await session.start()
+    changes.length = 0
+    expect(stubborn.listenerCount('ended')).toBe(1)
+
+    stubborn.emit('ended')
 
     expect(changes).toEqual([])
     expect(session.getState().status).toBe(CAMERA_STATUS.LIVE)
+    expect(session.getState().stream).toBe(stream)
+    expect(track.stopCount).toBe(0)
   })
 
   it('stops the camera when the document is hidden, and unbinds cleanly', async () => {
@@ -407,6 +456,29 @@ describe('createCameraSession', () => {
 
     unbind()
     expect(listeners.has('visibilitychange')).toBe(false)
+  })
+
+  it('keeps a standing failure when the tab is hidden, instead of offering a start that cannot work', async () => {
+    env.mediaDevices.getUserMedia.mockRejectedValue(namedError('NotAllowedError'))
+    const listeners = new Map()
+    const doc = {
+      hidden: false,
+      addEventListener: (type, handler) => listeners.set(type, handler),
+      removeEventListener: type => listeners.delete(type),
+    }
+    const session = newSession()
+    session.bindVisibility(doc)
+    await session.start()
+    expect(session.getState().failure).toBe(CAMERA_FAILURE.DENIED)
+
+    doc.hidden = true
+    listeners.get('visibilitychange')()
+
+    // Hiding a tab releases the stream; it does not un-refuse a refusal. Going
+    // idle here would swap the explanation for the neutral hint and put back a
+    // Start button whose only possible outcome is the same refusal again.
+    expect(session.getState().status).toBe(CAMERA_STATUS.ERROR)
+    expect(session.getState().failure).toBe(CAMERA_FAILURE.DENIED)
   })
 
   it('leaves the camera alone when the document becomes visible again', async () => {

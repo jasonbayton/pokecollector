@@ -55,10 +55,12 @@ const stagedCountOf = tree => [...walkTree(tree)]
   .find(node => Array.isArray(node.props?.children) && node.props.children.includes('/50 '))
   .props.children.join('')
 
-const submitButtonOf = tree => findAll(
+const buttonByText = (tree, label) => findAll(
   tree,
-  node => node.type === 'button' && textOf(node).includes('scanner.startScanning'),
+  node => node.type === 'button' && textOf(node).includes(label),
 )[0]
+
+const submitButtonOf = tree => buttonByText(tree, 'scanner.startScanning')
 
 /**
  * Gives both hidden file inputs a stand-in element, so a test can prove the
@@ -134,6 +136,58 @@ describe('UnifiedCardScanner file-input fallbacks', () => {
     tree = render()
 
     expect(thumbnailsOf(tree)).toHaveLength(1)
+  })
+
+  it('opens the OS camera app from Take photo, and the picker from Choose from gallery', () => {
+    // These two buttons are the whole fallback: on a device where the live
+    // viewfinder cannot run - a refused permission, a managed device with the
+    // camera blocked by policy, a browser without getUserMedia - they are the
+    // only way a card gets into the batch.
+    const tree = render()
+    const [cameraInput, galleryInput] = armFileInputs(tree)
+
+    buttonByText(tree, 'scanner.takePhoto').props.onClick()
+
+    expect(cameraInput.click).toHaveBeenCalledTimes(1)
+    expect(galleryInput.click).not.toHaveBeenCalled()
+
+    buttonByText(tree, 'scanner.chooseFromGallery').props.onClick()
+
+    expect(galleryInput.click).toHaveBeenCalledTimes(1)
+    expect(cameraInput.click).toHaveBeenCalledTimes(1)
+  })
+
+  it('stages a whole multi-file gallery selection, in the order it was chosen', async () => {
+    let tree = render()
+
+    selectFromInput(inputsOf(tree)[1], [jpeg('one.jpg'), jpeg('two.jpg'), jpeg('three.jpg')])
+    tree = render()
+
+    expect(thumbnailsOf(tree).map(node => node.props.src))
+      .toEqual(['blob:staged-1', 'blob:staged-2', 'blob:staged-3'])
+    expect(stagedCountOf(tree)).toBe('3/50 scanner.photos')
+
+    await submitButtonOf(tree).props.onClick()
+
+    // Order is not cosmetic: individual-scan positions are indexes into it.
+    expect(stubs.enqueueScanJob.mock.calls[0][0].map(file => file.name))
+      .toEqual(['one.jpg', 'two.jpg', 'three.jpg'])
+  })
+
+  it('leaves both fallback buttons usable right up to the cap, then disables them', () => {
+    let tree = render()
+    selectFromInput(inputsOf(tree)[1], Array.from({ length: 49 }, (_, index) => jpeg(`bulk-${index}.jpg`)))
+    tree = render()
+
+    expect(buttonByText(tree, 'scanner.takePhoto').props.disabled).toBe(false)
+    expect(buttonByText(tree, 'scanner.chooseFromGallery').props.disabled).toBe(false)
+
+    selectFromInput(inputsOf(tree)[0], [jpeg('fiftieth.jpg')])
+    tree = render()
+
+    expect(stagedCountOf(tree)).toBe('50/50 scanner.photos')
+    expect(buttonByText(tree, 'scanner.takePhoto').props.disabled).toBe(true)
+    expect(buttonByText(tree, 'scanner.chooseFromGallery').props.disabled).toBe(true)
   })
 
   it('rejects a file type the scanner cannot send', () => {

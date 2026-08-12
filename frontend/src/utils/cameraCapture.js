@@ -6,10 +6,15 @@
  * repository's DOM-less test environment are reachable through injected
  * collaborators instead of a browser.
  *
- * The one rule this module exists to enforce: a MediaStreamTrack that is never
+ * The rule this module exists to enforce: a MediaStreamTrack that is never
  * stopped leaves the camera light on. Every path that abandons a stream -
  * replacement, close, hidden tab, an unmount that races an open permission
  * prompt - has to stop its tracks.
+ *
+ * Its corollary: releasing a stream is not the same as clearing a failure. A
+ * refusal, a missing camera, an insecure origin and an unsupported browser
+ * outlive the stream, so the session keeps reporting them until something
+ * actually changes.
  */
 
 export const CAMERA_FAILURE = Object.freeze({
@@ -275,9 +280,31 @@ export function createCameraSession({
     return getState()
   }
 
+  /**
+   * Records an environment that cannot open a camera at all, without touching
+   * the camera. The owner calls this on mount so a standing block lives in the
+   * session rather than in its own state, where the next stop() would publish
+   * over it.
+   */
+  function probeSupport() {
+    if (disposed) return getState()
+    const blocked = detectCameraSupport(resolveEnv())
+    if (blocked) publish({ status: CAMERA_STATUS.ERROR, failure: blocked, stream: null })
+    return getState()
+  }
+
   function stop() {
     generation += 1
     releaseStream()
+    if (state.status === CAMERA_STATUS.ERROR) {
+      // Releasing the stream because the tab went away changes nothing about a
+      // refusal, a missing camera, an insecure origin or an unsupported
+      // browser. Going idle here would swap the explanation for the neutral
+      // hint and put back a Start button whose only possible outcome is the
+      // same failure again.
+      publish({ status: CAMERA_STATUS.ERROR, failure: state.failure, stream: null })
+      return getState()
+    }
     publish({ status: CAMERA_STATUS.IDLE, failure: null, stream: null })
     return getState()
   }
@@ -314,6 +341,7 @@ export function createCameraSession({
     dispose,
     getState,
     isDenied: () => deniedOnce,
+    probeSupport,
     start,
     stop,
   }

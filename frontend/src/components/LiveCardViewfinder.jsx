@@ -6,12 +6,15 @@ import {
   CAMERA_FAILURE,
   CAMERA_STATUS,
   createCameraSession,
-  detectCameraSupport,
 } from '../utils/cameraCapture'
 
 /**
  * Every branch calls t() with a literal key so the translation check can see
- * them. Building the key from the failure name would hide all nine from it.
+ * them. Building the key from the failure name would hide all eight from it.
+ *
+ * That check only reports keys the source asks for and en.js lacks, so it
+ * cannot see a branch pointed at the wrong sentence: the mapping itself is
+ * pinned in LiveCardViewfinder.test.js instead.
  */
 export function cameraFailureMessage(t, failure) {
   switch (failure) {
@@ -77,8 +80,9 @@ export default function LiveCardViewfinder({ onCapture, isFull = false }) {
     // start() is only ever reached from the button's own click handler.
     const session = getSession()
     const unbindVisibility = session.bindVisibility(typeof document === 'undefined' ? null : document)
-    const blocked = detectCameraSupport()
-    if (blocked) setCamera({ status: CAMERA_STATUS.ERROR, failure: blocked })
+    // The session records the block rather than this component, so that hiding
+    // the tab later cannot publish an idle state over the explanation.
+    session.probeSupport()
 
     return () => {
       unbindVisibility()
@@ -113,6 +117,12 @@ export default function LiveCardViewfinder({ onCapture, isFull = false }) {
     setCapturing(true)
     try {
       const file = await getSession().capture(videoRef.current)
+      // A tap that worked clears the last tap's message; leaving it up says the
+      // capture the user just took failed. Read the session rather than
+      // blanking the failure outright: the stream can die while the frame is
+      // being drawn, and that one has to survive this line.
+      const settled = getSession().getState()
+      setCamera({ status: settled.status, failure: settled.failure })
       onCapture?.(file)
     } catch (error) {
       // The session's own status, not a hardcoded live: a frame can fail

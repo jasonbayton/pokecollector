@@ -14,11 +14,16 @@ const camera = vi.hoisted(() => ({
   supportFailure: null,
 }))
 
+/**
+ * A stand-in session, so this file can put the component in states a stubbed
+ * browser cannot reach on demand. It mirrors the real session's contract, and
+ * LiveCardViewfinder.integration.test.js - the same component against the
+ * shipped createCameraSession - is what keeps the mirror honest.
+ */
 vi.mock('../utils/cameraCapture', async importOriginal => {
   const actual = await importOriginal()
   return {
     ...actual,
-    detectCameraSupport: () => camera.supportFailure,
     createCameraSession: options => {
       const session = {
         options,
@@ -31,7 +36,26 @@ vi.mock('../utils/cameraCapture', async importOriginal => {
         options.onChange({ ...session.state })
       }
       session.start = vi.fn(async () => session.state)
-      session.stop = vi.fn(() => { session.publish({ status: actual.CAMERA_STATUS.IDLE, failure: null, stream: null }) })
+      session.probeSupport = vi.fn(() => {
+        if (camera.supportFailure) {
+          session.publish({
+            status: actual.CAMERA_STATUS.ERROR,
+            failure: camera.supportFailure,
+            stream: null,
+          })
+        }
+        return { ...session.state }
+      })
+      session.stop = vi.fn(() => {
+        // Stopping releases the stream; it never publishes over a standing
+        // failure, so a hidden tab cannot wipe the reason the camera is off.
+        if (session.state.status === actual.CAMERA_STATUS.ERROR) {
+          session.publish({ stream: null })
+          return { ...session.state }
+        }
+        session.publish({ status: actual.CAMERA_STATUS.IDLE, failure: null, stream: null })
+        return { ...session.state }
+      })
       session.capture = vi.fn()
       session.dispose = vi.fn()
       session.getState = vi.fn(() => ({ ...session.state }))
@@ -51,7 +75,10 @@ vi.mock('../contexts/SettingsContext', () => ({
 }))
 
 const { CAMERA_FAILURE, CAMERA_STATUS } = await import('../utils/cameraCapture')
-const LiveCardViewfinder = (await import('./LiveCardViewfinder')).default
+const viewfinderModule = await import('./LiveCardViewfinder')
+const { cameraFailureMessage, canRetryCameraFailure } = viewfinderModule
+const LiveCardViewfinder = viewfinderModule.default
+const en = (await import('../i18n/en')).default
 
 let props
 let fakeVideo
@@ -88,6 +115,63 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+})
+
+describe('cameraFailureMessage', () => {
+  const keyFor = failure => cameraFailureMessage(key => key, failure)
+  const resolveEnglish = key => key.split('.').reduce((value, part) => value?.[part], en)
+
+  it('gives every failure its own sentence', () => {
+    expect(Object.fromEntries(
+      Object.entries(CAMERA_FAILURE).map(([name, failure]) => [name, keyFor(failure)]),
+    )).toEqual({
+      UNSUPPORTED: 'scanner.cameraErrorUnsupported',
+      INSECURE: 'scanner.cameraErrorInsecure',
+      DENIED: 'scanner.cameraErrorDenied',
+      NOT_FOUND: 'scanner.cameraErrorNotFound',
+      BUSY: 'scanner.cameraErrorBusy',
+      INTERRUPTED: 'scanner.cameraErrorInterrupted',
+      CAPTURE_FAILED: 'scanner.cameraErrorCaptureFailed',
+      UNKNOWN: 'scanner.cameraErrorUnknown',
+    })
+  })
+
+  it('resolves each of those keys to real English, and never reuses one', () => {
+    // The translation gate only catches keys the source asks for and en.js
+    // lacks. Pointing two failures at one sentence passes that gate and
+    // silently orphans the sentence nothing asks for any more, so the mapping
+    // has to be pinned here instead.
+    const keys = Object.values(CAMERA_FAILURE).map(keyFor)
+
+    for (const key of keys) expect(typeof resolveEnglish(key)).toBe('string')
+    expect(new Set(keys).size).toBe(keys.length)
+  })
+
+  it('falls back to the unknown sentence for a reason it has never heard of', () => {
+    expect(keyFor(undefined)).toBe('scanner.cameraErrorUnknown')
+    expect(keyFor('someReasonAddedLater')).toBe('scanner.cameraErrorUnknown')
+  })
+})
+
+describe('canRetryCameraFailure', () => {
+  it('offers a retry for exactly the failures that can clear on their own', () => {
+    expect(Object.fromEntries(
+      Object.entries(CAMERA_FAILURE).map(([name, failure]) => [name, canRetryCameraFailure(failure)]),
+    )).toEqual({
+      // Standing conditions: another getUserMedia call cannot change any of
+      // these, and for a refusal it re-prompts the user who just said no.
+      UNSUPPORTED: false,
+      INSECURE: false,
+      DENIED: false,
+      NOT_FOUND: false,
+      // Transients: the other app closes, the track comes back, the next frame
+      // encodes.
+      BUSY: true,
+      INTERRUPTED: true,
+      CAPTURE_FAILED: true,
+      UNKNOWN: true,
+    })
+  })
 })
 
 describe('LiveCardViewfinder', () => {
@@ -204,6 +288,39 @@ describe('LiveCardViewfinder', () => {
     expect(session().start).toHaveBeenCalledTimes(1)
   })
 
+  it('offers no retry on a device that has no camera to find', () => {
+    render()
+    session().publish({ status: CAMERA_STATUS.ERROR, failure: CAMERA_FAILURE.NOT_FOUND, stream: null })
+    const tree = render()
+
+    const text = textOf(tree)
+    expect(text).toContain('scanner.cameraErrorNotFound')
+    expect(text).toContain('scanner.cameraFallbackHint')
+    expect(text).not.toContain('scanner.retryCamera')
+    expect(text).not.toContain('scanner.startCamera')
+    expect(buttonsWithText(tree)).toEqual([])
+  })
+
+  it('offers no retry in a browser that cannot open a live camera', () => {
+    render()
+    session().publish({ status: CAMERA_STATUS.ERROR, failure: CAMERA_FAILURE.UNSUPPORTED, stream: null })
+    const tree = render()
+
+    const text = textOf(tree)
+    expect(text).toContain('scanner.cameraErrorUnsupported')
+    expect(text).toContain('scanner.cameraFallbackHint')
+    expect(text).not.toContain('scanner.retryCamera')
+    expect(text).not.toContain('scanner.startCamera')
+    expect(buttonsWithText(tree)).toEqual([])
+  })
+
+  // "A hidden tab keeps a standing failure on screen" is deliberately NOT
+  // asserted here. The stand-in session mirrors that rule, so a test of it
+  // against this file would pass whatever the real session did - it was
+  // written, watched to pass while the shipped stop() was mutated, and removed.
+  // LiveCardViewfinder.integration.test.js makes the claim against the real
+  // session, where it can actually fail.
+
   it('reports an insecure origin on mount instead of dangling a dead start button', () => {
     camera.supportFailure = CAMERA_FAILURE.INSECURE
     render()
@@ -229,6 +346,52 @@ describe('LiveCardViewfinder', () => {
     expect(props.onCapture).not.toHaveBeenCalled()
     expect(textOf(tree)).toContain('scanner.cameraErrorCaptureFailed')
     expect(textOf(tree)).toContain('scanner.captureCard')
+  })
+
+  it('clears the failed frame message as soon as a later tap works', async () => {
+    const recovered = new File(['ok'], 'card-2.jpg', { type: 'image/jpeg' })
+    let tree = render()
+    attachVideo(tree)
+    session().publish({ status: CAMERA_STATUS.LIVE, failure: null, stream: { id: 'stream-1' } })
+    tree = render()
+    session().capture
+      .mockRejectedValueOnce(Object.assign(new Error('no blob'), { reason: CAMERA_FAILURE.CAPTURE_FAILED }))
+      .mockResolvedValueOnce(recovered)
+
+    await buttonsWithText(tree)[0].props.onClick()
+    tree = render()
+    expect(textOf(tree)).toContain('scanner.cameraErrorCaptureFailed')
+
+    await buttonsWithText(tree)[0].props.onClick()
+    tree = render()
+
+    // One bad frame is a transient. Leaving "that frame could not be captured"
+    // above a viewfinder that has since captured another card tells the user
+    // their last tap failed when it did not.
+    expect(props.onCapture).toHaveBeenCalledWith(recovered)
+    expect(textOf(tree)).not.toContain('scanner.cameraErrorCaptureFailed')
+    expect(textOf(tree)).toContain('scanner.captureCard')
+  })
+
+  it('keeps a failure the session itself raised while a frame was being drawn', async () => {
+    let tree = render()
+    attachVideo(tree)
+    session().publish({ status: CAMERA_STATUS.LIVE, failure: null, stream: { id: 'stream-1' } })
+    tree = render()
+    const file = new File(['ok'], 'card-1.jpg', { type: 'image/jpeg' })
+    session().capture.mockImplementation(async () => {
+      // The track ends while the canvas is being drawn: the frame is still
+      // good, but the camera is gone and must not be reported as live.
+      session().state = { status: CAMERA_STATUS.ERROR, failure: CAMERA_FAILURE.INTERRUPTED, stream: null }
+      return file
+    })
+
+    await buttonsWithText(tree)[0].props.onClick()
+    tree = render()
+
+    expect(props.onCapture).toHaveBeenCalledWith(file)
+    expect(textOf(tree)).toContain('scanner.cameraErrorInterrupted')
+    expect(textOf(tree)).toContain('scanner.retryCamera')
   })
 
   it('drops out of live and offers a retry when the stream dies mid-capture', async () => {
