@@ -440,6 +440,14 @@ class ScanQueueTests(unittest.TestCase):
         self.assertEqual(persisted.image_path, f"{job.id}/0.jpg")
         self.assertTrue(old_file.is_file())
         self.assertEqual(old_file.read_bytes(), b"old photo")
+        # The other half of the claim: the replacement that no row now
+        # references must not be left behind either. Counted rather than named,
+        # because the new path is a uuid generated inside the call. Without
+        # this, deleting the orphan cleanup left the suite green.
+        self.assertEqual(
+            sorted(entry.name for entry in old_file.parent.iterdir()),
+            [old_file.name],
+        )
 
     def test_progress_counts_only_reviewable_items_as_attention(self):
         job = self._job(self.users[0], positions=(0, 1, 2, 3))
