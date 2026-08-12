@@ -7,6 +7,7 @@ import { formatEur } from '../utils/formatEur'
 import { groupCardsByPrint } from '../utils/groupCardsByPrint'
 import { formatBinderCountSummary } from '../utils/binderCounts'
 import { useSettings } from '../contexts/SettingsContext'
+import CardImageDialog from '../components/CardImageDialog'
 import { CardLegend, CardStack } from '../components/card-system'
 
 export default function PublicBinderView() {
@@ -14,6 +15,7 @@ export default function PublicBinderView() {
   const [binder, setBinder] = useState(null)
   const [error, setError] = useState(null)
   const [badgeLegendOpen, setBadgeLegendOpen] = useState(false)
+  const [zoomedCard, setZoomedCard] = useState(null)
   const { t } = useSettings()
 
   useEffect(() => {
@@ -88,6 +90,8 @@ export default function PublicBinderView() {
                 layers={backLayers}
                 layerOffset={layerOffset}
                 variantEffectSource={tile.prints}
+                interactive
+                onClick={() => setZoomedCard({ ...tile, set_id: tile.set_name })}
                 stateIndicatorProps={{
                   card: { ...tile, owned_variants: tile.prints },
                   showWishlist: false,
@@ -104,6 +108,14 @@ export default function PublicBinderView() {
         })}
         </div>
       </div>
+
+      {zoomedCard && (
+        <CardImageDialog
+          card={zoomedCard}
+          image={zoomedCard.image}
+          onClose={() => setZoomedCard(null)}
+        />
+      )}
     </main>
   )
 }
