@@ -11,7 +11,10 @@ export default function PublicHomeButton() {
       className="flex h-12 w-12 items-center justify-center rounded-full transition-transform duration-200 hover:scale-110 active:scale-90"
       style={{
         position: 'fixed',
-        zIndex: 100,
+        // Set inline so page content cannot bury it, but kept below the shared
+        // dialog layer (z-50): public pages now open card dialogs, and a
+        // floating button drawn over an open sheet reads as a rendering fault.
+        zIndex: 40,
         bottom: 'max(1.5rem, env(safe-area-inset-bottom))',
         left: 'max(1rem, env(safe-area-inset-left))',
         background: 'linear-gradient(180deg, #e3000b 50%, #f5f5f5 50%)',
