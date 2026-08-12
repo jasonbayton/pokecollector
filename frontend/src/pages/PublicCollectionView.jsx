@@ -5,6 +5,7 @@ import clsx from 'clsx'
 import { getPublicCollection, getPublicProfile } from '../api/publicClient'
 import { formatEur } from '../utils/formatEur'
 import { useSettings } from '../contexts/SettingsContext'
+import CardImageDialog from '../components/CardImageDialog'
 import { CardDisplay, CardLegend } from '../components/card-system'
 
 /**
@@ -18,6 +19,7 @@ export default function PublicCollectionView() {
   const [profile, setProfile] = useState(null)
   const [error, setError] = useState(null)
   const [badgeLegendOpen, setBadgeLegendOpen] = useState(false)
+  const [zoomedCard, setZoomedCard] = useState(null)
   const { t } = useSettings()
 
   useEffect(() => {
@@ -89,24 +91,36 @@ export default function PublicCollectionView() {
           </div>
         ) : (
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8">
-            {collection.cards.map((card) => (
-              <CardDisplay
-                key={`${card.id}-${card.variant || 'normal'}`}
-                card={{ ...card, set_id: card.set_name }}
-                image={card.image}
-                price={card.market_value != null ? formatEur(card.market_value) : null}
-                variantEffectSource={card.variant}
-                stateIndicatorProps={{
-                  // getCardState reads owned_variants; a bare quantity renders nothing.
-                  card: { owned_variants: [{ variant: card.variant || 'Normal', quantity: card.quantity }] },
-                  showWishlist: false,
-                  alwaysShowQuantity: true,
-                }}
-              />
-            ))}
+            {collection.cards.map((card) => {
+              const displayCard = { ...card, set_id: card.set_name }
+              return (
+                <CardDisplay
+                  key={`${card.id}-${card.variant || 'normal'}`}
+                  card={displayCard}
+                  image={card.image}
+                  price={card.market_value != null ? formatEur(card.market_value) : null}
+                  variantEffectSource={card.variant}
+                  onClick={() => setZoomedCard(displayCard)}
+                  stateIndicatorProps={{
+                    // getCardState reads owned_variants; a bare quantity renders nothing.
+                    card: { owned_variants: [{ variant: card.variant || 'Normal', quantity: card.quantity }] },
+                    showWishlist: false,
+                    alwaysShowQuantity: true,
+                  }}
+                />
+              )
+            })}
           </div>
         )}
       </div>
+
+      {zoomedCard && (
+        <CardImageDialog
+          card={zoomedCard}
+          image={zoomedCard.image}
+          onClose={() => setZoomedCard(null)}
+        />
+      )}
     </main>
   )
 }
