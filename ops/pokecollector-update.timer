@@ -1,0 +1,13 @@
+[Unit]
+Description=Check for a new PokeCollector fork tag
+
+[Timer]
+# The host is LAN only, so GitHub cannot reach it with a webhook. Polling is
+# the equivalent, and five minutes is well inside how long a release takes to
+# be wanted.
+OnBootSec=3min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

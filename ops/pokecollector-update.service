@@ -1,0 +1,7 @@
+[Unit]
+Description=Deploy the newest PokeCollector fork tag
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/pokecollector-deploy

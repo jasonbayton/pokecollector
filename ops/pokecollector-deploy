@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+#
+# Deploy the newest bayton-v* tag, if it is not already the deployed one.
+#
+# Run by pokecollector-update.timer. Safe to run by hand and safe to run when
+# there is nothing to do: it exits 0 without touching anything.
+#
+# Design notes, because each of these is a mistake that has already been made
+# by hand on this service:
+#
+#   * The candidate is built in a git WORKTREE, never in the serving checkout.
+#     A failed npm ci or vite build then cannot leave the running app in a
+#     half-updated state.
+#   * Release tags MUST be annotated, and are ordered by taggerdate. Not by
+#     version sort, because bayton-v1.37.0-3 is a semver PRERELEASE and sorts
+#     BEFORE upstream's v1.37.0. And not by creatordate, because that falls
+#     back to the COMMIT date for a lightweight tag: two lightweight tags on
+#     one commit tie, and a lightweight tag put on an older commit sorts by
+#     that old date and is never selected. Proven in the lab, where a newer
+#     lightweight tag lost to an older one. A lightweight tag is refused
+#     outright rather than ordered on a guess.
+#   * The deployed revision is verified after the swap. `systemctl is-active`
+#     reporting active proves only that something is running: a pull that
+#     aborted still leaves the old code active and healthy.
+#   * The health check gates the release. If it fails, the previous tag and its
+#     built assets are put back and the service restarted.
+#
+set -euo pipefail
+
+REPO=${POKECOLLECTOR_REPO:-/opt/pokecollector}
+RELEASES=${POKECOLLECTOR_RELEASES:-/opt/pokecollector-releases}
+STATE=${POKECOLLECTOR_STATE:-/var/lib/pokecollector-deploy}
+SERVICE=${POKECOLLECTOR_SERVICE:-pokecollector}
+HEALTH_URL=${POKECOLLECTOR_HEALTH_URL:-http://127.0.0.1:8000/api/health}
+HEALTH_ATTEMPTS=${POKECOLLECTOR_HEALTH_ATTEMPTS:-20}
+HEALTH_INTERVAL=${POKECOLLECTOR_HEALTH_INTERVAL:-3}
+TAG_GLOB=${POKECOLLECTOR_TAG_GLOB:-bayton-v*}
+REMOTE=${POKECOLLECTOR_REMOTE:-origin}
+
+log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+
+alert() {
+  local subject=$1 body=$2
+  log "ALERT: ${subject}"
+  if command -v outpost >/dev/null 2>&1; then
+    outpost mail send -f llm@api.bayton.org --from-name "PokeCollector deploy" \
+      -t jason@bayton.org -s "${subject}" --text "${body}" >/dev/null 2>&1 || \
+      log "outpost alert failed to send"
+  fi
+}
+
+health_ok() {
+  local attempt=1
+  while [ "${attempt}" -le "${HEALTH_ATTEMPTS}" ]; do
+    if curl -fs -o /dev/null --max-time 5 "${HEALTH_URL}"; then
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    sleep "${HEALTH_INTERVAL}"
+  done
+  return 1
+}
+
+mkdir -p "${STATE}" "${RELEASES}"
+
+cd "${REPO}"
+git fetch --quiet --tags --prune "${REMOTE}"
+
+# -taggerdate, deliberately. See the note at the top of this file.
+target=$(git tag --list "${TAG_GLOB}" --sort=-taggerdate | head -n 1)
+if [ -z "${target}" ]; then
+  log "no tags match ${TAG_GLOB}, nothing to deploy"
+  exit 0
+fi
+
+# An annotated tag is a tag object; a lightweight one resolves straight to a
+# commit. Ordering is only meaningful for the former, so the latter is refused
+# rather than deployed on the strength of a commit date that may be old.
+if [ "$(git cat-file -t "${target}" 2>/dev/null)" != "tag" ]; then
+  alert "PokeCollector release tag ${target} is not annotated" \
+    "Release tags must be annotated (git tag -a) so they can be ordered by when they were made. ${target} is lightweight and was NOT deployed. Re-tag it with git tag -a and push again."
+  log "refusing lightweight tag ${target}"
+  exit 1
+fi
+
+deployed=""
+[ -f "${STATE}/deployed" ] && deployed=$(cat "${STATE}/deployed")
+
+if [ "${target}" = "${deployed}" ]; then
+  log "already on ${target}"
+  exit 0
+fi
+
+log "deploying ${target} (currently ${deployed:-unknown})"
+target_sha=$(git rev-list -n 1 "${target}")
+
+# ---------------------------------------------------------------------------
+# Build the candidate in isolation. Nothing below this point has touched the
+# serving checkout yet, so any failure here leaves the running app alone.
+# ---------------------------------------------------------------------------
+candidate="${RELEASES}/${target}"
+rm -rf "${candidate}"
+git worktree prune
+git worktree add --quiet --detach "${candidate}" "${target_sha}"
+
+build_failed=0
+(
+  cd "${candidate}/frontend"
+  npm ci --silent
+  npm run build
+) || build_failed=1
+
+if [ "${build_failed}" -ne 0 ]; then
+  git worktree remove --force "${candidate}" 2>/dev/null || rm -rf "${candidate}"
+  git worktree prune
+  alert "PokeCollector deploy failed to build ${target}" \
+    "The candidate build failed, so nothing was swapped and the running release is untouched. The service is still on ${deployed:-an unknown tag}."
+  log "build failed for ${target}, running release untouched"
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Swap. Keep enough of the outgoing release to put it back.
+# ---------------------------------------------------------------------------
+previous_sha=$(git rev-parse HEAD)
+previous_tag=${deployed:-${previous_sha}}
+
+rm -rf "${REPO}/frontend/dist.previous"
+[ -d "${REPO}/frontend/dist" ] && cp -a "${REPO}/frontend/dist" "${REPO}/frontend/dist.previous"
+
+git checkout --quiet --detach "${target_sha}"
+rm -rf "${REPO}/frontend/dist"
+cp -a "${candidate}/frontend/dist" "${REPO}/frontend/dist"
+
+systemctl restart "${SERVICE}"
+
+if health_ok; then
+  printf '%s\n' "${target}" > "${STATE}/deployed"
+  printf '%s\n' "${previous_tag}" > "${STATE}/previous"
+  rm -rf "${REPO}/frontend/dist.previous"
+  git worktree remove --force "${candidate}" 2>/dev/null || rm -rf "${candidate}"
+  git worktree prune
+  # Verify the revision, not just that something is running.
+  live_sha=$(git rev-parse HEAD)
+  if [ "${live_sha}" != "${target_sha}" ]; then
+    alert "PokeCollector deployed ${target} but HEAD does not match" \
+      "Expected ${target_sha}, found ${live_sha}. The service is healthy but is serving an unexpected revision."
+    exit 1
+  fi
+  log "deployed ${target} (${target_sha}) and health checked"
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Health gate failed. Put the previous release back.
+# ---------------------------------------------------------------------------
+log "health check failed for ${target}, rolling back to ${previous_tag}"
+git checkout --quiet --detach "${previous_sha}"
+rm -rf "${REPO}/frontend/dist"
+[ -d "${REPO}/frontend/dist.previous" ] && mv "${REPO}/frontend/dist.previous" "${REPO}/frontend/dist"
+systemctl restart "${SERVICE}"
+
+git worktree remove --force "${candidate}" 2>/dev/null || rm -rf "${candidate}"
+git worktree prune
+
+if health_ok; then
+  alert "PokeCollector rolled back from ${target}" \
+    "${target} failed its health check after restart, so ${previous_tag} (${previous_sha}) was restored and is healthy again. The bad tag is still the newest, so this will retry until it is fixed or replaced."
+  log "rolled back to ${previous_tag} and it is healthy"
+else
+  alert "PokeCollector is DOWN after rolling back from ${target}" \
+    "${target} failed its health check, the rollback to ${previous_tag} (${previous_sha}) was attempted, and the service is still not answering ${HEALTH_URL}. This needs a person."
+  log "rollback did not restore health"
+fi
+exit 1
