@@ -35,22 +35,45 @@ a statement is unverified, it says so.
 These are the items worth reviewing first, because they are defects in upstream
 rather than additions to it.
 
-## 1.1 Forgeable sessions when the JWT secret is empty
+## 1.1 ~~Forgeable sessions when the JWT secret is empty~~ TAKEN UPSTREAM
 
-**Branch:** `fix/jwt-empty-secret-forgeable`
+> **Upstream took this.** Submitted as
+> [PR #351](https://github.com/Git-Romer/pokecollector/pull/351) and released
+> in **v1.38.1**. Nothing here is outstanding: the fork's
+> `backend/services/auth.py` and `backend/tests/test_jwt_secret.py` are now
+> byte-identical to upstream's.
+>
+> The maintainer improved it before merging, in `5f0a555`, and the improvement
+> was worth having: an `flock` around the read-and-create path, because several
+> workers starting at once each generated a key and raced through one fixed
+> temp file, so different workers could end up signing with different keys. He
+> also swapped that fixed path for `tempfile.mkstemp`, added `flush` and
+> `fsync` before the rename so a crash cannot leave an empty key file, tightened
+> the directory to `0700`, cleaned up the temp file on failure, and added three
+> tests: concurrent startup, an empty persisted file being repaired, and a
+> relative path.
 
-If the configured JWT secret was empty, tokens were still signed and verified
+~~**Branch:** `fix/jwt-empty-secret-forgeable`~~
+
+~~If the configured JWT secret was empty, tokens were still signed and verified
 against that empty string, so anyone could mint a valid session for any user.
 The fix generates and persists a secret when none is configured rather than
-proceeding with an empty one.
+proceeding with an empty one.~~
 
-**Files:** `backend/services/auth.py`, `backend/api/auth.py`
+~~**Files:** `backend/services/auth.py`, `backend/api/auth.py`~~
 
-**Extractability: clean.** This is a straight bug fix and does not depend on
+~~**Extractability: clean.** This is a straight bug fix and does not depend on
 anything else in this fork. If you take one thing from this document, take
-this.
+this.~~
 
 ## 1.2 Multi-user mode lockout
+
+> **Upstream has taken this too**, in
+> [PR #354](https://github.com/Git-Romer/pokecollector/pull/354), released in
+> **v1.38.2**, which this fork has not merged yet. Upstream's version also
+> warns before multi-user mode is enabled, which the fork's does not. Strike
+> this section once v1.38.2 is merged and the two are reconciled; prefer
+> upstream's where they overlap.
 
 **Branch:** `fix/multi-user-mode-lockout`
 
@@ -443,8 +466,9 @@ becoming unreachable as the frame grew.
 
 # 8. Suggested order if you want any of it
 
-1. **Section 1** - the security fixes, in full. They are defects, they are
-   self-contained, and 1.1 is the serious one.
+1. **Section 1** - the security fixes. Both have since been taken upstream:
+   1.1 in v1.38.1 and 1.2 in v1.38.2, the latter improved with a warning the
+   fork's version lacks. Nothing to do for 1.1; reconcile 1.2 on merge.
 2. **Section 2** - the provider abstraction, if multi-provider is interesting.
    Additive and default-preserving.
 3. **3.4** - per-item re-take. Small, no migration, and closes a real gap:
