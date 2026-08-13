@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { hookHarness, findAll, walkTree } from '../test/hookHarness'
@@ -505,5 +507,23 @@ describe('guideIsHeightBound', () => {
   it('treats the pre-metadata fallback as height-bound, as the old fixed box was', () => {
     expect(guideIsHeightBound(null)).toBe(true)
     expect(guideIsHeightBound({ width: 720, height: 0 })).toBe(true)
+  })
+})
+
+describe('the frame caps and the modal breakpoint', () => {
+  it('bounds the frame harder exactly where Modal stops rendering a sheet', async () => {
+    // The two caps exist because there are two containers: a full-height sheet
+    // below the breakpoint and an 85vh centred dialog at or above it. The
+    // shutter is pinned to the bottom of the frame, so a frame that outgrows
+    // its container takes its own controls off screen. If the breakpoint moves
+    // and the cap does not, that returns silently on desktop only.
+    const source = readFileSync(
+      new URL('./LiveCardViewfinder.jsx', import.meta.url), 'utf8',
+    )
+    const { DESKTOP_MEDIA_QUERY } = await import('./ui/Modal')
+
+    expect(DESKTOP_MEDIA_QUERY).toBe('(min-width: 1024px)')
+    // Tailwind's lg: is min-width 1024px, the same threshold.
+    expect(source).toContain('lg:max-h-[')
   })
 })

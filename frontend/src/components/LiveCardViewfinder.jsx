@@ -198,17 +198,19 @@ export default function LiveCardViewfinder({ onCapture, isFull = false, singleSh
       {/* Sized to the stream once the browser reports it, so the picture fills
           the frame instead of sitting in bars. 4:3 only until then.
 
-          The cap still matters even with the shutter overlaid: the shutter is
-          pinned to the bottom of the FRAME, not of the viewport, so a frame
-          taller than the visible sheet carries its own controls off the bottom
-          with it. Verified on a device at 62dvh, where the capture button was
-          only reachable by scrolling. 48dvh is what fits alongside the sheet's
-          header, the staged photos and the sticky submit; it is larger than the
-          old cap allowed because overlaying the controls gave back the row they
-          used to occupy. */}
+          Two caps, because there are two containers. The shutter is pinned to
+          the bottom of the FRAME rather than of the viewport, so a frame taller
+          than whatever is showing it carries its own controls off the bottom
+          with it. On a phone the sheet is full height, and 62dvh fits inside
+          it. From 1024px Modal stops rendering a sheet and renders a centred
+          dialog capped at 85vh instead, which has to hold this frame plus the
+          panel's header, staged photos and submit, so the frame is bounded
+          harder there. The lg breakpoint is 1024px precisely because that is
+          DESKTOP_MEDIA_QUERY in ui/Modal.jsx; if that moves, this must move
+          with it. */}
       <div
         style={streamSize ? { aspectRatio: `${streamSize.width} / ${streamSize.height}` } : undefined}
-        className={`relative mx-auto max-h-[62dvh] overflow-hidden rounded-xl border border-white/10 bg-black ${streamSize ? '' : 'aspect-[4/3]'}`}
+        className={`relative mx-auto max-h-[62dvh] overflow-hidden rounded-xl border border-white/10 bg-black lg:max-h-[42dvh] ${streamSize ? '' : 'aspect-[4/3]'}`}
       >
         <video
           ref={videoRef}

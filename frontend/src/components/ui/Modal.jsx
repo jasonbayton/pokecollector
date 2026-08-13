@@ -5,7 +5,10 @@ import Sheet from './Sheet'
 import { useSettings } from '../../contexts/SettingsContext'
 import { useDialogBehavior } from './dialogBehavior'
 
-const DESKTOP_MEDIA_QUERY = '(min-width: 1024px)'
+// Exported so the viewfinder's desktop frame cap can be pinned to the same
+// breakpoint. Below this Modal renders a sheet, at or above it a centred
+// dialog, and the two have very different height budgets for their content.
+export const DESKTOP_MEDIA_QUERY = '(min-width: 1024px)'
 
 /**
  * Modal — Centered overlay modal on desktop, Sheet on mobile.
