@@ -24,6 +24,11 @@
 #     aborted still leaves the old code active and healthy.
 #   * The health check gates the release. If it fails, the previous tag and its
 #     built assets are put back and the service restarted.
+#   * The fetch is --force --prune-tags. A plain `fetch --tags` REFUSES to move
+#     a tag that already exists locally ("would clobber existing tag") and
+#     leaves the old one in place, so a re-pointed release tag would go on
+#     building the commit it used to name, forever. --prune-tags likewise drops
+#     tags deleted on the remote, which would otherwise stay selectable here.
 #
 set -euo pipefail
 
@@ -65,7 +70,7 @@ health_ok() {
 mkdir -p "${STATE}" "${RELEASES}"
 
 cd "${REPO}"
-git fetch --quiet --tags --prune "${REMOTE}"
+git fetch --quiet --tags --prune --prune-tags --force "${REMOTE}"
 
 # -taggerdate, deliberately. See the note at the top of this file.
 target=$(git tag --list "${TAG_GLOB}" --sort=-taggerdate | head -n 1)
@@ -85,15 +90,26 @@ if [ "$(git cat-file -t "${target}" 2>/dev/null)" != "tag" ]; then
 fi
 
 deployed=""
+deployed_sha=""
 [ -f "${STATE}/deployed" ] && deployed=$(cat "${STATE}/deployed")
+[ -f "${STATE}/deployed_sha" ] && deployed_sha=$(cat "${STATE}/deployed_sha")
 
-if [ "${target}" = "${deployed}" ]; then
-  log "already on ${target}"
+target_sha=$(git rev-list -n 1 "${target}")
+
+# Both, not just the name. A tag that is moved to a new commit keeps its name,
+# so comparing names alone reports "already on" and silently never ships the
+# new commit. Comparing commits alone would miss nothing here but says less in
+# the log, so record and compare both.
+if [ "${target}" = "${deployed}" ] && [ "${target_sha}" = "${deployed_sha}" ]; then
+  log "already on ${target} (${target_sha})"
   exit 0
 fi
 
-log "deploying ${target} (currently ${deployed:-unknown})"
-target_sha=$(git rev-list -n 1 "${target}")
+if [ "${target}" = "${deployed}" ]; then
+  log "${target} has moved from ${deployed_sha:-unknown} to ${target_sha}, redeploying"
+else
+  log "deploying ${target} (currently ${deployed:-unknown})"
+fi
 
 # ---------------------------------------------------------------------------
 # Build the candidate in isolation. Nothing below this point has touched the
@@ -137,6 +153,7 @@ systemctl restart "${SERVICE}"
 
 if health_ok; then
   printf '%s\n' "${target}" > "${STATE}/deployed"
+  printf '%s\n' "${target_sha}" > "${STATE}/deployed_sha"
   printf '%s\n' "${previous_tag}" > "${STATE}/previous"
   rm -rf "${REPO}/frontend/dist.previous"
   git worktree remove --force "${candidate}" 2>/dev/null || rm -rf "${candidate}"
