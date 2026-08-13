@@ -24,11 +24,12 @@
 #     aborted still leaves the old code active and healthy.
 #   * The health check gates the release. If it fails, the previous tag and its
 #     built assets are put back and the service restarted.
-#   * The fetch is --force --prune-tags. A plain `fetch --tags` REFUSES to move
-#     a tag that already exists locally ("would clobber existing tag") and
+#   * Tags are pruned and then fetched with --force, in two passes. A plain
+#     `fetch --tags` REFUSES to move a tag that already exists locally and
 #     leaves the old one in place, so a re-pointed release tag would go on
-#     building the commit it used to name, forever. --prune-tags likewise drops
-#     tags deleted on the remote, which would otherwise stay selectable here.
+#     building the commit it used to name, forever. Pruning drops tags deleted
+#     on the remote. Doing both in one invocation dropped the stale tag without
+#     fetching its replacement, so the two are kept separate.
 #
 set -euo pipefail
 
@@ -70,7 +71,12 @@ health_ok() {
 mkdir -p "${STATE}" "${RELEASES}"
 
 cd "${REPO}"
-git fetch --quiet --tags --prune --prune-tags --force "${REMOTE}"
+# Two passes, deliberately. Combining --prune-tags with --tags in one
+# invocation pruned the stale tag and did not bring the replacement back in the
+# same pass, leaving no release tags at all. Pruning and fetching separately
+# makes the order explicit instead of depending on how the flags interact.
+git fetch --quiet --prune --prune-tags "${REMOTE}" || true
+git fetch --quiet --tags --force "${REMOTE}"
 
 # -taggerdate, deliberately. See the note at the top of this file.
 target=$(git tag --list "${TAG_GLOB}" --sort=-taggerdate | head -n 1)
