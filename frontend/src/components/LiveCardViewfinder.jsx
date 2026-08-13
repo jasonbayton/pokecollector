@@ -196,13 +196,19 @@ export default function LiveCardViewfinder({ onCapture, isFull = false, singleSh
       </div>
 
       {/* Sized to the stream once the browser reports it, so the picture fills
-          the frame instead of sitting in bars. 4:3 only until then, and still
-          capped in viewport height: at full modal width a tall portrait stream
-          would otherwise push the shutter and Start scanning off the bottom of
-          the panel. The cap is the reason this is max-h rather than a height. */}
+          the frame instead of sitting in bars. 4:3 only until then.
+
+          The cap still matters even with the shutter overlaid: the shutter is
+          pinned to the bottom of the FRAME, not of the viewport, so a frame
+          taller than the visible sheet carries its own controls off the bottom
+          with it. Verified on a device at 62dvh, where the capture button was
+          only reachable by scrolling. 48dvh is what fits alongside the sheet's
+          header, the staged photos and the sticky submit; it is larger than the
+          old cap allowed because overlaying the controls gave back the row they
+          used to occupy. */}
       <div
         style={streamSize ? { aspectRatio: `${streamSize.width} / ${streamSize.height}` } : undefined}
-        className={`relative mx-auto max-h-[62dvh] overflow-hidden rounded-xl border border-white/10 bg-black ${streamSize ? '' : 'aspect-[4/3]'}`}
+        className={`relative mx-auto max-h-[48dvh] overflow-hidden rounded-xl border border-white/10 bg-black ${streamSize ? '' : 'aspect-[4/3]'}`}
       >
         <video
           ref={videoRef}
