@@ -11,6 +11,7 @@ import { invalidateCardState, invalidateTcgdexFilterLanguages } from '../utils/q
 import MoneyInput from './MoneyInput'
 import { parseMoneyInputValue } from '../utils/moneyInput'
 import { CardDisplay } from './card-system'
+import QuantityInput from './ui/QuantityInput'
 
 // Add-to-collection modal for a confirmed scan match. This is the only path by
 // which a scanned card reaches the collection, so it is shared by the review
@@ -93,11 +94,7 @@ export default function ScanAddModal({ match, defaultLang, onClose, onAdded }) {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-text-muted mb-1 block">{t('common.quantity')}</label>
-                <input
-                  type="number" min="1" value={quantity}
-                  onChange={e => setQuantity(parseInt(e.target.value) || 1)}
-                  className="input"
-                />
+                <QuantityInput value={quantity} onChange={setQuantity} />
               </div>
               <div>
                 <label className="text-xs text-text-muted mb-1 block">{t('card.condition')}</label>

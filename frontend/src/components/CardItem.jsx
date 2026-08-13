@@ -21,6 +21,7 @@ import { parseMoneyInputValue } from '../utils/moneyInput'
 import { cardmarketLinks } from '../utils/cardmarket'
 import UnifiedCard, { UnifiedCardDialog } from './UnifiedCard'
 import { MAX_CARD_QUANTITY } from '../utils/quantityLimits'
+import QuantityInput from './ui/QuantityInput'
 
 const RARITY_COLORS = {
   'Common': 'text-text-secondary',
@@ -380,8 +381,7 @@ export function CustomCardModal({ onClose, onCreated, sets: setsProp = [], autoA
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-text-muted mb-1 block">{t('card.quantity')}</label>
-                  <input type="number" min="1" value={quantity}
-                    onChange={(e) => setQuantity(parseInt(e.target.value) || 1)} className="input" />
+                  <QuantityInput value={quantity} onChange={setQuantity} />
                 </div>
                 <div>
                   <label className="text-xs text-text-muted mb-1 block">{t('card.condition')}</label>
@@ -1068,8 +1068,7 @@ export function CardModal({ card, onClose, onEdit, defaultLang = 'en', ownedItem
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-text-muted mb-1 block">{t('card.quantity')}</label>
-                  <input type="number" min="1" value={quantity}
-                    onChange={(e) => setQuantity(parseInt(e.target.value) || 1)} className="input" />
+                  <QuantityInput value={quantity} onChange={setQuantity} />
                 </div>
                 <div>
                   <label className="text-xs text-text-muted mb-1 block">{t('card.condition')}</label>

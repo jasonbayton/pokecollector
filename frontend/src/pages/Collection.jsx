@@ -29,6 +29,7 @@ import { invalidateCardState, invalidateTcgdexFilterLanguages } from '../utils/q
 import { useVisibleTcgdexLanguages } from '../hooks/useVisibleTcgdexLanguages'
 import { formatMoneyInputValue, parseMoneyInputValue } from '../utils/moneyInput'
 import { getCardVariantEffectClass } from '../utils/cardVariantEffect'
+import QuantityInput from '../components/ui/QuantityInput'
 
 const CONDITIONS = ['Mint', 'NM', 'LP', 'MP', 'HP']
 const CONDITION_COLORS = {
@@ -565,11 +566,7 @@ function CollectionEditModal({ item, onClose }) {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-text-muted mb-1 block">{t('card.quantity')}</label>
-                  <input
-                    type="number" min="1" value={quantity}
-                    onChange={e => setQuantity(parseInt(e.target.value) || 1)}
-                    className="input"
-                  />
+                  <QuantityInput value={quantity} onChange={setQuantity} />
                 </div>
                 <div>
                   <label className="text-xs text-text-muted mb-1 block">{t('card.condition')}</label>
