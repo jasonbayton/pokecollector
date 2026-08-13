@@ -177,10 +177,12 @@ re-implementation:
   payload now carries `image_token`, hashed from the stored path, which changes
   when the file changes and not when the status advances.
 - **The panel treats an item as busy from the moment a re-take is submitted**,
-  not when the server reports it. `ScanAddModal` writes to the collection
-  *before* the scan is resolved, so acting on a stale candidate in that window
-  filed a card nothing had matched and then failed to resolve with a 409,
-  leaving it in the collection with no prompt.
+  not when the server reports it. This is the one with the worst consequence if
+  missed. `ScanAddModal` writes to the collection *before* the scan is
+  resolved, so acting on a stale candidate in that window filed a card that
+  nothing had matched, and the resolve then failed with a 409 because the
+  re-take had reset the item. The card stayed in the collection with no prompt.
+  The same window exists for `retry`, which shares the gate.
 
 **Files:** `backend/api/scan_jobs.py`, `backend/services/scan_queue.py`,
 `frontend/src/components/ScanReview.jsx`, `frontend/src/pages/ScanQueue.jsx`
@@ -211,8 +213,42 @@ Worth knowing if you adopt it:
 - **The session must be dropped, not merely disposed, on cleanup.** A disposed
   session refuses `start()` silently, and the ref outlives the cleanup.
 
+### Frame geometry, which took four attempts to get right
+
+Everything here was found by running the thing on a physical phone. None of it
+was visible from the code or catchable by the suite, so it is recorded in full
+rather than left for the next person to rediscover.
+
+- **The frame takes its aspect ratio from the stream**, read from
+  `onLoadedMetadata`. A hardcoded box cannot suit both: a phone hands back a
+  portrait stream and a desktop webcam a landscape one, so any fixed ratio bars
+  one of them, and `object-contain` then shrinks the card to fit the wrong
+  axis. At the original fixed 4:3 the card was using about 40% of the frame
+  width on a phone.
+- **`object-contain`, never `cover`.** Capture draws the whole video frame, so
+  a cropped preview would have the user framing against something that is not
+  what gets captured.
+- **`guideIsHeightBound` picks the alignment guide's binding axis.** The guide
+  was sized from the frame height, which only holds while the frame is wider
+  than a card. Once the frame started matching a portrait stream, width became
+  the scarce axis and 86% of the height ran the guide's side borders straight
+  off the picture.
+- **The capture and stop controls sit on the picture, not below it.** Stacked
+  underneath they competed with the frame for one vertical budget, so a bigger
+  card always cost a reachable shutter. Note the controls pin to the bottom of
+  the *frame*, not the viewport: an oversized frame carries them off-screen
+  with it, which is the same failure wearing a different hat.
+- **The scanner sheet is full height on mobile** (`fullHeight` on `Sheet`).
+  This is what actually resolved it. Every cap chosen before that was
+  negotiating over a panel that did not need to be short, since the camera is
+  the point of that screen.
+- **`fullHeight` is a prop, not a class the caller appends.** Two arbitrary
+  Tailwind `max-h` values tie on specificity, so which one wins depends on
+  their order in the built stylesheet rather than on anything visible at the
+  call site. Desktop is untouched and keeps its centred dialog.
+
 **Extractability: clean**, but it is a meaningful surface with real device
-behaviour behind it. See "Testing" below for what is and is not verified.
+behaviour behind it, and the geometry notes above are most of its value.
 
 ## 3.6 Quick add and scanner presentation
 
@@ -224,6 +260,30 @@ job.
 
 **Extractability: local by design.** This is presentation opinion, not
 mechanism. Described so the reasoning is available, not offered as a patch.
+
+## 3.7 Smaller scan-queue corrections
+
+Each of these is independent of the rest and cheap to take.
+
+- **`scanJobRemaining`** (`frontend/src/utils/scanJobs.js`). The job header
+  summed `pending + processing + retrying`, each of which is optional in
+  practice, so a payload missing one rendered the literal string
+  `NaN remaining` at the user. Note `Number(value || 0)` is *not* sufficient on
+  its own: it rescues `null` and `undefined` but turns a non-numeric string
+  straight back into `NaN`. The coercion goes through `Number.isFinite`.
+- **Scroll restoration between the list and a job.** They are one component and
+  react-router swaps `jobId` without remounting it, so opening a job from
+  halfway down the list dropped the user into the middle of the detail, and
+  returning restored whatever offset the detail had left behind. The window is
+  the scroller, since `Layout` is `min-h-dvh` with no vertical overflow
+  container.
+- **The empty state opens the scanner.** Its button is labelled "Open the card
+  scanner" and navigated to `/search`, because that page was once the only
+  place the scanner could be opened from. The shared scanner provider removed
+  that constraint and the button was left behind naming an action it did not
+  perform.
+
+**Extractability: clean**, individually.
 
 ---
 
@@ -345,16 +405,39 @@ Two things about the frontend harness that will bite anyone porting tests:
 All 107 `scanner.*` keys now exist in `en`, `de` and `fr`, with placeholders
 verified identical across locales.
 
-## What is not verified
+## What is and is not verified
 
-Stated plainly so nobody inherits a false assurance:
+Stated plainly so nobody inherits a false assurance either way.
 
-- **The re-take flow has not been exercised on real hardware.** The backend
-  path, the guards, the commit-failure ordering and the UI gating are all
-  covered by tests and were mutation-verified, but the end-to-end capture on a
-  physical phone against a deployed instance has not been performed.
-- The live viewfinder itself *was* verified on a physical Pixel earlier in its
-  development.
+**Verified on a physical Pixel 9 Pro XL against the deployed instance over
+HTTPS**, driven through adb: quick add opens the scanner; the viewfinder starts
+and goes live; capture stages a card and the camera stays live for the next
+one; submit creates a job; the job page offers a re-take; a re-take captures,
+posts, closes after one shot, and the panel then shows the **new** photo and a
+**re-scanned** result. That last part is the load-bearing check. The card
+number moved from 10/132 to 50/132 on the replacement image, which is what
+proves the matcher ran against the new photo rather than replaying the old
+result, and the changed thumbnail is what proves `image_token` works. Keyed on
+the item id, as it originally was, the panel would still have shown the photo
+the user had just replaced.
+
+Four defects came out of that device run that the suite could not have caught,
+and all four are fixed: the batch hint appearing in a single-shot modal, the
+"Open the card scanner" button navigating to `/search` instead of opening the
+scanner, the alignment guide's borders leaving the picture, and the shutter
+becoming unreachable as the frame grew.
+
+**Not verified:**
+
+- **Desktop layout of the reworked viewfinder.** `fullHeight` reaches only the
+  mobile sheet, and the overlaid controls were exercised on a phone. The
+  centred desktop dialog is unchanged, but the new frame geometry inside it
+  has not been looked at on a desktop browser.
+- **Any browser other than Chrome on Android**, and any device whose camera
+  reports an unusual stream ratio.
+- **`de` and `fr` are machine-written**, not reviewed by a speaker. They are
+  structurally checked (every key present, placeholders identical to English,
+  no en or em dashes) but the wording has not been checked for tone.
 
 ---
 
