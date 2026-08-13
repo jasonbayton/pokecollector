@@ -181,7 +181,7 @@ export default function LiveCardViewfinder({ onCapture, isFull = false, singleSh
           the panel. The cap is the reason this is max-h rather than a height. */}
       <div
         style={streamAspect ? { aspectRatio: streamAspect } : undefined}
-        className={`relative mx-auto max-h-[58dvh] overflow-hidden rounded-xl border border-white/10 bg-black ${streamAspect ? '' : 'aspect-[4/3]'}`}
+        className={`relative mx-auto max-h-[44dvh] overflow-hidden rounded-xl border border-white/10 bg-black ${streamAspect ? '' : 'aspect-[4/3]'}`}
       >
         <video
           ref={videoRef}
