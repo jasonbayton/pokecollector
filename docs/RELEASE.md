@@ -114,6 +114,33 @@ Alerts go through the host's existing `pokecollector-alert`, which holds its
 Outpost credentials in `/etc/pokecollector-alerts.env`. One alert path, one
 place to configure.
 
+## Four things the live rollout caught that the lab did not
+
+Recorded because each was invisible until it happened, and each would
+otherwise be rediscovered the hard way.
+
+- **`origin` on this container is UPSTREAM, `fork` is ours.** The script used to
+  default `POKECOLLECTOR_REMOTE` to `origin`, so a run without the env file
+  fetched and pruned release tags against upstream and deleted every one of
+  them. The remote is now **required** rather than defaulted, because the safe
+  value cannot be guessed.
+- **Tag handling must be scoped to the release glob.** This repository carries
+  upstream's tags alongside ours, and `--tags --prune-tags` acts on all of
+  them, which is what made the wrong remote so destructive. Only `bayton-v*`
+  is fetched, by explicit refspec, and pruning is computed from `ls-remote` so
+  it can only ever remove a release tag.
+- **A plain `fetch --tags` refuses to move an existing tag.** Re-pointing a
+  release tag left the container building the commit it used to name, and it
+  would have retried that build every five minutes indefinitely. The fetch is
+  `--force`, and the state records the **commit** as well as the tag so a moved
+  tag is recognised as new work.
+- **systemd has no `HOME`, so git could not read root's config.** The repo is
+  owned by the `pokecollector` user, and the `safe.directory` exception for it
+  lives in root's global config. Without `HOME` every git command exited 128
+  with "dubious ownership". The units set `Environment=HOME=/root`. The built
+  assets are also chowned to the repository's owner, since the deploy runs as
+  root inside a tree that does not belong to it.
+
 ## Installing the kit
 
 ```bash
@@ -148,7 +175,9 @@ reasoned about:
 | Good tag after a failed one | recovers | deployed, health passes |
 | Lightweight tag | refused with an alert | exit 1, nothing deployed |
 | Checkout drifted by hand | drift check alerts | exit 1, drift reported |
-| Deploy re-run after rework | still deploys and drift stays clean | exit 0, drift exit 0 |
+| Tag moved to a new commit | redeploys the new commit | redeployed, HEAD matched |
+| No remote configured | refuses rather than guess | exit 1, nothing touched |
+| Remote that does not exist | refuses | exit 1, release tags intact |
 
 The lightweight-tag rule exists *because* of that testing: the first version
 ordered by `creatordate` and a newer tag lost to an older one.
