@@ -9,16 +9,25 @@ built on the box from source at the tagged commit.
 ## Making a release
 
 ```bash
-# 1. Bump VERSION in the same commit as the tag, never a commit later.
-#    /api/version reads the embedded VERSION file, not the tag.
-git add VERSION && git commit -m "Release bayton-v1.37.0-4"
-
-# 2. Annotated tag. Not lightweight - see "Why annotated" below.
+# 1. Annotated tag. Not lightweight - see "Why annotated" below.
 git tag -a bayton-v1.37.0-4 -m "Scanner re-take and viewfinder rework"
 
-# 3. Push the branch and the tag.
+# 2. Push the branch and the tag.
 git push origin local-deployment bayton-v1.37.0-4
 ```
+
+**Do not bump `VERSION` for a fork release.** That file is upstream's and
+merges forward with every upstream release, so writing fork numbering into it
+would create a conflict on each merge and misreport the app's upstream lineage.
+The fork release is identified by its tag, and the deployed tag is recorded on
+the box in `/var/lib/pokecollector-deploy/deployed`:
+
+```bash
+ssh jason@192.168.1.200 "lxc exec pokecollector -- cat /var/lib/pokecollector-deploy/deployed"
+```
+
+If the running fork release should be visible in the app itself, that wants a
+separate field rather than a hijacked `VERSION`.
 
 Within five minutes the container picks it up. To watch:
 
@@ -89,24 +98,34 @@ silent stall.
 
 ## Monitoring
 
-`pokecollector-monitor.timer` runs every ten minutes and is separate from the
-deploy path on purpose. Deploy only runs when there is a new tag, so it cannot
-notice a service that died an hour later. The monitor alerts on:
+Liveness was already covered before this kit existed.
+`pokecollector-health.timer` polls the health endpoint, restarts the service
+after two consecutive failures and alerts through `pokecollector-alert`. That
+is better than a single check, so this kit does not duplicate it: two checkers
+would race each other's restarts and send two emails per incident.
 
-- the service not running
-- the service running but not answering `/api/health` (**active is not the same
-  as healthy**, which is exactly how a bad deploy nearly went unnoticed by hand)
-- the checkout having drifted from the tag the deploy recorded, which catches a
-  manual fix on the box that would otherwise be silently overwritten by the
-  next release
+What nothing covered is **drift**, so `pokecollector-drift.timer` runs every
+ten minutes and alerts when the serving checkout is not the tag the deploy
+recorded. That is what catches a fix applied by hand on the box, which the next
+release would otherwise silently overwrite, or a checkout left somewhere
+unexpected by an interrupted deploy.
+
+Alerts go through the host's existing `pokecollector-alert`, which holds its
+Outpost credentials in `/etc/pokecollector-alerts.env`. One alert path, one
+place to configure.
 
 ## Installing the kit
 
 ```bash
-install -m 755 ops/pokecollector-deploy ops/pokecollector-monitor /usr/local/bin/
-install -m 644 ops/pokecollector-*.service ops/pokecollector-*.timer /etc/systemd/system/
+install -m 755 ops/pokecollector-deploy ops/pokecollector-drift /usr/local/bin/
+install -m 644 ops/pokecollector-update.service ops/pokecollector-update.timer \
+               ops/pokecollector-drift.service ops/pokecollector-drift.timer /etc/systemd/system/
+
+# The live container names its git remote "fork", not "origin".
+printf 'POKECOLLECTOR_REMOTE=fork\n' > /etc/pokecollector-deploy.env
+
 systemctl daemon-reload
-systemctl enable --now pokecollector-update.timer pokecollector-monitor.timer
+systemctl enable --now pokecollector-update.timer pokecollector-drift.timer
 ```
 
 Everything is overridable by environment variable (`POKECOLLECTOR_REPO`,
@@ -117,7 +136,7 @@ can be exercised somewhere that is not the live container.
 
 Proven end to end in a throwaway LXD container (`pc-deploy-lab`) against a
 local bare repo standing in for GitHub, with a stand-in service so that health
-could be made to fail on demand. Six scenarios, each observed rather than
+could be made to fail on demand. Eight scenarios, each observed rather than
 reasoned about:
 
 | Scenario | Expected | Observed |
@@ -128,8 +147,8 @@ reasoned about:
 | Release that does not build | running release untouched | exit 1, still on old tag, healthy |
 | Good tag after a failed one | recovers | deployed, health passes |
 | Lightweight tag | refused with an alert | exit 1, nothing deployed |
-| Checkout drifted by hand | monitor alerts | exit 1, drift reported |
-| Service stopped | monitor alerts | exit 1, not-running reported |
+| Checkout drifted by hand | drift check alerts | exit 1, drift reported |
+| Deploy re-run after rework | still deploys and drift stays clean | exit 0, drift exit 0 |
 
 The lightweight-tag rule exists *because* of that testing: the first version
 ordered by `creatordate` and a newer tag lost to an older one.

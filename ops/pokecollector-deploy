@@ -42,10 +42,11 @@ log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 alert() {
   local subject=$1 body=$2
   log "ALERT: ${subject}"
-  if command -v outpost >/dev/null 2>&1; then
-    outpost mail send -f llm@api.bayton.org --from-name "PokeCollector deploy" \
-      -t jason@bayton.org -s "${subject}" --text "${body}" >/dev/null 2>&1 || \
-      log "outpost alert failed to send"
+  if command -v pokecollector-alert >/dev/null 2>&1; then
+    printf '%s\n' "${body}" | pokecollector-alert "${subject}" >/dev/null 2>&1 || \
+      log "alert helper could not send"
+  else
+    log "no pokecollector-alert on this host, alert stayed in the journal"
   fi
 }
 

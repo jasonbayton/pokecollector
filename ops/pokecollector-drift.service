@@ -1,0 +1,7 @@
+[Unit]
+Description=PokeCollector deployed-tag drift check
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/pokecollector-deploy.env
+ExecStart=/usr/local/bin/pokecollector-drift

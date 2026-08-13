@@ -4,4 +4,5 @@ After=network-online.target
 
 [Service]
 Type=oneshot
+EnvironmentFile=-/etc/pokecollector-deploy.env
 ExecStart=/usr/local/bin/pokecollector-deploy

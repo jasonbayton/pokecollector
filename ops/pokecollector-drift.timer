@@ -1,5 +1,5 @@
 [Unit]
-Description=Run the PokeCollector liveness and drift check
+Description=Run the PokeCollector drift check
 
 [Timer]
 OnBootSec=5min

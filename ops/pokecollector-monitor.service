@@ -1,6 +1,0 @@
-[Unit]
-Description=PokeCollector liveness and drift check
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/pokecollector-monitor
