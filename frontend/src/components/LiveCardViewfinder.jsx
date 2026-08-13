@@ -6,6 +6,8 @@ import {
   CAMERA_FAILURE,
   CAMERA_STATUS,
   createCameraSession,
+  encodeCanvasToJpeg,
+  grabFrame,
 } from '../utils/cameraCapture'
 
 /**
@@ -153,6 +155,20 @@ export default function LiveCardViewfinder({ onCapture, isFull = false, singleSh
     if (capturing || isFull || camera.status !== CAMERA_STATUS.LIVE) return
     setCapturing(true)
     try {
+      if (singleShot) {
+        // The pixels are copied synchronously, so the modal can go the instant
+        // the shutter is pressed. Encoding a full frame to JPEG takes seconds
+        // on a phone, and there is nothing for the user to look at while it
+        // happens: this is a one shot replacement, not a staging tray they are
+        // adding to. The canvas owns its pixels, so closing the viewfinder and
+        // disposing its session underneath this cannot spoil the result.
+        const canvas = grabFrame(videoRef.current)
+        onClose?.()
+        const file = await encodeCanvasToJpeg(canvas)
+        onCapture?.(file)
+        return
+      }
+
       const file = await getSession().capture(videoRef.current)
       // A tap that worked clears the last tap's message; leaving it up says the
       // capture the user just took failed. Read the session rather than
@@ -161,7 +177,6 @@ export default function LiveCardViewfinder({ onCapture, isFull = false, singleSh
       const settled = getSession().getState()
       setCamera({ status: settled.status, failure: settled.failure })
       onCapture?.(file)
-      if (singleShot) onClose?.()
     } catch (error) {
       // The session's own status, not a hardcoded live: a frame can fail
       // because the stream died under us, and that leaves the session in error

@@ -198,12 +198,26 @@ function JobDetail({ jobId }) {
     onError: error => toast.error(error?.response?.data?.detail || t('scanner.actionFailed')),
   })
 
+  // Refresh before opening. The panel renders from cached job data, so an item
+  // that was re-taken, dismissed or filed since the last fetch still offers a
+  // re-take. Acting on one then failed server side with "this scan has already
+  // been handled", which reads as a bug rather than as the stale row it is.
+  const openRetake = item => {
+    setRetakeItem(item)
+    queryClient.invalidateQueries({ queryKey: ['scan-job', jobId] })
+  }
+
   const retakeMutation = useMutation({
     mutationFn: ({ item, file }) => replaceScanJobItemPhoto(jobId, item.id, file),
     onMutate: ({ item }) => markItemBusy(item.id),
     onSettled: (_data, _error, { item }) => clearItemBusy(item.id),
     onSuccess: invalidate,
-    onError: error => toast.error(error?.response?.data?.detail || t('scanner.actionFailed')),
+    onError: error => {
+      toast.error(error?.response?.data?.detail || t('scanner.actionFailed'))
+      // A refusal means our copy of the item was out of date, so correct it
+      // rather than leaving the same stale row offering the same dead action.
+      invalidate()
+    },
   })
 
   // Every item with a re-take or retry in flight, not just the newest. A
@@ -328,7 +342,7 @@ function JobDetail({ jobId }) {
             item={item}
             onAdd={(scanItem, match) => setAddSelection({ item: scanItem, match })}
             onRetry={itemToRetry => retryMutation.mutate(itemToRetry)}
-            onRetake={setRetakeItem}
+            onRetake={openRetake}
             isBusy={isItemBusy(item.id)}
             onDismiss={dismiss}
             retryNow={retryNow}

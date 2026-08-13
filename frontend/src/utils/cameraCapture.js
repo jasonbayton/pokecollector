@@ -148,6 +148,41 @@ function canvasToJpegBlob(canvas, quality) {
 let captureSequence = 0
 
 /**
+ * Copies the current frame into a canvas. Synchronous, and the returned canvas
+ * owns its pixels outright: once this has run the stream can stop, the session
+ * can be disposed and the element can unmount without affecting the result.
+ *
+ * Split out from the encode because encoding a full frame to JPEG takes
+ * seconds on a phone, and a caller that has already got the pixels should not
+ * have to keep a modal open in front of the user while that happens.
+ */
+export function grabFrame(video, createCanvas = defaultCreateCanvas) {
+  const width = Math.round(video?.videoWidth || 0)
+  const height = Math.round(video?.videoHeight || 0)
+  if (!width || !height) {
+    throw new CameraError(CAMERA_FAILURE.CAPTURE_FAILED, 'The viewfinder has no frame to capture.')
+  }
+  const canvas = createCanvas(width, height)
+  canvas.width = width
+  canvas.height = height
+  const context = typeof canvas.getContext === 'function' ? canvas.getContext('2d') : null
+  if (!context) throw new CameraError(CAMERA_FAILURE.CAPTURE_FAILED, 'No 2d context for the capture canvas.')
+  context.drawImage(video, 0, 0, width, height)
+  return canvas
+}
+
+export async function encodeCanvasToJpeg(canvas, { quality = 0.92, now = Date.now } = {}) {
+  const blob = await canvasToJpegBlob(canvas, quality)
+  if (!blob) throw new CameraError(CAMERA_FAILURE.CAPTURE_FAILED, 'The frame could not be encoded as JPEG.')
+  captureSequence += 1
+  const stamp = new Date(now()).toISOString().replace(/[:.]/g, '-')
+  return new File([blob], `card-${stamp}-${String(captureSequence).padStart(4, '0')}.jpg`, {
+    type: 'image/jpeg',
+    lastModified: now(),
+  })
+}
+
+/**
  * Draws the current frame at the stream's own resolution and returns it as a
  * JPEG File, ready to stage exactly like a file the user picked.
  *
@@ -169,12 +204,7 @@ export async function captureJpegFromVideo(video, {
     throw new CameraError(CAMERA_FAILURE.CAPTURE_FAILED, 'The viewfinder has no frame to capture.')
   }
 
-  const canvas = createCanvas(width, height)
-  canvas.width = width
-  canvas.height = height
-  const context = typeof canvas.getContext === 'function' ? canvas.getContext('2d') : null
-  if (!context) throw new CameraError(CAMERA_FAILURE.CAPTURE_FAILED, 'No 2d context for the capture canvas.')
-  context.drawImage(video, 0, 0, width, height)
+  const canvas = grabFrame(video, createCanvas)
 
   const blob = await canvasToJpegBlob(canvas, quality)
   if (!blob) throw new CameraError(CAMERA_FAILURE.CAPTURE_FAILED, 'The frame could not be encoded as JPEG.')

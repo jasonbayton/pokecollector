@@ -11,6 +11,13 @@ vi.mock('react', async importOriginal => ({
   ...hookHarness.hooks,
 }))
 
+// Single-shot capture deliberately does not go through the session: it copies
+// the pixels synchronously so the modal can close before the slow JPEG encode.
+const capture = vi.hoisted(() => ({
+  grabFrame: () => ({ id: 'canvas' }),
+  encodeCanvasToJpeg: async () => new File(['x'], 'x.jpg', { type: 'image/jpeg' }),
+}))
+
 const camera = vi.hoisted(() => ({
   sessions: [],
   supportFailure: null,
@@ -26,6 +33,8 @@ vi.mock('../utils/cameraCapture', async importOriginal => {
   const actual = await importOriginal()
   return {
     ...actual,
+    grabFrame: (...args) => capture.grabFrame(...args),
+    encodeCanvasToJpeg: (...args) => capture.encodeCanvasToJpeg(...args),
     createCameraSession: options => {
       const session = {
         options,
@@ -247,19 +256,30 @@ describe('LiveCardViewfinder', () => {
     expect(session().stop).not.toHaveBeenCalled()
   })
 
-  it('closes after one capture in single-shot mode', async () => {
+  it('closes before the encode finishes, not after it', async () => {
+    // The whole reason single-shot does not use session.capture. Encoding a
+    // full frame to JPEG takes seconds on a phone, and closing only afterwards
+    // left the user staring at a frozen modal for that whole time. The pixels
+    // are copied synchronously, so there is nothing left to wait for.
     const file = new File(['one'], 'retake.jpg', { type: 'image/jpeg' })
     const onClose = vi.fn()
+    let closedBeforeEncode = false
+    capture.grabFrame = () => ({ id: 'canvas' })
+    capture.encodeCanvasToJpeg = async () => {
+      closedBeforeEncode = onClose.mock.calls.length === 1
+      return file
+    }
     let tree = render({ singleShot: true, onClose })
     attachVideo(tree)
     session().publish({ status: CAMERA_STATUS.LIVE, failure: null, stream: { id: 'stream-1' } })
     tree = render({ singleShot: true, onClose })
-    session().capture.mockResolvedValueOnce(file)
 
     await buttonsWithText(tree)[0].props.onClick()
 
+    expect(closedBeforeEncode, 'the modal was still open while encoding').toBe(true)
     expect(props.onCapture).toHaveBeenCalledWith(file)
     expect(onClose).toHaveBeenCalledTimes(1)
+    expect(session().capture).not.toHaveBeenCalled()
   })
 
   it('offers no shutter at all until the camera is live', () => {
