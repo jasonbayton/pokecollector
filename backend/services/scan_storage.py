@@ -33,6 +33,24 @@ MAX_IMAGE_PIXELS = 50_000_000
 MAX_IMAGE_EDGE = 2048
 JPEG_QUALITY = 90
 SCAN_RETENTION_DAYS = 14
+
+# How long an appended photo waits before it can be claimed on its own.
+#
+# The composite processor tiles two to four cards into ONE vision request, so a
+# rolling queue that made every photo claimable the instant it arrived would
+# never find siblings to group with and would spend roughly four times as much
+# on recognition. Holding a photo briefly lets the next few catch up.
+#
+# The wait is invisible during a run of captures, because the user is still
+# photographing; only the last photo of a run actually pays it. A full group is
+# released early, so a fast shooter never waits at all.
+COMPOSITE_LINGER_SECONDS = 8
+COMPOSITE_GROUP_SIZE = 4
+
+# The rolling queue's own ceiling: how many of a user's photos may be waiting
+# to be recognised at once, across every job. Distinct from MAX_FILES_PER_JOB,
+# which bounds one job's stored photos rather than the work in flight.
+MAX_PENDING_ITEMS = 50
 ALLOWED_IMAGE_FORMATS = frozenset({"JPEG", "PNG", "WEBP", "HEIF", "HEIC"})
 
 
@@ -229,8 +247,15 @@ async def create_scan_job(
     uploads: list,
     *,
     batch_modes: list[bool] | None = None,
+    rolling: bool = False,
 ) -> ScanJob:
-    """Validate and persist a job without retaining any original upload bytes."""
+    """Validate and persist a job without retaining any original upload bytes.
+
+    `rolling` opens the job for the rolling queue rather than as a finished
+    batch: its photos are eligible to be composited with whatever the user
+    photographs next, so they are held for COMPOSITE_LINGER_SECONDS instead of
+    being claimable immediately.
+    """
     if not uploads:
         raise ScanUploadError("At least one scan photo is required.")
     if len(uploads) > MAX_FILES_PER_JOB:
@@ -241,6 +266,7 @@ async def create_scan_job(
         raise ScanUploadError("Scan processing choices do not match the uploaded photos.")
 
     now = datetime.datetime.utcnow()
+    claimable_at = now + datetime.timedelta(seconds=COMPOSITE_LINGER_SECONDS) if rolling else now
     job = ScanJob(
         user_id=user_id,
         status="pending",
@@ -279,12 +305,12 @@ async def create_scan_job(
                     image_path=relative_path,
                     content_type=sanitized.content_type,
                     byte_size=byte_size,
-                    batch_mode=bool(batch_modes[position]) and len(uploads) > 1,
+                    batch_mode=True if rolling else (bool(batch_modes[position]) and len(uploads) > 1),
                     status="pending",
                     resolved=False,
                     attempts=0,
                     transient_failures=0,
-                    next_attempt_at=now,
+                    next_attempt_at=claimable_at,
                     created_at=now,
                     updated_at=now,
                 )
@@ -296,3 +322,116 @@ async def create_scan_job(
         db.rollback()
         delete_job_directory(job.id)
         raise
+
+
+def pending_item_count(db: Session, user_id: int) -> int:
+    """Photos of this user's that are still waiting to be recognised.
+
+    Counted across every job, because the ceiling is on work in flight rather
+    than on any one job's contents.
+    """
+    return (
+        db.query(ScanJobItem)
+        .filter(
+            ScanJobItem.user_id == user_id,
+            ScanJobItem.resolved.is_(False),
+            ScanJobItem.status.in_(["pending", "processing", "retrying"]),
+        )
+        .count()
+    )
+
+
+def release_full_composite_group(db: Session, job_id: int, *, now: datetime.datetime | None = None) -> int:
+    """Let a complete group skip the rest of its linger.
+
+    The linger exists to gather siblings for one composite request. Once enough
+    have arrived there is nothing left to wait for, so holding them only adds
+    latency for a user who is photographing quickly.
+    """
+    now = now or datetime.datetime.utcnow()
+    waiting = (
+        db.query(ScanJobItem)
+        .filter(
+            ScanJobItem.job_id == job_id,
+            ScanJobItem.status == "pending",
+            ScanJobItem.batch_mode.is_(True),
+            ScanJobItem.resolved.is_(False),
+            ScanJobItem.next_attempt_at > now,
+        )
+        .order_by(ScanJobItem.position.asc())
+        .all()
+    )
+    if len(waiting) < COMPOSITE_GROUP_SIZE:
+        return 0
+    for item in waiting[:COMPOSITE_GROUP_SIZE]:
+        item.next_attempt_at = now
+        item.updated_at = now
+    db.commit()
+    return COMPOSITE_GROUP_SIZE
+
+
+async def append_scan_items(db: Session, job: ScanJob, uploads: list) -> list[ScanJobItem]:
+    """Add photos to an open job, held briefly so they can be composited.
+
+    The rolling queue's whole point is that photographing IS submitting, so this
+    is what the shutter calls. It deliberately does not touch job status: the
+    queue moves a job to running when it claims from it, and a job that had
+    finished becomes claimable again simply by having new pending work.
+    """
+    if not uploads:
+        raise ScanUploadError("At least one scan photo is required.")
+
+    existing = db.query(ScanJobItem).filter(ScanJobItem.job_id == job.id).all()
+    if len(existing) + len(uploads) > MAX_FILES_PER_JOB:
+        raise ScanUploadError("A scan job can contain at most 50 photos.")
+
+    now = datetime.datetime.utcnow()
+    if job.expires_at <= now:
+        raise ScanUploadError("This scan job has expired.")
+
+    # Only items that still hold a file count against the job's budget: resolved
+    # ones keep byte_size but their photo has already been deleted.
+    used_bytes = sum(int(item.byte_size or 0) for item in existing if item.image_path)
+    claimable_at = now + datetime.timedelta(seconds=COMPOSITE_LINGER_SECONDS)
+    next_position = max((int(item.position) for item in existing), default=-1) + 1
+
+    added: list[ScanJobItem] = []
+    stored_paths: list[str] = []
+    try:
+        for offset, upload in enumerate(uploads):
+            raw = await read_limited_upload(upload, remaining_job_bytes=MAX_JOB_BYTES - used_bytes)
+            used_bytes += len(raw)
+            sanitized = sanitize_image_bytes(raw)
+            relative_path, byte_size = store_sanitized_image(job.id, sanitized)
+            stored_paths.append(relative_path)
+            item = ScanJobItem(
+                job_id=job.id,
+                user_id=job.user_id,
+                position=next_position + offset,
+                image_path=relative_path,
+                content_type=sanitized.content_type,
+                byte_size=byte_size,
+                batch_mode=True,
+                status="pending",
+                resolved=False,
+                attempts=0,
+                transient_failures=0,
+                next_attempt_at=claimable_at,
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(item)
+            added.append(item)
+        job.updated_at = now
+        db.commit()
+    except Exception:
+        db.rollback()
+        # Only what this call stored. The job's existing photos are not ours to
+        # remove, which is why this is not delete_job_directory.
+        for path in stored_paths:
+            delete_scan_image(path)
+        raise
+
+    for item in added:
+        db.refresh(item)
+    return added

@@ -450,7 +450,7 @@ class ScanProvider:
 
     def missing_credential_message(self) -> str:
         if self.is_gemini:
-            return "Kein Gemini API Key konfiguriert. Bitte in den Einstellungen eintragen."
+            return "No Gemini API key is configured. Add one in settings."
         return "No OpenAI API key configured. Add one in Settings first."
 
     def rate_limit_scope(self, priority: str):

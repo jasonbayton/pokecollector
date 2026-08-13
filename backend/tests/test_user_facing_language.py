@@ -22,7 +22,8 @@ GERMAN_CHARACTERS = re.compile(r"[äöüÄÖÜß]")
 # rather than a guess. Deliberately not "in" or "die", which are both.
 GERMAN_WORDS = re.compile(
     r"\b(nicht|konnte|werden|wurde|Karte|Fehler|bitte|Bitte|meldet|verf[üu]gbar"
-    r"|fehlgeschlagen|Ung[üu]ltig|[üu]berlastet|erreicht|pr[üu]fen|versuchen)\b"
+    r"|fehlgeschlagen|Ung[üu]ltig|[üu]berlastet|erreicht|pr[üu]fen|versuchen"
+    r"|Kein|keine|konfiguriert|eintragen|Einstellungen|nochmal|gerade)\b"
 )
 
 
@@ -50,18 +51,23 @@ class UserFacingLanguageTests(unittest.TestCase):
             "unmodified through the scan review inbox:\n" + "\n".join(offenders),
         )
 
-    def test_no_german_words_in_error_details(self):
+    def test_no_german_words_in_any_string_literal(self):
+        # Deliberately not restricted to lines mentioning detail or
+        # send_message. That narrower rule missed
+        # "Kein Gemini API Key konfiguriert. Bitte in den Einstellungen
+        # eintragen.", which is returned from a provider method and contains no
+        # umlaut, so neither half of the guard saw it.
         offenders = []
         for path in _candidate_files():
             for number, line in enumerate(path.read_text().splitlines(), start=1):
-                if "detail" not in line and "send_message" not in line:
+                if '"' not in line and "'" not in line:
                     continue
                 if GERMAN_WORDS.search(line):
                     offenders.append(f"{path.relative_to(BACKEND)}:{number}: {line.strip()}")
         self.assertEqual(
             offenders,
             [],
-            "German wording in a message that reaches the user:\n" + "\n".join(offenders),
+            "German wording in a string that can reach the user:\n" + "\n".join(offenders),
         )
 
     def test_the_guard_would_actually_fire(self):
@@ -69,6 +75,11 @@ class UserFacingLanguageTests(unittest.TestCase):
         # against the exact strings this fork had to translate.
         self.assertTrue(GERMAN_CHARACTERS.search("Ungültiger Gemini API Key."))
         self.assertTrue(GERMAN_WORDS.search("Kartenname konnte nicht erkannt werden."))
+        # The one the first version of this guard let through: no umlaut, and
+        # not on a line mentioning detail.
+        self.assertTrue(GERMAN_WORDS.search(
+            "Kein Gemini API Key konfiguriert. Bitte in den Einstellungen eintragen."
+        ))
         self.assertFalse(GERMAN_CHARACTERS.search("The card name could not be read."))
         self.assertFalse(GERMAN_WORDS.search("The card name could not be read."))
 

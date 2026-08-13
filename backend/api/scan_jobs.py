@@ -27,11 +27,15 @@ from services.scan_bulk_add import (
 )
 from services.scan_storage import (
     MAX_JOB_BYTES,
+    MAX_PENDING_ITEMS,
     ScanItemNoLongerReviewable,
     ScanJobBytesExceeded,
     ScanUploadError,
+    append_scan_items,
     create_scan_job,
     delete_job_directory,
+    pending_item_count,
+    release_full_composite_group,
     read_limited_upload,
     resolve_scan_path,
 )
@@ -113,6 +117,7 @@ async def enqueue_scan_job(
     background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     individual_positions: str | None = Form(None),
+    rolling: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -148,10 +153,56 @@ async def enqueue_scan_job(
             current_user.id,
             files,
             batch_modes=batch_modes,
+            rolling=rolling,
         )
     except ScanUploadError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+    background_tasks.add_task(drain_scan_queue, max_items=len(files))
+    return job_progress(db, job)
+
+
+@router.post("/recognize/jobs/{job_id}/items")
+async def append_scan_job_items(
+    job_id: int,
+    background_tasks: BackgroundTasks,
+    files: List[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Add photos to an open job. This is what the shutter calls.
+
+    In the rolling queue, photographing is submitting: there is no staging tray
+    and no separate send. The photo is held briefly so it can share a vision
+    request with whatever is shot next, and released early once a full group has
+    gathered.
+    """
+    job = (
+        db.query(ScanJob)
+        .filter(ScanJob.id == job_id, ScanJob.user_id == current_user.id)
+        .one_or_none()
+    )
+    if job is None:
+        raise HTTPException(status_code=404, detail="Scan job not found.")
+
+    # The ceiling is on work in flight, not on any one job, so it is counted
+    # across the user's jobs rather than from this one's contents.
+    outstanding = pending_item_count(db, current_user.id)
+    if outstanding + len(files) > MAX_PENDING_ITEMS:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"{MAX_PENDING_ITEMS} photos are already waiting to be scanned. "
+                "Review some before adding more."
+            ),
+        )
+
+    try:
+        await append_scan_items(db, job, files)
+    except ScanUploadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    release_full_composite_group(db, job.id)
     background_tasks.add_task(drain_scan_queue, max_items=len(files))
     return job_progress(db, job)
 
