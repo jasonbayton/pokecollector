@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Camera, Clock3, Loader2, ScanLine, Trash2 } from 'lucide-react'
@@ -24,6 +24,7 @@ import {
   hasActiveScanJobs,
   isScanJobActive,
   scanJobPollInterval,
+  scanJobRemaining,
 } from '../utils/scanJobs'
 import { formatRetryCountdown } from '../utils/retryCountdown'
 import { invalidateCardState, invalidateTcgdexFilterLanguages } from '../utils/queryInvalidation'
@@ -284,7 +285,7 @@ function JobDetail({ jobId }) {
             style={{ width: `${job.total ? Math.round((job.processed / job.total) * 100) : 0}%` }} />
         </div>
         <p className="mt-2 text-xs text-text-muted">
-          {job.pending + job.processing + job.retrying} {t('scanner.remaining')}
+          {scanJobRemaining(job)} {t('scanner.remaining')}
           {job.failed > 0 && ` · ${job.failed} ${t('scanner.failed')}`}
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
@@ -382,6 +383,8 @@ export default function ScanQueue() {
   const navigate = useNavigate()
   const { jobId } = useParams()
 
+  const listScrollRef = useRef(0)
+
   const { data, isLoading } = useQuery({
     queryKey: SCAN_JOBS_QUERY_KEY,
     queryFn: getScanJobs,
@@ -396,6 +399,22 @@ export default function ScanQueue() {
     if (hasInAppPredecessor(currentHistoryState())) navigate(-1)
     else navigate('/search')
   }
+
+  // The list and the detail are one component: react-router swaps jobId
+  // without remounting ScanQueue, so nothing resets or restores the scroll
+  // between them. Opening a job from halfway down the list therefore dropped
+  // the user into the middle of the detail, and coming back put them at
+  // whatever offset the detail had left behind. The window is the scroller
+  // here: Layout is min-h-dvh with no vertical overflow container.
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    if (jobId) {
+      window.scrollTo(0, 0)
+      return undefined
+    }
+    window.scrollTo(0, listScrollRef.current)
+    return () => { listScrollRef.current = window.scrollY }
+  }, [jobId])
 
   const jobs = data?.jobs || []
   const retryNow = useRetryClock(jobs.some(job => Number(job.retrying || 0) > 0))
