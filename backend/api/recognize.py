@@ -96,7 +96,7 @@ class GeminiRateLimitHTTPException(HTTPException):
         self.retry_reason = retry_reason
         super().__init__(
             status_code=429,
-            detail="Gemini Rate Limit erreicht – bitte nach der angegebenen Wartezeit erneut versuchen.",
+            detail="Gemini rate limit reached. Try again after the stated wait.",
             headers={"Retry-After": str(max(1, int(self.retry_after_seconds + 0.999)))},
         )
 
@@ -413,13 +413,13 @@ async def post_gemini_generate(
             if resp.status_code in {400, 401, 403}:
                 raise HTTPException(
                     status_code=400,
-                    detail="Ungültiger Gemini API Key. Bitte in den Einstellungen prüfen.",
+                    detail="That Gemini API key was rejected. Check it in settings.",
                 )
             if resp.status_code == 404:
                 upstream_message = gemini_error_message(resp)
-                detail = "Gemini Modell nicht verfügbar. Bitte GEMINI_MODEL auf ein unterstütztes Modell setzen."
+                detail = "That Gemini model is not available. Set GEMINI_MODEL to a supported model."
                 if upstream_message:
-                    detail = f"{detail} Google meldet: {upstream_message}"
+                    detail = f"{detail} Google reports: {upstream_message}"
                 raise HTTPException(status_code=502, detail=detail)
             if resp.status_code in GEMINI_TRANSIENT_STATUS_CODES:
                 if attempt < max_attempts - 1:
@@ -427,13 +427,13 @@ async def post_gemini_generate(
                     continue
                 raise HTTPException(
                     status_code=503,
-                    detail="Gemini ist gerade temporär überlastet oder nicht verfügbar. Bitte gleich nochmal versuchen.",
+                    detail="Gemini is busy or unavailable right now. Try again shortly.",
                 )
             if resp.is_error:
                 upstream_message = gemini_error_message(resp)
-                detail = f"Gemini Anfrage fehlgeschlagen ({resp.status_code})."
+                detail = f"The Gemini request failed ({resp.status_code})."
                 if upstream_message:
-                    detail = f"{detail} Google meldet: {upstream_message}"
+                    detail = f"{detail} Google reports: {upstream_message}"
                 raise HTTPException(status_code=502, detail=detail)
             try:
                 record_gemini_success(api_key)
@@ -454,10 +454,10 @@ async def post_gemini_generate(
                 continue
             raise HTTPException(
                 status_code=503,
-                detail="Gemini konnte gerade nicht erreicht werden. Bitte Verbindung prüfen oder später erneut versuchen.",
+                detail="Gemini could not be reached. Check the connection, or try again later.",
             )
 
-    raise HTTPException(status_code=500, detail=f"Gemini Anfrage fehlgeschlagen: {last_error}")
+    raise HTTPException(status_code=500, detail=f"The Gemini request failed: {last_error}")
 
 
 RECOGNIZE_PROMPT = """Look at this Pokemon Trading Card Game card image.
@@ -822,7 +822,7 @@ async def _search_and_rank_candidates(
     card_name = str(card_info.get("name") or "").strip()
     card_name_en = str(card_info.get("name_en") or card_name).strip() or card_name
     if not card_name:
-        raise HTTPException(status_code=422, detail="Kartenname konnte nicht erkannt werden.")
+        raise HTTPException(status_code=422, detail="The card name could not be read from this photo.")
 
     simple_name = _simplify_name(card_name)
     simple_name_en = _simplify_name(card_name_en)
@@ -1160,7 +1160,7 @@ async def recognize_sanitized_card(
     except Exception as exc:
         if trace:
             trace.record_error(f"Recognition parsing failed: {type(exc).__name__}")
-        raise HTTPException(status_code=500, detail=f"Erkennung fehlgeschlagen: {exc}")
+        raise HTTPException(status_code=500, detail=f"Recognition failed: {exc}")
 
     try:
         return await match_card_info(

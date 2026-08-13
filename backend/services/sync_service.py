@@ -752,8 +752,8 @@ def record_custom_card_match(db: Session, card, *, notify: bool = True) -> str |
     if notify:
         try:
             telegram.send_message(
-                f"🔄 Karte '<b>{card.name}</b>' ({card.set_id} #{card.number}) ist jetzt in der API verfügbar! "
-                f"Öffne die App um die Daten zu migrieren.",
+                f"🔄 '<b>{card.name}</b>' ({card.set_id} #{card.number}) is now available in the API. "
+                f"Open the app to migrate its data.",
                 db=db,
                 # Manual cards are owned, so the alert belongs to the owner's
                 # Telegram settings rather than the installation default.
