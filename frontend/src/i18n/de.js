@@ -1218,6 +1218,8 @@ const de = {
     confidentCardsFiled: '{count} sichere Karten zur Sammlung hinzugefügt.',
     confidentCardFiled: '1 sichere Karte zur Sammlung hinzugefügt.',
     opening: 'Scanner wird geöffnet…',
+    liveViewfinderHintSingle: 'Richte die Karte aus und tippe einmal.',
+    replacePhoto: 'Foto ersetzen',
   },
 
   // Language filter / card language

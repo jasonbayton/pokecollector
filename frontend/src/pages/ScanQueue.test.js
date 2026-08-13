@@ -442,18 +442,20 @@ describe('leaving the queue', () => {
     expect(hasInAppPredecessor(undefined)).toBe(false)
   })
 
-  it('keeps the empty state pointing at the page that hosts the scanner', () => {
-    // History would drop the user wherever they came from, which need not have a
-    // way to scan. It is still one click short of an open scanner. The index is
-    // set past the first entry so that wiring this button to the leave handler
-    // instead, as it used to be, fails here rather than agreeing by accident.
+  it('opens the scanner from the empty state instead of navigating anywhere', () => {
+    // It used to send the user to /search, because that page was once the only
+    // place the scanner could be opened from. The shared provider removed that
+    // constraint and the button was left behind naming an action it did not
+    // perform. The index is set past the first entry so that wiring it to the
+    // leave handler instead fails here rather than agreeing by accident.
     vi.stubGlobal('window', { history: { state: { idx: 3 } } })
     showList([])
     renderScanQueue()
 
     clickButton('scanner.goScan')
 
-    expect(navigate).toHaveBeenCalledWith('/search')
+    expect(openScanner).toHaveBeenCalled()
+    expect(navigate).not.toHaveBeenCalled()
   })
 })
 
@@ -823,3 +825,4 @@ describe('what the page has to keep doing', () => {
     expect(markup).not.toContain('scanner.processing')
   })
 })
+

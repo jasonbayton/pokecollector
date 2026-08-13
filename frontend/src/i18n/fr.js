@@ -970,6 +970,8 @@ const fr = {
     scanIndividually: 'Scanner individuellement',
     scanAllIndividually: 'Tout scanner individuellement',
     useAutomaticGrouping: 'Utiliser le regroupement automatique',
+    liveViewfinderHintSingle: 'Alignez la carte et touchez une fois.',
+    replacePhoto: 'Remplacer la photo',
   },
 
   // Language filter / card language

@@ -70,6 +70,13 @@ export default function LiveCardViewfinder({ onCapture, isFull = false, singleSh
   const sessionRef = useRef(null)
   const [camera, setCamera] = useState({ status: CAMERA_STATUS.IDLE, failure: null })
   const [capturing, setCapturing] = useState(false)
+  // The stream's own aspect ratio, once the browser reports it. A hardcoded
+  // box cannot be right for both: a phone hands back a portrait stream and a
+  // desktop webcam a landscape one, so any fixed ratio pillarboxes or
+  // letterboxes one of them. object-contain then shrinks the card to fit the
+  // wrong axis, which is why the card was using about 40% of the frame width
+  // on a phone.
+  const [streamAspect, setStreamAspect] = useState(null)
 
   const getSession = () => {
     if (!sessionRef.current) {
@@ -167,15 +174,24 @@ export default function LiveCardViewfinder({ onCapture, isFull = false, singleSh
         )}
       </div>
 
-      {/* Capped in viewport height as well as by aspect: at full modal width a
-          4:3 box pushes the shutter, the staged photos and Start scanning off
-          the bottom of the panel. */}
-      <div className="relative mx-auto aspect-[4/3] max-h-[40vh] overflow-hidden rounded-xl border border-white/10 bg-black">
+      {/* Sized to the stream once the browser reports it, so the picture fills
+          the frame instead of sitting in bars. 4:3 only until then, and still
+          capped in viewport height: at full modal width a tall portrait stream
+          would otherwise push the shutter and Start scanning off the bottom of
+          the panel. The cap is the reason this is max-h rather than a height. */}
+      <div
+        style={streamAspect ? { aspectRatio: streamAspect } : undefined}
+        className={`relative mx-auto max-h-[58dvh] overflow-hidden rounded-xl border border-white/10 bg-black ${streamAspect ? '' : 'aspect-[4/3]'}`}
+      >
         <video
           ref={videoRef}
           muted
           playsInline
           autoPlay
+          onLoadedMetadata={event => {
+            const { videoWidth, videoHeight } = event.currentTarget
+            if (videoWidth > 0 && videoHeight > 0) setStreamAspect(`${videoWidth} / ${videoHeight}`)
+          }}
           aria-label={t('scanner.liveViewfinderTitle')}
           className={`h-full w-full object-contain ${isLive ? '' : 'invisible'}`}
         />
@@ -195,7 +211,7 @@ export default function LiveCardViewfinder({ onCapture, isFull = false, singleSh
               <p className="text-xs leading-relaxed text-text-secondary" role="status">
                 {isStarting && t('scanner.startingCamera')}
                 {!isStarting && hasFailure && cameraFailureMessage(t, camera.failure)}
-                {!isStarting && !hasFailure && t('scanner.liveViewfinderHint')}
+                {!isStarting && !hasFailure && t(singleShot ? 'scanner.liveViewfinderHintSingle' : 'scanner.liveViewfinderHint')}
               </p>
               {!isStarting && hasFailure && (
                 <p className="text-[11px] text-text-muted">{t('scanner.cameraFallbackHint')}</p>
@@ -220,7 +236,7 @@ export default function LiveCardViewfinder({ onCapture, isFull = false, singleSh
             className="btn-primary flex flex-1 items-center justify-center gap-2 py-3"
           >
             {capturing ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
-            <span>{capturing ? t('scanner.capturing') : t('scanner.captureCard')}</span>
+            <span>{capturing ? t('scanner.capturing') : t(singleShot ? 'scanner.replacePhoto' : 'scanner.captureCard')}</span>
           </button>
           <button
             type="button"

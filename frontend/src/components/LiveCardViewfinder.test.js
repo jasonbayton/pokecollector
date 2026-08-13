@@ -469,3 +469,21 @@ describe('LiveCardViewfinder', () => {
     expect(fakeVideo.srcObject).toBeNull()
   })
 })
+
+describe('single-shot mode copy', () => {
+  it('does not invite a batch when it replaces one photo and closes', () => {
+    // Found on a device, not by reading: the re-take modal showed the staging
+    // hint, "Keep going for as many cards as you like", in a viewfinder that
+    // takes exactly one photo and then shuts.
+    const tree = render({ singleShot: true })
+
+    expect(textOf(tree)).toContain('scanner.liveViewfinderHintSingle')
+    expect(textOf(tree)).not.toContain('scanner.liveViewfinderHint')
+  })
+
+  it('keeps the batch hint when it is staging a batch', () => {
+    const tree = render({ singleShot: false })
+
+    expect(textOf(tree)).toContain('scanner.liveViewfinderHint')
+  })
+})

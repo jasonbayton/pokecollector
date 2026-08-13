@@ -380,6 +380,7 @@ function JobDetail({ jobId }) {
 
 export default function ScanQueue() {
   const { t } = useSettings()
+  const { openScanner } = useScanner()
   const navigate = useNavigate()
   const { jobId } = useParams()
 
@@ -442,12 +443,13 @@ export default function ScanQueue() {
             <div className="card space-y-3 py-12 text-center">
               <ScanLine size={28} className="mx-auto text-text-muted opacity-50" />
               <p className="text-sm text-text-muted">{t('scanner.noScans')}</p>
-              {/* Deliberately the search page rather than "wherever you came
-                  from": the scanner is only reachable from the camera button
-                  there, so history could drop the user somewhere with no way to
-                  scan at all. It still costs the user a second click, which only
-                  a scanner route or provider can remove. */}
-              <button type="button" onClick={() => navigate('/search')} className="btn-primary mx-auto justify-center">
+              {/* Opens the scanner, rather than dropping the user on the search
+                  page to find the camera button themselves. This used to send
+                  them to /search because the scanner could only be opened from
+                  there; the shared provider removed that constraint and this
+                  was left behind, so the button named an action it did not
+                  perform. */}
+              <button type="button" onClick={openScanner} className="btn-primary mx-auto justify-center">
                 {t('scanner.goScan')}
               </button>
             </div>

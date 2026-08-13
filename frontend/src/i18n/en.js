@@ -1309,6 +1309,8 @@ const en = {
     scanIndividually: 'Scan individually',
     scanAllIndividually: 'Scan all individually',
     useAutomaticGrouping: 'Use automatic grouping',
+    liveViewfinderHintSingle: 'Line the card up and tap once.',
+    replacePhoto: 'Replace photo',
   },
 
   // Language filter / card language
