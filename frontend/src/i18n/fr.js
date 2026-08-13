@@ -299,6 +299,18 @@ const fr = {
     searchCards: 'Rechercher des cartes...',
     clearFilters: 'Effacer les filtres',
     foundIn: 'Trouvée dans',
+    ownPhoto: 'Votre propre photo de cette carte',
+    ownPhotoLabel: 'Ma photo de carte',
+    ownPhotoDesc: 'Ajoutez une photo privée de votre carte physique. Elle est utilisée lorsque l\'illustration du catalogue est absente, ou lorsque « Préférer mes photos de cartes » est activé. Les métadonnées de la photo sont supprimées avant l\'enregistrement.',
+    ownPhotoSaved: 'Photo enregistrée',
+    uploadOwnPhoto: 'Ajouter une photo',
+    replaceOwnPhoto: 'Remplacer la photo',
+    processingOwnPhoto: 'Traitement de la photo',
+    removeOwnPhoto: 'Supprimer votre photo',
+    ownPhotoRemoved: 'Photo supprimée',
+    photoSource: 'Choisir l\'image de la carte',
+    cataloguePhoto: 'Catalogue',
+    myCardPhoto: 'Ma carte',
   },
 
   // Sets
@@ -780,6 +792,13 @@ const fr = {
     min360: 'Toutes les 6 heures',
     min720: 'Toutes les 12 heures',
     min1440: 'Toutes les 24 heures',
+    preferOwnCardPhotos: 'Préférer mes photos de cartes',
+    preferOwnCardPhotosDesc: 'Afficher d\'abord votre photo privée partout où il en existe une. L\'illustration du catalogue reste accessible dans la fiche de la carte.',
+    deleteCardPhotos: 'Supprimer mes photos de cartes',
+    deleteCardPhotosDesc: 'Supprimer définitivement toutes les photos privées associées aux cartes de votre collection.',
+    deleteCardPhotosConfirm: 'Supprimer définitivement toutes vos photos privées de cartes de collection ? Les images du catalogue, les cartes personnalisées et les diagnostics du scanner ne sont pas affectés.',
+    cardPhotosDeleted: 'Photos de cartes supprimées',
+    cardPhotosDeleteFailed: 'Les photos de cartes n\'ont pas pu être supprimées',
   },
 
   // Period selector

@@ -114,6 +114,7 @@ export function CardArtworkFrame({
   className = '',
   imageClassName = 'w-full h-full object-cover',
   loading = 'lazy',
+  viewportRef,
 }) {
   const { t } = useSettings()
   const kinds = getCardFallbackKinds(card)
@@ -124,6 +125,7 @@ export function CardArtworkFrame({
 
   return (
     <div
+      ref={viewportRef}
       className={clsx(
         'unified-card-frame',
         interactive && 'unified-card-frame-interactive',
@@ -205,10 +207,11 @@ export function CompactCardArtwork({
   alt,
   variantEffectSource,
   className = '',
+  viewportRef,
   ...frameProps
 }) {
   return (
-    <div className={clsx('unified-card-compact-artwork flex-shrink-0', className)}>
+    <div ref={viewportRef} className={clsx('unified-card-compact-artwork flex-shrink-0', className)}>
       <CardArtworkFrame
         card={card}
         image={image}
@@ -226,6 +229,8 @@ export function CompactCardArtwork({
 export function UnifiedCardDialog({
   card,
   image,
+  imageOverlay,
+  imageAccessory,
   variantEffectSource = card,
   price,
   tabs = [],
@@ -325,6 +330,7 @@ export function UnifiedCardDialog({
                 <CardArtworkFrame
                   card={card}
                   image={image}
+                  overlay={imageOverlay}
                   alt={card.name}
                   variantEffectSource={variantEffectSource}
                   showStateIndicators={false}
@@ -346,6 +352,7 @@ export function UnifiedCardDialog({
                 <FallbackBadges card={card} className="mt-2" />
               </div>
             </div>
+            {imageAccessory && <div className="mt-3">{imageAccessory}</div>}
           </aside>
 
           <section className="min-w-0">
@@ -463,11 +470,12 @@ export default function UnifiedCard({
   compact = false,
   loading = 'lazy',
   className = '',
+  viewportRef,
 }) {
   const [artworkLoading, setArtworkLoading] = useState(true)
 
   return (
-    <div className={clsx('min-w-0', className)}>
+    <div ref={viewportRef} className={clsx('min-w-0', className)}>
       <CardArtworkFrame
         card={card}
         image={image}

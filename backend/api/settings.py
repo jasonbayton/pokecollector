@@ -8,7 +8,7 @@ from fastapi.responses import Response
 from api.auth import get_current_user
 from sqlalchemy.orm import Session
 from database import get_db
-from models import Setting, UserSetting, User
+from models import CollectionCardPhoto, Setting, UserSetting, User
 from services.debug_logging import configure_debug_logging, get_debug_log_path
 from services.digital_sets import DIGITAL_SETS_SETTING_KEY, refresh_digital_catalogue_flags
 from services.exchange_rates import (
@@ -44,6 +44,7 @@ from services.scan_providers import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+PHOTO_PREFERENCE_SETTING_KEY = "prefer_own_card_photos"
 
 PER_USER_KEYS = {
     "language", "currency", "price_primary", "price_display",
@@ -53,7 +54,7 @@ PER_USER_KEYS = {
     "gemini_api_key", "trainer_name", "portfolio_display_mode",
     "openai_api_key", "share_collection",
     SCANNER_PROVIDER_SETTING, VISUAL_VERIFICATION_SETTING, SCANNER_MODEL_SETTING,
-    SCAN_DIAGNOSTICS_SETTING_KEY,
+    SCAN_DIAGNOSTICS_SETTING_KEY, PHOTO_PREFERENCE_SETTING_KEY,
 }
 
 ADMIN_ONLY_KEYS = {
@@ -128,6 +129,7 @@ DEFAULT_SETTINGS = {
     # Existing installations have no stored provider, and this keeps them on
     # Gemini exactly as before.
     SCANNER_PROVIDER_SETTING: "gemini",
+    PHOTO_PREFERENCE_SETTING_KEY: "false",
 }
 
 
@@ -146,6 +148,7 @@ def _coerce_setting_value(key: str, value) -> str:
         "cross_language_image_fallback", DIGITAL_SETS_SETTING_KEY,
         PUBLIC_PROFILES_SETTING_KEY, SCAN_DIAGNOSTICS_SETTING_KEY,
         "share_collection",
+        PHOTO_PREFERENCE_SETTING_KEY,
     }:
         return "true" if str(value).lower() in {"true", "1", "yes", "on"} else "false"
     if key == SCANNER_PROVIDER_SETTING:
@@ -388,6 +391,19 @@ def delete_scan_diagnostics(
             detail="Stored scanner diagnostics could not be deleted.",
         ) from exc
     return {"deleted": deleted}
+
+
+@router.delete("/card-photos")
+def delete_card_photos(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Permanently delete only this user's private collection-card photos."""
+    deleted = db.query(CollectionCardPhoto).filter(
+        CollectionCardPhoto.user_id == current_user.id,
+    ).delete(synchronize_session=False)
+    db.commit()
+    return {"deleted": int(deleted or 0)}
 
 
 @router.get("/telegram_status")

@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Loader2, Plus } from 'lucide-react'
-import { addToCollection } from '../api/client'
+import { addToCollection, uploadCollectionItemPhoto } from '../api/client'
+import { hasCatalogueImage } from '../utils/imageUrl'
 import { useQueryClient } from '@tanstack/react-query'
 import { useSettings } from '../contexts/SettingsContext'
 import toast from 'react-hot-toast'
@@ -16,6 +17,35 @@ import QuantityInput from './ui/QuantityInput'
 // Add-to-collection modal for a confirmed scan match. This is the only path by
 // which a scanned card reaches the collection, so it is shared by the review
 // inbox rather than owned by any one scanner component.
+/**
+ * Keep the scanned photo as the card's own image when nothing else depicts it.
+ *
+ * Ported from upstream's CardScanner.jsx, which this fork deleted when it
+ * replaced that component with UnifiedCardScanner. Deliberately byte-identical
+ * to their implementation so that when it reaches a release, merging it is a
+ * no-op rather than a conflict.
+ *
+ * `getPhoto`, when given, resolves to the Blob/File the user actually scanned.
+ * Called only after the collection item exists, and only matters for cards
+ * TCGdex has no scan of - and only when the matched card has no catalogue
+ * artwork and no saved fallback. A failed photo attach must never block adding
+ * the card itself.
+ */
+export async function attachScanFallbackPhoto({ created, match, getPhoto, uploadPhoto = uploadCollectionItemPhoto }) {
+  const createdCard = created?.card
+  const hasReferenceArtwork = hasCatalogueImage(createdCard) || Boolean(createdCard?.custom_image_url)
+  if (!getPhoto || !createdCard || created?.has_scan_photo || hasReferenceArtwork) return false
+  try {
+    const photo = await getPhoto()
+    if (!photo) return false
+    await uploadPhoto(created.id, photo)
+    return true
+  } catch {
+    // Photo retention is best-effort and must never undo the collection add.
+    return false
+  }
+}
+
 export default function ScanAddModal({ match, defaultLang, onClose, onAdded }) {
   const { t, exchangeRate, exchangeRateReady } = useSettings()
   const [quantity, setQuantity] = useState(1)

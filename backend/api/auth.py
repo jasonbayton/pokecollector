@@ -305,6 +305,7 @@ def delete_user(
         Binder,
         BinderCard,
         Card,
+        CollectionCardPhoto,
         CollectionItem,
         CustomCardMatch,
         ImageCache,
@@ -330,6 +331,7 @@ def delete_user(
     db.query(Binder).filter(Binder.user_id == user_id).delete()
     db.query(ProductLedgerEntry).filter(ProductLedgerEntry.user_id == user_id).delete()
     db.query(ProductCard).filter(ProductCard.user_id == user_id).delete()
+    db.query(CollectionCardPhoto).filter(CollectionCardPhoto.user_id == user_id).delete()
     db.query(CollectionItem).filter(CollectionItem.user_id == user_id).delete()
     db.query(WishlistItem).filter(WishlistItem.user_id == user_id).delete()
     db.query(ProductPurchase).filter(ProductPurchase.user_id == user_id).delete()
