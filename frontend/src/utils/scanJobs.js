@@ -25,3 +25,19 @@ const finiteCount = value => {
 export const scanJobRemaining = job => (
   finiteCount(job?.pending) + finiteCount(job?.processing) + finiteCount(job?.retrying)
 )
+
+// The set of items with a re-take or retry in flight.
+//
+// Kept as an explicit set driven by the mutation lifecycle rather than read
+// from a mutation's `variables`. An observer exposes only its CURRENT
+// variables, and TanStack Query replaces those the moment mutate() is called
+// again, even while the earlier call is still pending. Deriving the gate from
+// them therefore un-gated item A as soon as the user started item B, handing
+// back A's stale candidates while its re-take was still in flight.
+export const addBusyItem = (current, itemId) => (
+  current.includes(itemId) ? current : [...current, itemId]
+)
+
+export const removeBusyItem = (current, itemId) => current.filter(
+  candidate => candidate !== itemId,
+)

@@ -290,6 +290,10 @@ describe('createCameraSession', () => {
 
     expect(first.failure).toBe(CAMERA_FAILURE.DENIED)
     expect(second.failure).toBe(CAMERA_FAILURE.DENIED)
+    // The call count is the point. Asserting only that both say denied also
+    // passes under the old veto, which answered DENIED without asking at all,
+    // so this test used to survive the exact regression it sits beside.
+    expect(env.mediaDevices.getUserMedia).toHaveBeenCalledTimes(2)
   })
 
   it('does keep retrying a busy camera, because that one clears on its own', async () => {

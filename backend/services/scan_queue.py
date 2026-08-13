@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from models import ScanJob, ScanJobItem, ScanQueueUserState, User
 from services.gemini_rate_limit import gemini_priority_scope
 from services.scan_storage import (
+    ScanItemNoLongerReviewable,
     ScanUploadError,
     delete_job_directory,
     delete_scan_image,
@@ -736,24 +737,50 @@ def replace_scan_item_photo(db: Session, item: ScanJobItem, raw_image: bytes) ->
     Raw bytes keep validation and metadata stripping in the storage service. The
     old file is deleted only after the commit, so a failed commit leaves its row
     and file together.
+
+    The caller's guard is not enough on its own. Sanitising and storing the
+    upload takes long enough for add-all or a dismissal to lock the same row,
+    file its old candidate and resolve it, so the preconditions are taken again
+    here under a row lock before anything is written.
     """
     sanitized = sanitize_image_bytes(raw_image)
     new_path, byte_size = store_sanitized_image(item.job.id, sanitized)
-    old_path = item.image_path
     now = datetime.datetime.utcnow()
 
-    item.image_path = new_path
-    item.content_type = sanitized.content_type
-    item.byte_size = byte_size
-    _reset_item_for_rescan(item, now)
     try:
+        locked = (
+            db.query(ScanJobItem)
+            .filter(ScanJobItem.id == item.id)
+            .with_for_update()
+            .one_or_none()
+        )
+        if locked is None:
+            raise ScanItemNoLongerReviewable("This scan no longer exists.")
+        if locked.resolved:
+            raise ScanItemNoLongerReviewable("This scan has already been handled.")
+        if locked.status not in {"done", "failed"}:
+            raise ScanItemNoLongerReviewable("This scan is still being processed.")
+
+        old_path = locked.image_path
+        locked.image_path = new_path
+        locked.content_type = sanitized.content_type
+        locked.byte_size = byte_size
+        _reset_item_for_rescan(locked, now)
         db.commit()
     except Exception:
         db.rollback()
         delete_scan_image(new_path)
         raise
+
     db.refresh(item)
-    delete_scan_image(old_path)
+    # After the commit, so a re-take that really succeeded is not reported as a
+    # failure because the old file could not be unlinked. The row no longer
+    # references it either way, and the worst case is a leftover file the
+    # retention sweep collects.
+    try:
+        delete_scan_image(old_path)
+    except OSError:
+        logger.warning("Could not remove the replaced scan photo %s", old_path)
     return item
 
 

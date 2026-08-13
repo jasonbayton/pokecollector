@@ -53,7 +53,7 @@ export default function ScanAddModal({ match, defaultLang, onClose, onAdded }) {
   return createPortal(
     <div
       className="fixed inset-0 z-[300] flex items-end justify-center bg-black/80 p-2 backdrop-blur-sm sm:items-center sm:p-3"
-      onClick={onClose}
+      onClick={adding ? undefined : onClose}
     >
       <div
         className="relative max-h-[calc(100dvh-1rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-bg-surface shadow-2xl sm:max-h-[calc(100dvh-1.5rem)]"
@@ -62,7 +62,8 @@ export default function ScanAddModal({ match, defaultLang, onClose, onAdded }) {
         <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-white/20 sm:hidden" aria-hidden />
         <button
           type="button"
-          onClick={onClose}
+          onClick={adding ? undefined : onClose}
+          disabled={adding}
           className="absolute right-3 top-3 z-50 grid h-9 w-9 place-items-center rounded-full border border-white/15 bg-black/70 text-white shadow-lg hover:bg-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-red"
           aria-label={t('common.close')}
         >
@@ -136,7 +137,7 @@ export default function ScanAddModal({ match, defaultLang, onClose, onAdded }) {
               {adding ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
               {adding ? t('scanner.adding') : t('scanner.addToCollection')}
             </button>
-            <button onClick={onClose} className="btn-ghost px-3">
+            <button onClick={onClose} disabled={adding} className="btn-ghost px-3">
               <X size={16} />
             </button>
           </div>

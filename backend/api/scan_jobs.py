@@ -27,6 +27,7 @@ from services.scan_bulk_add import (
 )
 from services.scan_storage import (
     MAX_JOB_BYTES,
+    ScanItemNoLongerReviewable,
     ScanJobBytesExceeded,
     ScanUploadError,
     create_scan_job,
@@ -311,7 +312,11 @@ async def replace_scan_job_item_photo(
     if len(files) != 1:
         raise HTTPException(status_code=400, detail="Exactly one scan photo is required.")
 
-    current_bytes = sum(int(candidate.byte_size or 0) for candidate in item.job.items)
+    current_bytes = sum(
+        int(candidate.byte_size or 0)
+        for candidate in item.job.items
+        if candidate.image_path
+    )
     remaining_bytes = MAX_JOB_BYTES - (current_bytes - int(item.byte_size or 0))
     try:
         raw_image = await read_limited_upload(files[0], remaining_job_bytes=remaining_bytes)
@@ -322,6 +327,11 @@ async def replace_scan_job_item_photo(
 
     try:
         replace_scan_item_photo(db, item, raw_image)
+    except ScanItemNoLongerReviewable as exc:
+        # Another review action claimed the row while the upload was being
+        # sanitised. Same status as the guard above, because from the user's
+        # side it is the same refusal.
+        raise HTTPException(status_code=409, detail=str(exc))
     except ScanUploadError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

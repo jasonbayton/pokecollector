@@ -22,7 +22,9 @@ import { useSettings } from '../contexts/SettingsContext'
 import {
   SCAN_JOBS_QUERY_KEY,
   hasActiveScanJobs,
+  addBusyItem,
   isScanJobActive,
+  removeBusyItem,
   scanJobPollInterval,
   scanJobRemaining,
 } from '../utils/scanJobs'
@@ -151,6 +153,10 @@ function JobDetail({ jobId }) {
   const [addSelection, setAddSelection] = useState(null)
   const [confirmation, setConfirmation] = useState(null)
   const [retakeItem, setRetakeItem] = useState(null)
+  const [busyItemIds, setBusyItemIds] = useState([])
+
+  const markItemBusy = itemId => setBusyItemIds(current => addBusyItem(current, itemId))
+  const clearItemBusy = itemId => setBusyItemIds(current => removeBusyItem(current, itemId))
 
   // The list is not always the previous entry: the scanner pushes straight to a
   // freshly enqueued job from the search page. Only a detail opened from a queue
@@ -186,22 +192,26 @@ function JobDetail({ jobId }) {
 
   const retryMutation = useMutation({
     mutationFn: item => retryScanJobItem(jobId, item.id),
+    onMutate: item => markItemBusy(item.id),
+    onSettled: (_data, _error, item) => clearItemBusy(item.id),
     onSuccess: invalidate,
     onError: error => toast.error(error?.response?.data?.detail || t('scanner.actionFailed')),
   })
 
   const retakeMutation = useMutation({
     mutationFn: ({ item, file }) => replaceScanJobItemPhoto(jobId, item.id, file),
+    onMutate: ({ item }) => markItemBusy(item.id),
+    onSettled: (_data, _error, { item }) => clearItemBusy(item.id),
     onSuccess: invalidate,
     onError: error => toast.error(error?.response?.data?.detail || t('scanner.actionFailed')),
   })
 
-  // The item a re-take or retry is currently in flight for. Both reset the
-  // scan server-side, so its panel must stop offering the previous result the
-  // moment the request leaves, not when the refetch lands.
-  const busyItemId = retakeMutation.isPending
-    ? retakeMutation.variables?.item?.id
-    : retryMutation.isPending ? retryMutation.variables?.id : null
+  // Every item with a re-take or retry in flight, not just the newest. A
+  // mutation observer exposes only its CURRENT variables, which are replaced
+  // the moment mutate() is called again even while the earlier call is still
+  // pending, so deriving this from `variables` un-gated item A as soon as the
+  // user started item B and handed A's stale candidates back.
+  const isItemBusy = itemId => busyItemIds.includes(itemId)
 
   const deleteMutation = useMutation({
     mutationFn: () => deleteScanJob(jobId),
@@ -319,7 +329,7 @@ function JobDetail({ jobId }) {
             onAdd={(scanItem, match) => setAddSelection({ item: scanItem, match })}
             onRetry={itemToRetry => retryMutation.mutate(itemToRetry)}
             onRetake={setRetakeItem}
-            isBusy={busyItemId === item.id}
+            isBusy={isItemBusy(item.id)}
             onDismiss={dismiss}
             retryNow={retryNow}
             t={t}

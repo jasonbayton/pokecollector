@@ -40,6 +40,18 @@ class ScanUploadError(ValueError):
     """An uploaded file is unsafe or outside the scanner limits."""
 
 
+class ScanItemNoLongerReviewable(ValueError):
+    """The item stopped being re-takeable between the guard and the commit.
+
+    The endpoint reads `resolved` and `status` before it sanitises the upload,
+    which takes long enough for add-all or a dismissal to claim the same row.
+    Those paths lock the item, file its old candidate and set resolved; a
+    re-take that then committed a fresh photo and a pending status over the top
+    would leave a resolved row queued for work, with the old card already added
+    and the new photo invisible to review.
+    """
+
+
 class ScanJobBytesExceeded(ScanUploadError):
     """The job would outgrow MAX_JOB_BYTES, as opposed to one photo being bad.
 

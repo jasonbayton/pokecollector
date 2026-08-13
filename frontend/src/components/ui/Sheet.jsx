@@ -51,7 +51,7 @@ export default function Sheet({ isOpen, onClose, title, children, className = ''
           'fixed bottom-0 left-0 right-0 z-50',
           'bg-bg-surface border-t border-border',
           'rounded-t-2xl',
-          fullHeight ? 'h-dvh max-h-dvh flex flex-col' : 'max-h-[85dvh] flex flex-col',
+          fullHeight ? 'h-dvh max-h-dvh flex flex-col pt-[env(safe-area-inset-top)]' : 'max-h-[85dvh] flex flex-col',
           'animate-slide-up',
           className,
         ].join(' ')}

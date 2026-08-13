@@ -17,7 +17,8 @@ try:
     from api.auth import get_current_user
     from database import Base, get_db
     from models import Card, CollectionItem, ScanJob, ScanJobItem, User
-    from services.scan_storage import resolve_scan_path
+    from services.scan_storage import MAX_JOB_BYTES, resolve_scan_path
+    from services import scan_queue as scan_queue_module
 
     DEPS_AVAILABLE = True
 except ModuleNotFoundError:
@@ -296,6 +297,106 @@ class ScanJobsApiTests(unittest.TestCase):
         self.assertEqual(response.json()["status"], "pending")
         self.assertEqual(response.json()["attempts"], 0)
         self.assertTrue(stored.exists())
+
+    def test_retake_refuses_when_the_item_was_resolved_mid_upload(self):
+        # The endpoint reads resolved and status before it sanitises the
+        # upload, which is long enough for add-all or a dismissal to claim the
+        # same row. Without a recheck under lock, the re-take would commit a
+        # fresh photo and a pending status over a resolved item: the old card
+        # already added, the new photo invisible to review, and a resolved row
+        # queued for work.
+        created = self._enqueue()
+        item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
+        item.status = "done"
+        self.db.commit()
+        original_path = item.image_path
+
+        real_sanitize = scan_queue_module.sanitize_image_bytes
+
+        def resolve_it_first(raw):
+            # Stand-in for the concurrent review action, run at the point the
+            # endpoint has already passed its own guard.
+            self.db.query(ScanJobItem).filter(ScanJobItem.id == item.id).update(
+                {"resolved": True}
+            )
+            self.db.commit()
+            return real_sanitize(raw)
+
+        with patch.object(scan_queue_module, "sanitize_image_bytes", side_effect=resolve_it_first), \
+                patch("api.scan_jobs.drain_scan_queue", new=AsyncMock(return_value=0)):
+            response = self.client.post(
+                f"/api/cards/recognize/jobs/{created['id']}/items/{item.id}/photo",
+                files={"file": ("retake.jpg", _jpeg_bytes(size=(400, 560)), "image/jpeg")},
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.db.expire_all()
+        persisted = self.db.get(ScanJobItem, item.id)
+        self.assertTrue(persisted.resolved)
+        self.assertEqual(persisted.image_path, original_path)
+
+    def test_retake_budget_ignores_photos_that_were_already_deleted(self):
+        # Resolution and add-all null image_path and delete the file but leave
+        # byte_size, so charging the job for every row meant deleted photos
+        # could push a valid replacement over the limit.
+        created = self._enqueue()
+        item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
+        item.status = "done"
+        ghost = ScanJobItem(
+            job_id=item.job_id,
+            user_id=item.user_id,
+            position=item.position + 1,
+            image_path=None,
+            content_type="image/jpeg",
+            byte_size=MAX_JOB_BYTES,
+            status="done",
+            resolved=True,
+            attempts=0,
+            transient_failures=0,
+            created_at=datetime.datetime.utcnow(),
+            updated_at=datetime.datetime.utcnow(),
+        )
+        self.db.add(ghost)
+        self.db.commit()
+
+        with patch("api.scan_jobs.drain_scan_queue", new=AsyncMock(return_value=0)):
+            response = self.client.post(
+                f"/api/cards/recognize/jobs/{created['id']}/items/{item.id}/photo",
+                files={"file": ("retake.jpg", _jpeg_bytes(size=(400, 560)), "image/jpeg")},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+
+    def test_retake_survives_a_failure_to_unlink_the_replaced_photo(self):
+        # The unlink runs after the commit, so by then the re-take has already
+        # happened. Letting an OSError out of it reported a failure for work
+        # that succeeded, and the caller would reasonably retry it. The row no
+        # longer references the old file either way.
+        created = self._enqueue()
+        item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
+        item.status = "done"
+        self.db.commit()
+        old_path = item.image_path
+
+        real_delete = scan_queue_module.delete_scan_image
+
+        def fail_on_the_old_photo(path):
+            if path == old_path:
+                raise OSError("device busy")
+            return real_delete(path)
+
+        with patch.object(scan_queue_module, "delete_scan_image", side_effect=fail_on_the_old_photo), \
+                patch("api.scan_jobs.drain_scan_queue", new=AsyncMock(return_value=0)):
+            response = self.client.post(
+                f"/api/cards/recognize/jobs/{created['id']}/items/{item.id}/photo",
+                files={"file": ("retake.jpg", _jpeg_bytes(size=(400, 560)), "image/jpeg")},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.db.expire_all()
+        persisted = self.db.get(ScanJobItem, item.id)
+        self.assertNotEqual(persisted.image_path, old_path)
+        self.assertEqual(persisted.status, "pending")
 
     def test_retake_changes_the_image_token_so_the_panel_refetches(self):
         # The review panel fetches each photo into a blob URL once, keyed on

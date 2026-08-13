@@ -5,6 +5,8 @@ import {
   scanAttentionCount,
   scanJobPollInterval,
   scanJobRemaining,
+  addBusyItem,
+  removeBusyItem,
 } from './scanJobs'
 
 describe('scan job presentation helpers', () => {
@@ -44,5 +46,28 @@ describe('scanJobRemaining', () => {
 
   it('does not treat a non-numeric counter as NaN either', () => {
     expect(scanJobRemaining({ pending: 'x', processing: 2 })).toBe(2)
+  })
+})
+
+describe('the in-flight item set', () => {
+  it('keeps an earlier item gated when a second one starts', () => {
+    // The defect: the gate was derived from a mutation's current variables,
+    // which are replaced as soon as mutate() is called again. Starting item B
+    // un-gated item A while A's re-take was still in flight, handing back the
+    // candidates belonging to the photo A was replacing.
+    const busy = addBusyItem(addBusyItem([], 1), 2)
+
+    expect(busy).toContain(1)
+    expect(busy).toContain(2)
+  })
+
+  it('releases only the item that settled', () => {
+    const busy = removeBusyItem([1, 2], 2)
+
+    expect(busy).toEqual([1])
+  })
+
+  it('does not list the same item twice if it is marked again', () => {
+    expect(addBusyItem([1], 1)).toEqual([1])
   })
 })

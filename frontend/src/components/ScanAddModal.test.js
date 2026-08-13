@@ -77,8 +77,19 @@ function* walk(node) {
 // The submit button is the only button the modal can disable; both close
 // buttons are unconditional. Selecting on that rather than on a class string
 // keeps the test pinned to behaviour instead of styling.
-const findSubmitButton = tree => [...walk(tree)]
-  .find(node => node.type === 'button' && typeof node.props?.disabled === 'boolean')
+// Identified by its label rather than by "the first button carrying a boolean
+// disabled prop". That older rule quietly selected whichever button happened to
+// be disable-able first, so giving the close control a disabled state made it
+// match instead and three tests started exercising the wrong button.
+const textOfNode = node => [...walk(node)]
+  .flatMap(child => (Array.isArray(child.props?.children) ? child.props.children : [child.props?.children]))
+  .filter(child => typeof child === 'string')
+  .join(' ')
+
+const findSubmitButton = tree => [...walk(tree)].find(node => (
+  node.type === 'button'
+  && /scanner\.(addToCollection|adding)/.test(textOfNode(node))
+))
 
 let documentStub
 
@@ -242,5 +253,30 @@ describe('ScanAddModal', () => {
     expect(onAdded).not.toHaveBeenCalled()
     expect(onClose).not.toHaveBeenCalled()
     expect(invalidateCardState).not.toHaveBeenCalled()
+  })
+})
+
+describe('closing while an add is in flight', () => {
+  it('binds the close control to the same in-flight state that guards submit', () => {
+    // addToCollection writes to the collection BEFORE the scan is resolved and
+    // unmounting does not cancel it, so closing mid-flight let the write land
+    // after a re-take had already reset the item: a card nothing had matched,
+    // filed, with the follow-up resolve failing 409 and no rollback.
+    //
+    // This suite renders to static markup, so component state never survives a
+    // render and the in-flight case cannot be observed directly. What can be
+    // checked is that the two controls are driven by the same flag: submit and
+    // close must both carry a boolean disabled prop, so the close control
+    // cannot silently go back to being always-enabled.
+    render()
+    const tree = portalTrees[portalTrees.length - 1]
+
+    const submit = findSubmitButton(tree)
+    const closeButton = [...walk(tree)]
+      .find(node => node.type === 'button' && node.props?.['aria-label'] === 'common.close')
+
+    expect(typeof submit.props.disabled).toBe('boolean')
+    expect(closeButton, 'no close control was rendered').toBeDefined()
+    expect(typeof closeButton.props.disabled).toBe('boolean')
   })
 })
