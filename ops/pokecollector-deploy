@@ -183,6 +183,10 @@ rm -rf "${REPO}/frontend/dist.previous"
 git checkout --quiet --detach "${target_sha}"
 rm -rf "${REPO}/frontend/dist"
 cp -a "${candidate}/frontend/dist" "${REPO}/frontend/dist"
+# The tree belongs to the service account, not to root. Leaving root-owned
+# assets behind in it works today only because nothing writes there.
+repo_owner=$(stat -c '%U:%G' "${REPO}")
+chown -R "${repo_owner}" "${REPO}/frontend/dist" 2>/dev/null || true
 
 systemctl restart "${SERVICE}"
 
