@@ -188,6 +188,10 @@ export default function UnifiedCardScanner({ isOpen, onClose }) {
         onClose={closeScanner}
         title={t('scanner.title')}
         size="xl"
+        // The camera is the point of this screen, so on a phone it takes the
+        // whole viewport rather than 85dvh. The viewfinder was competing with
+        // the sheet's own chrome for a share of a deliberately short panel.
+        fullHeight
         isObscured={Boolean(confirmation)}
       >
         <div className="space-y-4 p-4 sm:p-5">

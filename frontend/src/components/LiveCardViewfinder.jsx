@@ -208,7 +208,7 @@ export default function LiveCardViewfinder({ onCapture, isFull = false, singleSh
           used to occupy. */}
       <div
         style={streamSize ? { aspectRatio: `${streamSize.width} / ${streamSize.height}` } : undefined}
-        className={`relative mx-auto max-h-[48dvh] overflow-hidden rounded-xl border border-white/10 bg-black ${streamSize ? '' : 'aspect-[4/3]'}`}
+        className={`relative mx-auto max-h-[62dvh] overflow-hidden rounded-xl border border-white/10 bg-black ${streamSize ? '' : 'aspect-[4/3]'}`}
       >
         <video
           ref={videoRef}

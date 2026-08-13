@@ -16,6 +16,7 @@ const DESKTOP_MEDIA_QUERY = '(min-width: 1024px)'
  *   title     {string}    — optional header title
  *   children  {node}      — modal content
  *   size      {string}    — 'sm' | 'md' | 'lg' | 'xl' (default: 'md')
+ *   fullHeight {boolean}  — mobile sheet takes the whole viewport (default: false)
  *   className {string}    — extra classes for the inner panel
  *   overlayClassName {string} — stacking class for the backdrop (default: 'z-50')
  *   mobileSheet {boolean} — if true, renders as Sheet on mobile (default: true)
@@ -26,6 +27,7 @@ export default function Modal({
   title,
   children,
   size = 'md',
+  fullHeight = false,
   className = '',
   overlayClassName = 'z-50',
   mobileSheet = true,
@@ -87,7 +89,7 @@ export default function Modal({
   if (mobileSheet) {
     if (!isDesktop) {
       return (
-        <Sheet isOpen={isOpen} onClose={onClose} title={title} className={className} manageBodyScroll={false} restoreFocus={false} isObscured={isObscured}>
+        <Sheet isOpen={isOpen} onClose={onClose} title={title} className={className} manageBodyScroll={false} restoreFocus={false} isObscured={isObscured} fullHeight={fullHeight}>
           {children}
         </Sheet>
       )

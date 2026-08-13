@@ -13,8 +13,14 @@ import { useDialogBehavior } from './dialogBehavior'
  *   title    {string}   — optional header title
  *   children {node}     — sheet content
  *   className {string}  — extra classes for the panel
+ *   fullHeight {boolean} — take the whole viewport instead of 85dvh. For a
+ *                          sheet whose content is the point of the screen, the
+ *                          camera being the case in hand. A prop rather than a
+ *                          class the caller appends: two arbitrary max-h values
+ *                          tie on specificity and the winner then depends on
+ *                          their order in the built stylesheet.
  */
-export default function Sheet({ isOpen, onClose, title, children, className = '', manageBodyScroll = true, restoreFocus = true, isObscured = false }) {
+export default function Sheet({ isOpen, onClose, title, children, className = '', manageBodyScroll = true, restoreFocus = true, isObscured = false, fullHeight = false }) {
   const { t } = useSettings()
   const titleId = useId()
   const { dialogRef, onDialogKeyDown } = useDialogBehavior(isOpen, onClose, { restoreFocus })
@@ -45,7 +51,7 @@ export default function Sheet({ isOpen, onClose, title, children, className = ''
           'fixed bottom-0 left-0 right-0 z-50',
           'bg-bg-surface border-t border-border',
           'rounded-t-2xl',
-          'max-h-[85dvh] flex flex-col',
+          fullHeight ? 'h-dvh max-h-dvh flex flex-col' : 'max-h-[85dvh] flex flex-col',
           'animate-slide-up',
           className,
         ].join(' ')}
