@@ -47,6 +47,25 @@ export function cameraFailureMessage(t, failure) {
  * is not a risk: a browser that is still blocking rejects immediately and
  * silently, so the worst case is the same message again.
  */
+/**
+ * Which axis the card alignment guide is bound by.
+ *
+ * A frame wider than a card has spare width, so the guide is sized from the
+ * height. A frame NARROWER than a card is the other way round, and sizing from
+ * the height there runs the guide's side borders straight off the picture.
+ * That is what happened once the frame started matching a portrait phone
+ * stream instead of a fixed 4:3 box.
+ *
+ * The 4:3 fallback applies before the browser reports the stream, and is wider
+ * than a card, so it stays height-bound exactly as the old fixed box was.
+ */
+export function guideIsHeightBound(streamSize) {
+  const ratio = streamSize && streamSize.height > 0
+    ? streamSize.width / streamSize.height
+    : 4 / 3
+  return ratio >= 2.5 / 3.5
+}
+
 export function canRetryCameraFailure(failure) {
   return failure === CAMERA_FAILURE.BUSY
     || failure === CAMERA_FAILURE.DENIED
@@ -76,7 +95,7 @@ export default function LiveCardViewfinder({ onCapture, isFull = false, singleSh
   // letterboxes one of them. object-contain then shrinks the card to fit the
   // wrong axis, which is why the card was using about 40% of the frame width
   // on a phone.
-  const [streamAspect, setStreamAspect] = useState(null)
+  const [streamSize, setStreamSize] = useState(null)
 
   const getSession = () => {
     if (!sessionRef.current) {
@@ -156,6 +175,8 @@ export default function LiveCardViewfinder({ onCapture, isFull = false, singleSh
     }
   }
 
+  const guideFitsByHeight = guideIsHeightBound(streamSize)
+
   const isLive = camera.status === CAMERA_STATUS.LIVE
   const isStarting = camera.status === CAMERA_STATUS.STARTING
   const hasFailure = Boolean(camera.failure)
@@ -180,8 +201,8 @@ export default function LiveCardViewfinder({ onCapture, isFull = false, singleSh
           would otherwise push the shutter and Start scanning off the bottom of
           the panel. The cap is the reason this is max-h rather than a height. */}
       <div
-        style={streamAspect ? { aspectRatio: streamAspect } : undefined}
-        className={`relative mx-auto max-h-[44dvh] overflow-hidden rounded-xl border border-white/10 bg-black ${streamAspect ? '' : 'aspect-[4/3]'}`}
+        style={streamSize ? { aspectRatio: `${streamSize.width} / ${streamSize.height}` } : undefined}
+        className={`relative mx-auto max-h-[62dvh] overflow-hidden rounded-xl border border-white/10 bg-black ${streamSize ? '' : 'aspect-[4/3]'}`}
       >
         <video
           ref={videoRef}
@@ -190,16 +211,37 @@ export default function LiveCardViewfinder({ onCapture, isFull = false, singleSh
           autoPlay
           onLoadedMetadata={event => {
             const { videoWidth, videoHeight } = event.currentTarget
-            if (videoWidth > 0 && videoHeight > 0) setStreamAspect(`${videoWidth} / ${videoHeight}`)
+            if (videoWidth > 0 && videoHeight > 0) setStreamSize({ width: videoWidth, height: videoHeight })
           }}
           aria-label={t('scanner.liveViewfinderTitle')}
           className={`h-full w-full object-contain ${isLive ? '' : 'invisible'}`}
         />
 
         {isLive && (
-          <div className="pointer-events-none absolute inset-0 grid place-items-center">
-            <div className="aspect-[2.5/3.5] h-[86%] rounded-lg border-2 border-gold/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" />
-          </div>
+          <>
+            <div className="pointer-events-none absolute inset-0 grid place-items-center">
+              <div className={`aspect-[2.5/3.5] rounded-lg border-2 border-gold/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)] ${guideFitsByHeight ? 'h-[86%]' : 'w-[86%]'}`} />
+            </div>
+            <div className="absolute inset-x-0 bottom-0 flex gap-2 bg-gradient-to-t from-black/80 to-transparent p-3 pt-8">
+              <button
+                type="button"
+                onClick={handleShutter}
+                disabled={capturing || isFull}
+                className="btn-primary flex flex-1 items-center justify-center gap-2 py-3"
+              >
+                {capturing ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
+                <span>{capturing ? t('scanner.capturing') : t(singleShot ? 'scanner.replacePhoto' : 'scanner.captureCard')}</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleStop}
+                aria-label={t('scanner.stopCamera')}
+                className="btn-ghost flex items-center justify-center gap-2 bg-black/50 px-4"
+              >
+                <CameraOff size={16} />
+              </button>
+            </div>
+          </>
         )}
 
         {!isLive && (
@@ -227,27 +269,7 @@ export default function LiveCardViewfinder({ onCapture, isFull = false, singleSh
         </p>
       )}
 
-      {isLive ? (
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={handleShutter}
-            disabled={capturing || isFull}
-            className="btn-primary flex flex-1 items-center justify-center gap-2 py-3"
-          >
-            {capturing ? <Loader2 size={16} className="animate-spin" /> : <Camera size={16} />}
-            <span>{capturing ? t('scanner.capturing') : t(singleShot ? 'scanner.replacePhoto' : 'scanner.captureCard')}</span>
-          </button>
-          <button
-            type="button"
-            onClick={handleStop}
-            className="btn-ghost flex items-center justify-center gap-2"
-          >
-            <CameraOff size={16} />
-            <span>{t('scanner.stopCamera')}</span>
-          </button>
-        </div>
-      ) : (
+      {isLive ? null : (
         (!hasFailure || canRetryCameraFailure(camera.failure)) && (
           <button
             type="button"

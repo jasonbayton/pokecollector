@@ -76,7 +76,7 @@ vi.mock('../contexts/SettingsContext', () => ({
 
 const { CAMERA_FAILURE, CAMERA_STATUS } = await import('../utils/cameraCapture')
 const viewfinderModule = await import('./LiveCardViewfinder')
-const { cameraFailureMessage, canRetryCameraFailure } = viewfinderModule
+const { cameraFailureMessage, canRetryCameraFailure, guideIsHeightBound } = viewfinderModule
 const LiveCardViewfinder = viewfinderModule.default
 const en = (await import('../i18n/en')).default
 
@@ -485,5 +485,25 @@ describe('single-shot mode copy', () => {
     const tree = render({ singleShot: false })
 
     expect(textOf(tree)).toContain('scanner.liveViewfinderHint')
+  })
+})
+
+describe('guideIsHeightBound', () => {
+  it('sizes the guide from the width when the frame is narrower than a card', () => {
+    // The defect Jason saw: the frame started matching a portrait phone
+    // stream, the guide kept sizing from the height, and its left and right
+    // borders ran off the picture entirely.
+    expect(guideIsHeightBound({ width: 720, height: 1280 })).toBe(false)
+    expect(guideIsHeightBound({ width: 1080, height: 1920 })).toBe(false)
+  })
+
+  it('keeps sizing from the height when the frame is wider than a card', () => {
+    expect(guideIsHeightBound({ width: 1280, height: 720 })).toBe(true)
+    expect(guideIsHeightBound({ width: 640, height: 480 })).toBe(true)
+  })
+
+  it('treats the pre-metadata fallback as height-bound, as the old fixed box was', () => {
+    expect(guideIsHeightBound(null)).toBe(true)
+    expect(guideIsHeightBound({ width: 720, height: 0 })).toBe(true)
   })
 })
