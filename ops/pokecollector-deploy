@@ -24,12 +24,13 @@
 #     aborted still leaves the old code active and healthy.
 #   * The health check gates the release. If it fails, the previous tag and its
 #     built assets are put back and the service restarted.
-#   * Tags are pruned and then fetched with --force, in two passes. A plain
-#     `fetch --tags` REFUSES to move a tag that already exists locally and
-#     leaves the old one in place, so a re-pointed release tag would go on
-#     building the commit it used to name, forever. Pruning drops tags deleted
-#     on the remote. Doing both in one invocation dropped the stale tag without
-#     fetching its replacement, so the two are kept separate.
+#   * Only release tags are fetched, by explicit refspec, and only from the
+#     configured remote. This repository carries upstream's tags as well as
+#     ours, and on the live container 'origin' is UPSTREAM while 'fork' is
+#     ours, so --tags --prune-tags against a defaulted remote deleted every
+#     release tag. The remote is therefore required, not defaulted.
+#   * The fetch is --force, because a plain fetch refuses to move a tag that
+#     already exists locally and would go on naming the old commit forever.
 #
 set -euo pipefail
 
@@ -41,7 +42,7 @@ HEALTH_URL=${POKECOLLECTOR_HEALTH_URL:-http://127.0.0.1:8000/api/health}
 HEALTH_ATTEMPTS=${POKECOLLECTOR_HEALTH_ATTEMPTS:-20}
 HEALTH_INTERVAL=${POKECOLLECTOR_HEALTH_INTERVAL:-3}
 TAG_GLOB=${POKECOLLECTOR_TAG_GLOB:-bayton-v*}
-REMOTE=${POKECOLLECTOR_REMOTE:-origin}
+REMOTE=${POKECOLLECTOR_REMOTE:-}
 
 log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 
@@ -71,12 +72,40 @@ health_ok() {
 mkdir -p "${STATE}" "${RELEASES}"
 
 cd "${REPO}"
-# Two passes, deliberately. Combining --prune-tags with --tags in one
-# invocation pruned the stale tag and did not bring the replacement back in the
-# same pass, leaving no release tags at all. Pruning and fetching separately
-# makes the order explicit instead of depending on how the flags interact.
-git fetch --quiet --prune --prune-tags "${REMOTE}" || true
-git fetch --quiet --tags --force "${REMOTE}"
+if [ -z "${REMOTE}" ]; then
+  alert "PokeCollector deploy has no remote configured" \
+    "POKECOLLECTOR_REMOTE is not set. It is deliberately not defaulted: on this container 'origin' is UPSTREAM and 'fork' is ours, so a default would have fetched and pruned release tags against the wrong repository. Set it in /etc/pokecollector-deploy.env."
+  log "POKECOLLECTOR_REMOTE is not set, refusing to guess"
+  exit 1
+fi
+
+if ! git remote get-url "${REMOTE}" >/dev/null 2>&1; then
+  alert "PokeCollector deploy remote ${REMOTE} does not exist" \
+    "The configured remote ${REMOTE} is not defined in $(pwd). Nothing was fetched or deployed."
+  log "remote ${REMOTE} does not exist"
+  exit 1
+fi
+
+# Only the release tags, and only from our own remote. Two reasons this is an
+# explicit refspec rather than --tags --prune-tags:
+#
+#   * --tags fetches and prunes EVERY tag, and this repository legitimately
+#     carries upstream's tags too. Pruning them against the wrong remote is how
+#     every bayton- tag got deleted here: 'origin' on this box is upstream.
+#   * A plain fetch refuses to move a tag that already exists locally, so a
+#     re-pointed release tag would go on naming the commit it used to.
+git fetch --quiet --force "${REMOTE}" "+refs/tags/${TAG_GLOB}:refs/tags/${TAG_GLOB}" || true
+
+# Prune release tags that no longer exist on our remote, computed explicitly so
+# it can only ever remove tags matching the release glob.
+remote_tags=$(git ls-remote --tags "${REMOTE}" "refs/tags/${TAG_GLOB}" 2>/dev/null \
+  | sed 's|.*refs/tags/||; s|\^{}$||' | sort -u)
+for local_tag in $(git tag --list "${TAG_GLOB}"); do
+  if ! printf '%s\n' "${remote_tags}" | grep -qxF "${local_tag}"; then
+    log "pruning ${local_tag}, no longer on ${REMOTE}"
+    git tag -d "${local_tag}" >/dev/null 2>&1 || true
+  fi
+done
 
 # -taggerdate, deliberately. See the note at the top of this file.
 target=$(git tag --list "${TAG_GLOB}" --sort=-taggerdate | head -n 1)
