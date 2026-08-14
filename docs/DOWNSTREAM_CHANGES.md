@@ -3,7 +3,7 @@
 A description of everything this fork adds on top of upstream, written for the
 upstream maintainer deciding what is worth pulling in.
 
-**Baseline:** upstream `v1.37.0`. **Branch that runs:** `local-deployment`.
+**Baseline:** upstream `v1.38.4`. **Branch that runs:** `local-deployment`.
 
 At the time of writing that is 133 non-merge commits, 77 new files and 101
 modified files, adding 10 API endpoints, 3 database tables and roughly 470
@@ -66,14 +66,21 @@ proceeding with an empty one.~~
 anything else in this fork. If you take one thing from this document, take
 this.~~
 
-## 1.2 Multi-user mode lockout
+## 1.2 ~~Multi-user mode lockout~~ TAKEN UPSTREAM
 
-> **Upstream has taken this too**, in
+> **Upstream took this too.** Submitted as
 > [PR #354](https://github.com/Git-Romer/pokecollector/pull/354), released in
-> **v1.38.2**, which this fork has not merged yet. Upstream's version also
-> warns before multi-user mode is enabled, which the fork's does not. Strike
-> this section once v1.38.2 is merged and the two are reconciled; prefer
-> upstream's where they overlap.
+> **v1.38.2**, and now merged here. Reconciled in upstream's favour, which was
+> the right call: his version also confirms before multi-user mode is turned
+> **off**, where ours warned only on enable, so disabling authentication was
+> previously instant and silent. He also fixed a stuck spinner in ours, where a
+> failed toggle left the confirm button disabled for good.
+>
+> A follow-up came out of merging it: upstream's guard covered only
+> `update_settings`, while `api/settings.py` has a second writer, so
+> `POST /api/settings/multi_user_mode` walked around it. Reported on #354 and
+> fixed in [PR #362](https://github.com/Git-Romer/pokecollector/pull/362),
+> released as **v1.38.4**.
 
 **Branch:** `fix/multi-user-mode-lockout`
 
@@ -466,9 +473,9 @@ becoming unreachable as the frame grew.
 
 # 8. Suggested order if you want any of it
 
-1. **Section 1** - the security fixes. Both have since been taken upstream:
-   1.1 in v1.38.1 and 1.2 in v1.38.2, the latter improved with a warning the
-   fork's version lacks. Nothing to do for 1.1; reconcile 1.2 on merge.
+1. ~~**Section 1** - the security fixes.~~ **Both are now upstream**: 1.1 in
+   v1.38.1, 1.2 in v1.38.2, and the follow-up bypass they exposed in v1.38.4.
+   Nothing here is outstanding, and the fork carries upstream's versions.
 2. **Section 2** - the provider abstraction, if multi-provider is interesting.
    Additive and default-preserving.
 3. **3.4** - per-item re-take. Small, no migration, and closes a real gap:
