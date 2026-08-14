@@ -162,6 +162,11 @@ const en = {
     signInToCollection: 'Sign in to your collection',
     switchUser: 'Switch User',
     welcomeBack: 'Welcome back',
+    startingTitle: 'Starting PokéCollector',
+    startingMessage: 'Checking the server and your session...',
+    connectionTitle: 'Cannot reach PokéCollector',
+    connectionMessage: 'The server is still starting or temporarily unavailable. PokéCollector will reconnect automatically.',
+    retryConnection: 'Try again',
   },
 
   // Floating quick-add control, present on every page
