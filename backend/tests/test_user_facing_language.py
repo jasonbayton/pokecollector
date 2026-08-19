@@ -18,6 +18,12 @@ ALLOWED = {"text_search.py"}
 
 GERMAN_CHARACTERS = re.compile(r"[äöüÄÖÜß]")
 
+# A character mapping is not a message. Transliteration code has to name the
+# characters it folds, so `.replace("ß", "ss")` in a normaliser is legitimate
+# and must not be read as German prose. Deliberately narrow: it matches a
+# single character being replaced, so a German sentence cannot hide behind it.
+TRANSLITERATION = re.compile(r"""\.replace\(\s*["'].["']\s*,\s*["'][^"']{0,4}["']\s*\)""")
+
 # Words that are German rather than shared with English, so a hit is decisive
 # rather than a guess. Deliberately not "in" or "die", which are both.
 GERMAN_WORDS = re.compile(
@@ -41,6 +47,8 @@ class UserFacingLanguageTests(unittest.TestCase):
         offenders = []
         for path in _candidate_files():
             for number, line in enumerate(path.read_text().splitlines(), start=1):
+                if TRANSLITERATION.search(line):
+                    continue
                 if GERMAN_CHARACTERS.search(line):
                     offenders.append(f"{path.relative_to(BACKEND)}:{number}: {line.strip()}")
         self.assertEqual(
@@ -68,6 +76,10 @@ class UserFacingLanguageTests(unittest.TestCase):
         # A guard that cannot fail is decoration. Both patterns are checked
         # against the exact strings this fork had to translate.
         self.assertTrue(GERMAN_CHARACTERS.search("Ungültiger Gemini API Key."))
+        # The exemption must not swallow a real message that happens to contain
+        # a replace() call elsewhere on the line.
+        self.assertTrue(TRANSLITERATION.search('.replace("ß", "ss")'))
+        self.assertFalse(TRANSLITERATION.search('detail="Ungültiger Key"'))
         self.assertTrue(GERMAN_WORDS.search("Kartenname konnte nicht erkannt werden."))
         self.assertFalse(GERMAN_CHARACTERS.search("The card name could not be read."))
         self.assertFalse(GERMAN_WORDS.search("The card name could not be read."))

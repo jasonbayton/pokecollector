@@ -1023,6 +1023,7 @@ const en = {
     supporters: 'Supporters',
     sponsors: 'Support',
     noSupportersYet: 'No supporters yet. Be the first! ❤️',
+    supportersUnavailable: 'The supporter list is temporarily unavailable.',
     supporterDonation: 'donation',
     supporterDonations: 'donations',
     latestSupport: 'Latest support',
