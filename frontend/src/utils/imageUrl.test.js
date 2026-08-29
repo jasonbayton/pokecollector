@@ -78,6 +78,25 @@ describe('resolveCardDetailImageUrl', () => {
     )).toBe('/api/images/card/custom-1/large')
   })
 
+  it('keeps the versioned custom image ahead of the generic endpoint', () => {
+    // The version is what makes a newly saved custom image appear. The generic
+    // endpoint is the same address without it, so preferring that would leave
+    // the src unchanged across a save and the browser would go on showing the
+    // old picture until its cache expired.
+    expect(resolveCardDetailImageUrl(
+      { id: 'missing-art_en' },
+      { customImageProxyUrl: '/api/images/card/missing-art_en/large?v=2' },
+    )).toBe('/api/images/card/missing-art_en/large?v=2')
+  })
+
+  it('does not let a custom image shadow real card art', () => {
+    // customImageProxyUrl is only ever set for a card the catalogue has no
+    // artwork for, but the ordering should not depend on that being true.
+    expect(resolveCardDetailImageUrl(
+      { id: 'base1-4_en', images_large: 'https://assets.tcgdex.net/en/base/base1/4/high.webp' },
+    )).toBe('/api/images/card/base1-4_en/large')
+  })
+
   it('falls back to the manual image only when there is nothing else', () => {
     expect(resolveCardDetailImageUrl(
       {},

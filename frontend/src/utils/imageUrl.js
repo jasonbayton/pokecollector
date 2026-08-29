@@ -58,8 +58,15 @@ export const resolveCardDetailImageUrl = (card, {
   customImageProxyUrl = null,
 } = {}) => (
   manualImageProxyUrl
-  || resolveCardImageUrl(card, 'large')
+  // Ahead of the generic endpoint on purpose. This one carries a version that
+  // the card modal increments when the owner saves a new custom image, and the
+  // generic URL is the same address without it. Preferring the generic URL
+  // would leave the src unchanged across a save, so the browser would keep
+  // showing the old picture for as long as its cache holds it - a day, given
+  // the endpoint's max-age. It is only ever set for a card the catalogue has
+  // no artwork for, so it cannot shadow real card art.
   || customImageProxyUrl
+  || resolveCardImageUrl(card, 'large')
   || resolveCardImageUrl(card)
   || null
 )
