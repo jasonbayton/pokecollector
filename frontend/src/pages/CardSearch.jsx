@@ -9,6 +9,7 @@ import { useSettings } from '../contexts/SettingsContext'
 import { useScanner } from '../contexts/ScannerContext'
 import Sheet from '../components/ui/Sheet'
 import { getDefaultVariantOrNull } from '../utils/cardVariants'
+import { resolveCardImageUrl } from '../utils/imageUrl'
 import { cardNumberMatches } from '../utils/cardNumbers'
 import { normalizeSearchText, textIncludes } from '../utils/textSearch'
 import { cardSearchKeysSuspended } from '../utils/cardSearchOverlays'
@@ -735,7 +736,7 @@ export default function CardSearch() {
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
               {data.data?.map((card) => {
-                const imgSrc = card.images?.small || card.images_small || (card.image ? `${card.image}/low.webp` : null)
+                const imgSrc = resolveCardImageUrl(card) || card.images?.small || (card.image ? `${card.image}/low.webp` : null)
                 const isSelected = selectedItems.has(card.id)
                 const cardPrice = card.price_market ?? card.price_trend ?? null
                 return (
