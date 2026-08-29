@@ -4,8 +4,11 @@ from unittest.mock import AsyncMock, Mock, patch
 try:
     import httpx  # noqa: F401
     from fastapi import HTTPException
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
 
     from api.recognize import _search_and_rank_candidates
+    from database import Base
 
     DEPS_AVAILABLE = True
 except ModuleNotFoundError:  # pragma: no cover
@@ -38,11 +41,14 @@ class CatalogueOutageTests(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         self.card_info = {"name": "Sandshrew", "name_en": "Sandshrew", "number_local": "027", "language": "en"}
-        # An empty local catalogue, so these tests still exercise the outage
-        # path rather than the local fallback.
-        self.db = Mock()
-        self.db.query.return_value.filter.return_value.limit.return_value.all.return_value = []
-        self.db.query.return_value.filter.return_value.all.return_value = []
+        # A real but empty local catalogue, so these tests still exercise the
+        # outage path rather than the local fallback.
+        engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(engine)
+        self.db = sessionmaker(bind=engine)()
+
+    def tearDown(self):
+        self.db.close()
 
     async def test_a_network_failure_is_reported_rather_than_returning_no_matches(self):
         # The user-visible problem this fixes: while the catalogue was down,
@@ -64,11 +70,11 @@ class CatalogueOutageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(raised.exception.status_code, 503)
 
     async def test_a_body_that_cannot_be_read_is_an_outage_not_an_answer(self):
-        # A gateway serving an error page with a 200 is still the catalogue
-        # being unavailable. This also pins the attempt accounting: the failure
-        # happens after the response arrives, so counting the lookup twice
-        # would leave attempts and failures unequal and silently return no
-        # matches again.
+        # A gateway serving an HTML error page with a 200 is still the
+        # catalogue being unavailable. This also pins the attempt accounting:
+        # the failure happens after the response arrives, so counting the
+        # lookup twice would leave attempts and failures unequal and silently
+        # return no matches again.
         response = _response(200, [])
         response.json = Mock(side_effect=ValueError("not json"))
         with patch("api.recognize.httpx.AsyncClient", _client_returning(response)):
@@ -88,8 +94,8 @@ class CatalogueOutageTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_rate_limited_lookup_is_an_outage_not_an_answer(self):
         # A 429 is the catalogue declining to answer this request, not a
         # statement that the card does not exist. Treating it as an answer
-        # reproduces the misleading "no matches" under rate limiting, which is
-        # the outcome this change exists to remove.
+        # reproduces the original misleading "no matches" under rate limiting,
+        # which is exactly the outcome these commits exist to remove.
         with patch("api.recognize.httpx.AsyncClient", _client_returning(_response(429, []))):
             with self.assertRaises(HTTPException) as raised:
                 await _search_and_rank_candidates(self.db, self.card_info, trace=None)

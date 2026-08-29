@@ -32,7 +32,7 @@ from services.scan_providers import (
 )
 import logging
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 from api.auth import get_current_user
 from database import get_db
@@ -794,29 +794,60 @@ def _local_catalogue_candidates(db, card_info, search_pairs) -> list:
     entries, and matching a scan against one would invent a result the live
     search could never have produced.
     """
-    names = []
-    for _language, search_name in search_pairs:
-        if search_name and search_name not in names:
-            names.append(search_name)
-    if not names:
+    # Each pair is searched as a pair. Splitting them into a list of names and
+    # a list of languages would admit their product, so a name only ever
+    # searched in English could match a row in another language. That is not
+    # hypothetical: swsh2-201 is Milo in English and Yarrow in Italian, while
+    # swsh7-201 is Milo in Italian, all numbered 201, so an Italian scan of
+    # Yarrow would admit an unrelated Italian Milo through the English name.
+    pairs = []
+    for language, search_name in search_pairs:
+        if search_name and (language, search_name) not in pairs:
+            pairs.append((language, search_name))
+    if not pairs:
         return []
 
-    languages = []
-    for language, _search_name in search_pairs:
-        if language not in languages:
-            languages.append(language)
-
-    rows = (
+    query = (
         db.query(Card)
         .filter(
             Card.tcg_card_id.isnot(None),
-            Card.is_custom.is_(False),
-            or_(*[Card.name.ilike(name) for name in names]),
-            Card.lang.in_(languages),
+            # is_custom is nullable, and the card-id migration in database.py
+            # already treats "NULL or false" as catalogue data. A synced row
+            # left NULL must not be invisible here.
+            Card.is_custom.isnot(True),
+            or_(*[
+                and_(Card.lang == language, Card.name.ilike(search_name))
+                for language, search_name in pairs
+            ]),
         )
-        .limit(60)
-        .all()
     )
+
+    # Ordered so the row set is deterministic. An unordered LIMIT in
+    # PostgreSQL may return a different subset each time, and the truncation
+    # below has to be applied to a stable set for the narrowing to mean
+    # anything.
+    rows = query.order_by(
+        Card.lang.asc(), Card.set_id.asc(), Card.number.asc(), Card.id.asc()
+    ).limit(500).all()
+
+    # Narrow on the printed collector number BEFORE truncating. Truncating
+    # first could drop the right printing while leaving a different card of the
+    # same name, which the ranker then reads as a unique number and marks
+    # confident: a wrong card filed automatically by "add all confident", which
+    # is worse than no match at all. The same normaliser the live search uses,
+    # so the two cannot drift apart on what counts as the same number.
+    target_number = normalize_scanner_card_number(card_info.get("number_local"))
+    if target_number:
+        # No fallback to the unnarrowed rows when nothing matches. The live
+        # search can safely return same-name results because it is searching
+        # the whole catalogue; this is a partial local copy, and a lone
+        # same-name row of the wrong number is precisely what the ranker reads
+        # as a unique number and marks confident.
+        rows = [
+            row for row in rows
+            if normalize_scanner_card_number(row.number) == target_number
+        ]
+    rows = rows[:60]
 
     set_names = {}
     set_ids = {row.set_id for row in rows if row.set_id}
@@ -929,7 +960,7 @@ async def _search_and_rank_candidates(
             unreachable += 1
             continue
 
-    if not candidates and unreachable:
+    if not candidates and attempted and unreachable == attempted:
         # The catalogue is unreachable, but this installation already holds a
         # synced copy of it. Searching that is not as good as a live lookup, it
         # only knows the sets that have been synced, but it is far better than
