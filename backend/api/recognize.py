@@ -814,16 +814,18 @@ async def _search_and_rank_candidates(
     for search_language, search_name in search_pairs:
         if len(candidates) >= 15:
             break
+        attempted += 1
         try:
             async with httpx.AsyncClient(timeout=15) as client:
                 response = await client.get(
                     f"https://api.tcgdex.net/v2/{search_language}/cards",
                     params={"name": search_name},
                 )
-            attempted += 1
-            # A 5xx is the catalogue failing, not an answer. A 4xx is an answer
-            # we should not retry forever, so it is not counted as unreachable.
-            if response.status_code >= 500:
+            # A 5xx is the catalogue failing, not an answer. So are 429 and 408:
+            # the catalogue is declining to answer this request now, which is
+            # not "no such card" either. Any other 4xx is an answer we should
+            # not retry forever, so it is not counted as unreachable.
+            if response.status_code >= 500 or response.status_code in {408, 429}:
                 unreachable += 1
             cards = response.json() if response.status_code == 200 else []
             if trace:
@@ -866,7 +868,6 @@ async def _search_and_rank_candidates(
                     count=None,
                     error=type(exc).__name__,
                 )
-            attempted += 1
             unreachable += 1
             continue
 
