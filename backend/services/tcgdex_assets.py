@@ -27,6 +27,28 @@ CANONICAL_ASSET_HOST = "assets.tcgdex.net"
 # page load would be harder to reason about than a restart.
 TCGDEX_ASSETS_BASE = os.environ.get("TCGDEX_ASSETS_BASE", "").rstrip("/")
 
+# Whether the mirror is asked first or only after the CDN has failed.
+#
+# Both orders try both hosts, so this is a preference rather than a
+# restriction. Mirror-primary suits a mirror on the same network: it is
+# quicker, it spares the public CDN, and an image already held locally does
+# not depend on the internet at all. Mirror-standby suits a mirror you trust
+# less than the source, or one you keep purely for the days the CDN is down.
+_MIRROR_PRIMARY = "primary"
+_MIRROR_STANDBY = "standby"
+# "fallback" and "secondary" mean the same thing to most people writing this
+# setting, and rejecting them would only produce a mirror silently used in the
+# wrong order.
+_STANDBY_SPELLINGS = {_MIRROR_STANDBY, "fallback", "secondary"}
+
+
+def asset_mirror_mode() -> str:
+    """Whether the mirror is tried first or second. Defaults to first."""
+    configured = os.environ.get("TCGDEX_ASSETS_MODE", "").strip().lower()
+    if configured in _STANDBY_SPELLINGS:
+        return _MIRROR_STANDBY
+    return _MIRROR_PRIMARY
+
 
 def _mirror_parts():
     """The configured mirror as (scheme, netloc, path prefix), or None."""
@@ -60,16 +82,21 @@ def mirror_asset_url(url: object) -> Optional[str]:
 
 
 def asset_urls_to_try(url: object) -> list:
-    """Where to look for one image, best first.
+    """Where to look for one image, preferred first.
 
-    The mirror, then the CDN it mirrors. Callers walk this in order and stop at
-    the first that answers, which is what makes enabling a mirror safe: the
-    original source is still there behind it.
+    Both the mirror and the CDN it mirrors appear, in the order
+    TCGDEX_ASSETS_MODE asks for. Callers walk the list and stop at the first
+    that answers, which is what makes configuring a mirror safe in either
+    order: whichever is second is still there behind the first.
     """
     if not url:
         return []
     mirror = mirror_asset_url(url)
-    return [mirror, str(url)] if mirror else [str(url)]
+    if not mirror:
+        return [str(url)]
+    if asset_mirror_mode() == _MIRROR_STANDBY:
+        return [str(url), mirror]
+    return [mirror, str(url)]
 
 
 def secure_asset_url(url: object) -> str:
@@ -81,6 +108,10 @@ def secure_asset_url(url: object) -> str:
     LAN address must not quietly relax that. Such a mirror is simply not used
     for this, and the canonical CDN is.
     """
+    if asset_mirror_mode() == _MIRROR_STANDBY:
+        # One URL is chosen here with no second attempt, so a mirror the
+        # operator has asked to keep in reserve is not the one to pick.
+        return str(url) if url else ""
     mirror = mirror_asset_url(url)
     if mirror and urlparse(mirror).scheme == "https":
         return mirror
@@ -95,8 +126,8 @@ def trusted_asset_hosts() -> set:
     """
     hosts = {CANONICAL_ASSET_HOST}
     parts = _mirror_parts()
-    if parts is not None:
-        scheme, netloc, _prefix = parts
+    if parts is not None and asset_mirror_mode() != _MIRROR_STANDBY:
+        scheme, _netloc, _prefix = parts
         if scheme == "https":
             hosts.add(urlparse(TCGDEX_ASSETS_BASE).hostname)
     return hosts

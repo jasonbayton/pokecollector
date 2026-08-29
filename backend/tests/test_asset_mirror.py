@@ -31,11 +31,15 @@ except ModuleNotFoundError:  # pragma: no cover
 CANONICAL = "https://assets.tcgdex.net/en/sv/sv03.5/027/low.webp"
 
 
-def _reload(base=None):
+def _reload(base=None, mode=None):
     if base is None:
         os.environ.pop("TCGDEX_ASSETS_BASE", None)
     else:
         os.environ["TCGDEX_ASSETS_BASE"] = base
+    if mode is None:
+        os.environ.pop("TCGDEX_ASSETS_MODE", None)
+    else:
+        os.environ["TCGDEX_ASSETS_MODE"] = mode
     import services.tcgdex_assets as assets
     return importlib.reload(assets)
 
@@ -96,6 +100,56 @@ class AssetMirrorUrlTests(unittest.TestCase):
                 assets = _reload(base)
                 self.assertIsNone(assets.mirror_asset_url(CANONICAL))
                 self.assertEqual(assets.asset_urls_to_try(CANONICAL), [CANONICAL])
+
+
+@unittest.skipUnless(DEPS_AVAILABLE, "SQLAlchemy is not installed in this lightweight test environment")
+class MirrorModeTests(unittest.TestCase):
+    """Whether the mirror is asked before or after the CDN it mirrors."""
+
+    def tearDown(self):
+        _reload(None, None)
+
+    def test_the_mirror_leads_by_default(self):
+        assets = _reload("http://mirror.local")
+        self.assertEqual(assets.asset_mirror_mode(), "primary")
+        self.assertEqual(
+            assets.asset_urls_to_try(CANONICAL)[0],
+            "http://mirror.local/en/sv/sv03.5/027/low.webp",
+        )
+
+    def test_standby_mode_puts_the_cdn_first(self):
+        assets = _reload("http://mirror.local", "standby")
+        self.assertEqual(
+            assets.asset_urls_to_try(CANONICAL),
+            [CANONICAL, "http://mirror.local/en/sv/sv03.5/027/low.webp"],
+        )
+
+    def test_both_hosts_are_tried_whichever_order_is_asked_for(self):
+        # The mode is a preference, not a restriction: neither order gives up
+        # after one host, which is what makes either safe to configure.
+        for mode in (None, "primary", "standby"):
+            with self.subTest(mode=mode):
+                assets = _reload("http://mirror.local", mode)
+                self.assertEqual(len(assets.asset_urls_to_try(CANONICAL)), 2)
+
+    def test_the_usual_spellings_of_standby_are_understood(self):
+        # Rejecting these would not stop anyone writing them; it would just
+        # use the mirror in the order they did not ask for.
+        for spelling in ("standby", "STANDBY", " fallback ", "secondary"):
+            with self.subTest(spelling=spelling):
+                assets = _reload("http://mirror.local", spelling)
+                self.assertEqual(assets.asset_urls_to_try(CANONICAL)[0], CANONICAL)
+
+    def test_an_unrecognised_mode_leaves_the_mirror_leading(self):
+        assets = _reload("http://mirror.local", "sideways")
+        self.assertEqual(assets.asset_mirror_mode(), "primary")
+
+    def test_a_standby_mirror_is_not_used_for_reference_images(self):
+        # That path picks one URL with no second attempt, so a mirror held in
+        # reserve is not the one to pick, HTTPS or not.
+        assets = _reload("https://cache.example.org", "standby")
+        self.assertEqual(assets.secure_asset_url(CANONICAL), CANONICAL)
+        self.assertEqual(assets.trusted_asset_hosts(), {"assets.tcgdex.net"})
 
 
 @unittest.skipUnless(DEPS_AVAILABLE, "SQLAlchemy is not installed in this lightweight test environment")
