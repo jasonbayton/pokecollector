@@ -34,6 +34,7 @@ import logging
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from sqlalchemy import and_, func, or_
 from services.card_numbers import card_number_variants
+from services.tcgdex_assets import secure_asset_url, trusted_asset_hosts
 from services.pokemon_api import (
     get_base_url as tcgdex_base_url,
     get_standby_base_url as tcgdex_standby_base_url,
@@ -58,7 +59,12 @@ PHASH_CANDIDATE_LIMIT = 8
 CANDIDATE_DETAIL_LIMIT = 8
 MAX_REFERENCE_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_REFERENCE_IMAGE_PIXELS = 50_000_000
-TRUSTED_REFERENCE_IMAGE_HOSTS = {"assets.tcgdex.net"}
+# The catalogue CDN, plus an HTTPS asset mirror when one is configured. An
+# HTTP mirror is deliberately excluded: these bytes are decoded as an image and
+# sent to the vision model, and a mirror on a plain LAN address must not be
+# able to relax that. Such a mirror still serves the pictures people look at,
+# which go through the app's own image endpoint.
+TRUSTED_REFERENCE_IMAGE_HOSTS = trusted_asset_hosts()
 # Which catalogue a candidate came from, carried on the candidate so its later
 # detail lookup goes back to the same one.
 CATALOGUE_PRIMARY = "primary"
@@ -625,6 +631,7 @@ async def _download_candidate_images(
         image_url = candidate.get("image")
         if not candidate_id or not image_url or candidate_id in downloaded:
             return None
+        image_url = secure_asset_url(image_url)
         parsed_url = urlparse(str(image_url))
         if (
             parsed_url.scheme != "https"

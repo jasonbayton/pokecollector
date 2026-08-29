@@ -8,6 +8,7 @@ from urllib.parse import urljoin
 from sqlalchemy.orm import Session
 
 from database import get_db
+from services.tcgdex_assets import asset_urls_to_try
 from models import Card, ImageCache, ProductPurchase, Set, Setting
 from services.card_visibility import get_configured_sync_languages, get_pinned_set_language_pairs
 from services.image_url_security import validate_public_https_image_url
@@ -89,11 +90,24 @@ def _get_or_fetch(db: Session, key: str, url: str) -> tuple[bytes, str]:
     if cached:
         return cached.data, cached.content_type
 
-    try:
-        resp = _client.get(url)
-        resp.raise_for_status()
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail="Failed to fetch image from upstream") from exc
+    # The mirror first, then the CDN it mirrors. The cache key is the caller's,
+    # built from the canonical URL, so turning a mirror on or off never
+    # invalidates a single already-cached image: where the bytes came from is
+    # not part of what they are.
+    resp = None
+    last_error = None
+    for candidate_url in asset_urls_to_try(url) or [url]:
+        try:
+            resp = _client.get(candidate_url)
+            resp.raise_for_status()
+            break
+        except Exception as exc:
+            last_error = exc
+            resp = None
+    if resp is None:
+        raise HTTPException(
+            status_code=502, detail="Failed to fetch image from upstream"
+        ) from last_error
 
     content_type = resp.headers.get("content-type", "image/webp")
     entry = ImageCache(image_key=key, data=resp.content, content_type=content_type)
