@@ -24,8 +24,9 @@ from services.digital_sets import is_digital_set_data
 # than a restart.
 TCGDEX_BASE = os.environ.get("TCGDEX_API_BASE", "https://api.tcgdex.net/v2").rstrip("/")
 
-# A second catalogue, consulted by the scanner only when the first cannot be
-# reached at all. Off unless set.
+# A second catalogue, consulted only when the first cannot be reached at all,
+# by the scanner and by the card lookups behind adding and enrichment. Off
+# unless set.
 #
 # It is a standby rather than an equal for a measured reason. A self-hosted
 # catalogue built from the same source is not built at the same moment, and its
@@ -255,12 +256,18 @@ def get_card(card_id: str, lang: str = "en") -> Optional[Dict]:
     the user would be shown a card they cannot add, which is a worse place to
     be stuck than not matching it at all.
 
-    A 404 is an answer and is returned as one. Only an unreachable catalogue
-    moves on to the next, and a body that cannot be read counts as unreachable
-    for the same reason the scanner counts it that way: a gateway serving an
-    error page with a 200 is the catalogue being unavailable, not an answer.
-    Handling it differently here is what let the scanner match a card through
-    the standby that this call could then not fetch.
+    A 404 is an answer and is returned as one. Anything else that stops this
+    call producing a card counts as the catalogue being unavailable, and moves
+    on to the next one.
+
+    That breadth is deliberate and it matches the scanner exactly. Twice now,
+    handling one failure class here and a wider set there has let the scanner
+    match a card through the standby that this call could not then fetch,
+    leaving the user looking at a card they cannot add. Rather than keep adding
+    exception types one at a time, this treats "did not come back with a card"
+    as the single condition, which is what the scanner's own broad boundary
+    already does. Nothing is swallowed: if no catalogue produces a card, the
+    last failure is raised.
     """
     last_error = None
     for base_url in (get_base_url(lang), get_standby_base_url(lang)):
@@ -272,8 +279,14 @@ def get_card(card_id: str, lang: str = "en") -> Optional[Dict]:
                 if response.status_code == 404:
                     return None
                 response.raise_for_status()
-                return response.json()
-        except (httpx.HTTPError, httpx.StreamError, ValueError) as exc:
+                card = response.json()
+            # A decoded body is not necessarily a card. A gateway answering 200
+            # with a list, a null, or an error document would otherwise be
+            # handed to callers that immediately treat it as one.
+            if not isinstance(card, dict) or not card.get("id"):
+                raise ValueError(f"{base_url} did not return a card for {card_id}")
+            return card
+        except Exception as exc:
             # A 4xx other than 404 is the catalogue answering, so it is not
             # something a second catalogue would answer differently.
             status = getattr(getattr(exc, "response", None), "status_code", None)

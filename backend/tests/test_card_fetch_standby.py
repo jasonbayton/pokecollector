@@ -123,6 +123,36 @@ class CardFetchStandbyTests(unittest.TestCase):
         self.assertEqual(card["id"], "sv03.5-027")
         self.assertTrue(any("standby.local" in url for url in catalogues.calls))
 
+    def test_a_body_that_is_not_a_card_falls_through_like_an_outage(self):
+        # A gateway answering 200 with a list or a null decodes perfectly well
+        # and is not a card. Handing it back would push the failure into the
+        # caller, which treats it as one and raises AttributeError; the scanner
+        # meanwhile counts the same response as unreachable and matches through
+        # the standby, so the user is offered a card that cannot be added.
+        for junk in ([None], [], "not a card", {"error": "nope"}):
+            with self.subTest(junk=junk):
+                pokemon_api = self._with_standby()
+                catalogues = _Catalogues({
+                    "api.tcgdex.net": (200, junk),
+                    "standby.local": (200, {"id": "sv03.5-027", "name": "Sandshrew"}),
+                })
+                with patch("services.pokemon_api.httpx.Client", catalogues):
+                    card = pokemon_api.get_card("sv03.5-027", "en")
+                self.assertEqual(card["id"], "sv03.5-027")
+
+    def test_a_failure_the_scanner_would_tolerate_reaches_the_standby(self):
+        # The scanner's boundary is a bare "except Exception", so any failure
+        # it survives must be one this call survives too. An invalid URL is one
+        # the earlier, narrower handling here would have let through.
+        pokemon_api = self._with_standby()
+        catalogues = _Catalogues({
+            "api.tcgdex.net": httpx.InvalidURL("malformed"),
+            "standby.local": (200, {"id": "sv03.5-027", "name": "Sandshrew"}),
+        })
+        with patch("services.pokemon_api.httpx.Client", catalogues):
+            card = pokemon_api.get_card("sv03.5-027", "en")
+        self.assertEqual(card["id"], "sv03.5-027")
+
     def test_the_failure_still_surfaces_when_neither_can_be_reached(self):
         pokemon_api = self._with_standby()
         catalogues = _Catalogues({
