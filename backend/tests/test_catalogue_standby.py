@@ -127,6 +127,40 @@ class CatalogueStandbyTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("standby.local" in url for url in catalogues.calls), catalogues.calls)
         self.assertEqual([c["tcg_card_id"] for c in candidates], ["sv03.5-027"])
 
+    async def test_details_are_fetched_from_the_catalogue_that_answered(self):
+        # Enrichment must follow the candidates. Asking the primary about a
+        # card the standby found means talking to a host already known to be
+        # down: eight one-by-one timeouts, and artist, HP, regulation mark and
+        # printed total left empty, all of which feed ranking and confidence.
+        recognize = self._with_standby()
+        catalogues = _Catalogues({
+            "api.tcgdex.net": httpx.ConnectTimeout("timed out"),
+            "standby.local": (200, [_card("sv03.5-027", "Sandshrew", "027")]),
+        })
+        # The enrichment only runs for fields the scan actually read off the
+        # card, so the fixture has to have read one.
+        card_info = dict(self.card_info, artist="kodama")
+        with patch("api.recognize.httpx.AsyncClient", catalogues):
+            candidates, _ = await recognize._search_and_rank_candidates(self.db, card_info, trace=None)
+            await recognize._fill_candidate_details(self.db, candidates, card_info)
+
+        detail_calls = [url for url in catalogues.calls if "/cards/" in url]
+        self.assertTrue(detail_calls, "the detail lookup should have run")
+        self.assertTrue(
+            all("standby.local" in url for url in detail_calls),
+            f"details must come from the catalogue that answered: {detail_calls}",
+        )
+
+    async def test_a_candidate_records_which_catalogue_found_it(self):
+        recognize = self._with_standby()
+        catalogues = _Catalogues({
+            "api.tcgdex.net": httpx.ConnectTimeout("timed out"),
+            "standby.local": (200, [_card("sv03.5-027", "Sandshrew", "027")]),
+        })
+        with patch("api.recognize.httpx.AsyncClient", catalogues):
+            candidates, _ = await recognize._search_and_rank_candidates(self.db, self.card_info, trace=None)
+        self.assertEqual([c["_catalogue"] for c in candidates], [recognize.CATALOGUE_STANDBY])
+
     async def test_both_unreachable_still_reports_the_outage(self):
         recognize = self._with_standby()
         catalogues = _Catalogues({

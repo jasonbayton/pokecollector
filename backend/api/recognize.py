@@ -59,6 +59,10 @@ CANDIDATE_DETAIL_LIMIT = 8
 MAX_REFERENCE_IMAGE_BYTES = 5 * 1024 * 1024
 MAX_REFERENCE_IMAGE_PIXELS = 50_000_000
 TRUSTED_REFERENCE_IMAGE_HOSTS = {"assets.tcgdex.net"}
+# Which catalogue a candidate came from, carried on the candidate so its later
+# detail lookup goes back to the same one.
+CATALOGUE_PRIMARY = "primary"
+CATALOGUE_STANDBY = "standby"
 # The widest burst one gated matcher can aim at TCGdex.
 #
 # A matcher fans out concurrently in exactly two places, and they run in
@@ -813,10 +817,13 @@ async def _fill_candidate_details(
             language = card.get("_lang", "en")
             if not tcg_id:
                 return
+            base_url = _catalogue_base_for(card.get("_catalogue"))
+            if base_url is None:
+                return
             try:
                 async with _request_gate(request_gate):
                     response = await client.get(
-                        f"{tcgdex_base_url(language)}/cards/{tcg_id}"
+                        f"{base_url(language)}/cards/{tcg_id}"
                     )
                 if response.status_code != 200:
                     return
@@ -911,6 +918,18 @@ def _local_catalogue_candidates(db, card_info, search_pairs) -> list:
     return candidates
 
 
+def _catalogue_base_for(catalogue_name):
+    """The base-URL resolver a candidate's own catalogue name refers to.
+
+    Returns None when a standby-sourced candidate outlives its configuration,
+    so a later enrichment silently skips rather than quietly asking a different
+    catalogue about a card it may number differently.
+    """
+    if catalogue_name == CATALOGUE_STANDBY:
+        return tcgdex_standby_base_url if tcgdex_standby_base_url() is not None else None
+    return tcgdex_base_url
+
+
 def _catalogue_bases():
     """The catalogues to search, in order of preference.
 
@@ -918,9 +937,9 @@ def _catalogue_bases():
     first one that answers, so a configured standby costs nothing until the
     catalogue in front of it is unreachable.
     """
-    yield tcgdex_base_url
+    yield CATALOGUE_PRIMARY, tcgdex_base_url
     if tcgdex_standby_base_url() is not None:
-        yield tcgdex_standby_base_url
+        yield CATALOGUE_STANDBY, tcgdex_standby_base_url
 
 
 async def _search_one_catalogue(
@@ -929,6 +948,7 @@ async def _search_one_catalogue(
     card_info: dict,
     trace: ScanTrace | None,
     request_gate,
+    catalogue_name: str = CATALOGUE_PRIMARY,
 ) -> tuple[list[dict], int, int]:
     """Search one catalogue host for the given name and language pairs.
 
@@ -987,6 +1007,7 @@ async def _search_one_catalogue(
                     "lang": search_language,
                     "_lang": search_language,
                     "_number_extra": bool(card.get("_number_extra")),
+                    "_catalogue": catalogue_name,
                 })
         except Exception as exc:
             if trace:
@@ -1030,9 +1051,9 @@ async def _search_and_rank_candidates(
     candidates = []
     attempted = 0
     unreachable = 0
-    for base_url in _catalogue_bases():
+    for catalogue_name, base_url in _catalogue_bases():
         found, base_attempted, base_unreachable = await _search_one_catalogue(
-            base_url, search_pairs, card_info, trace, request_gate
+            base_url, search_pairs, card_info, trace, request_gate, catalogue_name
         )
         candidates.extend(found)
         attempted += base_attempted
