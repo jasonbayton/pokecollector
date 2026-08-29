@@ -23,6 +23,20 @@ from services.digital_sets import is_digital_set_data
 # setting, and a half-changed base URL part way through a sync would be worse
 # than a restart.
 TCGDEX_BASE = os.environ.get("TCGDEX_API_BASE", "https://api.tcgdex.net/v2").rstrip("/")
+
+# A second catalogue, consulted by the scanner only when the first cannot be
+# reached at all. Off unless set.
+#
+# It is a standby rather than an equal for a measured reason. A self-hosted
+# catalogue built from the same source is not built at the same moment, and its
+# search results come back in a different order. For a card whose name and
+# number are shared by several printings that changes which candidate ranks
+# first: asked for Charizard 4, the public catalogue offers base4-4 first and a
+# self-hosted build offers ex14-4. Both are defensible answers, but swapping
+# between them by chance would quietly change what the scanner suggests.
+# Consulting the standby only during an outage keeps normal matching exactly as
+# it is, which is the whole reason to have one.
+TCGDEX_STANDBY_BASE = os.environ.get("TCGDEX_STANDBY_API_BASE", "").rstrip("/")
 _POKEMON_CATEGORY_VALUES = {"pokemon", "pokémon"}
 _NAME_SUFFIX_TOKENS = {"ex", "gx", "v", "vmax", "vstar"}
 _MEGA_FORM_TOKENS = {"x", "y"}
@@ -60,6 +74,16 @@ def get_base_url(lang: str = "en") -> str:
     if not is_supported_tcgdex_language(normalized_lang):
         normalized_lang = "en"
     return f"{TCGDEX_BASE}/{normalized_lang}"
+
+
+def get_standby_base_url(lang: str = "en") -> Optional[str]:
+    """The standby catalogue's base URL, or None when none is configured."""
+    if not TCGDEX_STANDBY_BASE:
+        return None
+    normalized_lang = normalize_tcgdex_language(lang)
+    if not is_supported_tcgdex_language(normalized_lang):
+        normalized_lang = "en"
+    return f"{TCGDEX_STANDBY_BASE}/{normalized_lang}"
 
 
 def extract_prices(card_data: Dict) -> Dict[str, Optional[float]]:

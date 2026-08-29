@@ -34,7 +34,10 @@ import logging
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from sqlalchemy import and_, func, or_
 from services.card_numbers import card_number_variants
-from services.pokemon_api import get_base_url as tcgdex_base_url
+from services.pokemon_api import (
+    get_base_url as tcgdex_base_url,
+    get_standby_base_url as tcgdex_standby_base_url,
+)
 from services.scan_queue import CATALOGUE_UNREACHABLE_RETRY_REASON
 from sqlalchemy.orm import Session
 from api.auth import get_current_user
@@ -908,31 +911,31 @@ def _local_catalogue_candidates(db, card_info, search_pairs) -> list:
     return candidates
 
 
-async def _search_and_rank_candidates(
-    db: Session,
+def _catalogue_bases():
+    """The catalogues to search, in order of preference.
+
+    The standby is only ever the second entry, and the caller stops after the
+    first one that answers, so a configured standby costs nothing until the
+    catalogue in front of it is unreachable.
+    """
+    yield tcgdex_base_url
+    if tcgdex_standby_base_url() is not None:
+        yield tcgdex_standby_base_url
+
+
+async def _search_one_catalogue(
+    base_url,
+    search_pairs,
     card_info: dict,
-    trace: ScanTrace | None = None,
-    *,
-    request_gate=None,
-) -> tuple[list[dict], int]:
-    card_name = str(card_info.get("name") or "").strip()
-    card_name_en = str(card_info.get("name_en") or card_name).strip() or card_name
-    if not card_name:
-        raise HTTPException(status_code=422, detail="The card name could not be read from this photo.")
+    trace: ScanTrace | None,
+    request_gate,
+) -> tuple[list[dict], int, int]:
+    """Search one catalogue host for the given name and language pairs.
 
-    simple_name = _simplify_name(card_name)
-    simple_name_en = _simplify_name(card_name_en)
-    language = normalize_tcgdex_language(card_info.get("language", "en"))
-    if not is_supported_tcgdex_language(language):
-        language = "en"
-    search_pairs = [(language, simple_name)]
-    if simple_name != card_name:
-        search_pairs.append((language, card_name))
-    if language != "en":
-        search_pairs.append(("en", simple_name_en))
-        if simple_name_en != card_name_en:
-            search_pairs.append(("en", card_name_en))
-
+    Returns its candidates, how many lookups were made and how many of those
+    failed to reach it. Extracted so the standby is searched by the same code
+    as the primary rather than by a copy of it that can drift.
+    """
     candidates = []
     attempted = 0
     unreachable = 0
@@ -944,7 +947,7 @@ async def _search_and_rank_candidates(
             async with _request_gate(request_gate):
                 async with httpx.AsyncClient(timeout=15) as client:
                     response = await client.get(
-                        f"{tcgdex_base_url(search_language)}/cards",
+                        f"{base_url(search_language)}/cards",
                         params={"name": search_name},
                     )
             # A 5xx is the catalogue failing, not an answer. So are 429 and 408:
@@ -996,6 +999,50 @@ async def _search_and_rank_candidates(
                 )
             unreachable += 1
             continue
+    return candidates, attempted, unreachable
+
+
+async def _search_and_rank_candidates(
+    db: Session,
+    card_info: dict,
+    trace: ScanTrace | None = None,
+    *,
+    request_gate=None,
+) -> tuple[list[dict], int]:
+    card_name = str(card_info.get("name") or "").strip()
+    card_name_en = str(card_info.get("name_en") or card_name).strip() or card_name
+    if not card_name:
+        raise HTTPException(status_code=422, detail="The card name could not be read from this photo.")
+
+    simple_name = _simplify_name(card_name)
+    simple_name_en = _simplify_name(card_name_en)
+    language = normalize_tcgdex_language(card_info.get("language", "en"))
+    if not is_supported_tcgdex_language(language):
+        language = "en"
+    search_pairs = [(language, simple_name)]
+    if simple_name != card_name:
+        search_pairs.append((language, card_name))
+    if language != "en":
+        search_pairs.append(("en", simple_name_en))
+        if simple_name_en != card_name_en:
+            search_pairs.append(("en", card_name_en))
+
+    candidates = []
+    attempted = 0
+    unreachable = 0
+    for base_url in _catalogue_bases():
+        found, base_attempted, base_unreachable = await _search_one_catalogue(
+            base_url, search_pairs, card_info, trace, request_gate
+        )
+        candidates.extend(found)
+        attempted += base_attempted
+        unreachable += base_unreachable
+        # Move on to the standby only when this catalogue could not be reached
+        # at all. If it answered, its answer stands, including an answer of
+        # "no such card": a second opinion sought only because the first was
+        # not to our liking is not a fallback, it is a coin toss.
+        if not (base_attempted and base_unreachable == base_attempted):
+            break
 
     if not candidates and attempted and unreachable == attempted:
         # The catalogue is unreachable, but this installation already holds a
