@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, Mock, patch
 try:
     import httpx  # noqa: F401
     from fastapi import HTTPException  # noqa: F401
-    from sqlalchemy import create_engine
+    from sqlalchemy import create_engine, text
     from sqlalchemy.orm import sessionmaker
 
     from api.recognize import _local_catalogue_candidates, _search_and_rank_candidates
@@ -147,6 +147,22 @@ class LocalCatalogueFallbackTests(unittest.IsolatedAsyncioTestCase):
             custom_image_url="/uploads/custom-1.jpg",
         )
         self.assertEqual(_local_catalogue_candidates(self.db, self.card_info, self.pairs), [])
+
+    def test_rows_predating_the_custom_flag_are_still_catalogue_rows(self):
+        # is_custom is nullable, and the card-id migration in database.py
+        # already treats "NULL or false" as catalogue data. A synced row left
+        # NULL must not become invisible to the fallback, which would put the
+        # user back where they started: their own catalogue on disk, unused.
+        row = _add_card(self.db)
+        # The column carries a Python-side default of False, which SQLAlchemy
+        # applies to a None on insert, so the NULL has to be written directly.
+        self.db.execute(text("UPDATE cards SET is_custom = NULL WHERE id = :id"), {"id": row.id})
+        self.db.commit()
+        stored = self.db.execute(text("SELECT is_custom FROM cards WHERE id = :id"), {"id": row.id}).scalar()
+        self.assertIsNone(stored, "this test is worthless unless the row really is NULL")
+
+        candidates = _local_catalogue_candidates(self.db, self.card_info, self.pairs)
+        self.assertEqual([card["tcg_card_id"] for card in candidates], ["sv03.5-027"])
 
     def test_rows_without_a_catalogue_id_are_excluded(self):
         # A row with no tcg_card_id cannot be resolved by anything downstream,

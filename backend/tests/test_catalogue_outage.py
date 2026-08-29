@@ -8,6 +8,7 @@ try:
     from sqlalchemy.orm import sessionmaker
 
     from api.recognize import _search_and_rank_candidates
+    from services.scan_queue import CATALOGUE_UNREACHABLE_RETRY_REASON
     from database import Base
 
     DEPS_AVAILABLE = True
@@ -83,6 +84,19 @@ class CatalogueOutageTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(raised.exception.status_code, 503)
 
+    async def test_the_outage_carries_a_reason_the_queue_can_bound(self):
+        # The queue stops retrying this particular failure, because each retry
+        # re-runs the paid vision extraction before it can reach the catalogue.
+        # It can only do that if the reason travels with the error.
+        with patch("api.recognize.httpx.AsyncClient", _client_returning(error=httpx.ConnectTimeout("timed out"))):
+            with self.assertRaises(HTTPException) as raised:
+                await _search_and_rank_candidates(self.db, self.card_info, trace=None)
+
+        self.assertEqual(
+            getattr(raised.exception, "retry_reason", None),
+            CATALOGUE_UNREACHABLE_RETRY_REASON,
+        )
+
     async def test_a_genuine_empty_result_still_reports_no_matches(self):
         # The bystander. The catalogue answered; it simply has no such card.
         # Raising here would turn every unknown card into a retry loop.
@@ -90,6 +104,17 @@ class CatalogueOutageTests(unittest.IsolatedAsyncioTestCase):
             candidates, _ = await _search_and_rank_candidates(self.db, self.card_info, trace=None)
 
         self.assertEqual(candidates, [])
+
+    async def test_a_rate_limited_lookup_is_an_outage_not_an_answer(self):
+        # A 429 is the catalogue declining to answer this request, not a
+        # statement that the card does not exist. Treating it as an answer
+        # reproduces the original misleading "no matches" under rate limiting,
+        # which is exactly the outcome these commits exist to remove.
+        with patch("api.recognize.httpx.AsyncClient", _client_returning(_response(429, []))):
+            with self.assertRaises(HTTPException) as raised:
+                await _search_and_rank_candidates(self.db, self.card_info, trace=None)
+
+        self.assertEqual(raised.exception.status_code, 503)
 
     async def test_a_client_error_is_an_answer_not_an_outage(self):
         # A 4xx is the catalogue rejecting the request. Retrying it forever

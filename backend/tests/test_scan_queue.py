@@ -25,6 +25,8 @@ try:
         replace_scan_item_photo,
         job_progress,
         complete_claim_group,
+        CATALOGUE_UNREACHABLE_RETRY_REASON,
+        MAX_CATALOGUE_UNREACHABLE_ATTEMPTS,
     )
 
     DEPS_AVAILABLE = True
@@ -327,6 +329,58 @@ class ScanQueueTests(unittest.TestCase):
         self.assertEqual(item.status, "retrying")
         self.assertEqual(item.attempts, 0)
         self.assertEqual(item.transient_failures, 1)
+
+    def test_an_unreachable_catalogue_stops_retrying_after_a_few_attempts(self):
+        # Every retry of this failure re-runs the vision extraction before it
+        # can reach the catalogue at all, so an outage lasting days would
+        # charge for the same photo dozens of times and never succeed. The item
+        # fails with the reason still on it, and the user's retry resets it.
+        job = self._job(self.users[0])
+        job_dir = scan_storage.scan_upload_root() / str(job.id)
+        job_dir.mkdir()
+        (job_dir / "0.jpg").write_bytes(b"jpeg")
+        for attempt in range(1, MAX_CATALOGUE_UNREACHABLE_ATTEMPTS + 1):
+            claim = claim_next_scan_item(self.db)
+            self.assertIsNotNone(claim, f"attempt {attempt} should have been claimable")
+            fail_claim(
+                self.db,
+                claim,
+                "catalogue down",
+                transient=True,
+                retry_reason=CATALOGUE_UNREACHABLE_RETRY_REASON,
+            )
+            item = self.db.get(ScanJobItem, claim.item_id)
+            last = attempt == MAX_CATALOGUE_UNREACHABLE_ATTEMPTS
+            self.assertEqual(item.status, "failed" if last else "retrying", f"attempt {attempt}")
+            if not last:
+                item.next_attempt_at = datetime.datetime.utcnow()
+                self.db.commit()
+
+        self.assertIsNone(item.next_attempt_at)
+        self.assertEqual(item.retry_reason, CATALOGUE_UNREACHABLE_RETRY_REASON)
+        self.assertEqual(item.attempts, 0, "a catalogue outage is not a recognition failure")
+
+        # The bystander that matters: the user can still retry it themselves
+        # once the catalogue is back, and that clears the count.
+        retry_scan_item(self.db, item)
+        self.assertEqual(item.status, "pending")
+        self.assertEqual(item.transient_failures, 0)
+
+    def test_other_transient_failures_are_still_retried_without_a_bound(self):
+        # The bound is for the catalogue reason alone. A provider rate limit
+        # must keep its existing unbounded backoff, because waiting genuinely
+        # does fix it and a retry costs nothing until the limit clears.
+        self._job(self.users[0])
+        item = self.db.query(ScanJobItem).one()
+        item.transient_failures = MAX_CATALOGUE_UNREACHABLE_ATTEMPTS + 5
+        self.db.commit()
+        claim = claim_next_scan_item(self.db)
+
+        fail_claim(self.db, claim, "429", transient=True, retry_reason="daily_quota")
+
+        self.db.refresh(item)
+        self.assertEqual(item.status, "retrying")
+        self.assertIsNotNone(item.next_attempt_at)
 
     def test_provider_retry_delay_and_reason_are_persisted(self):
         self._job(self.users[0])

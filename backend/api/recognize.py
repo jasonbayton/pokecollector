@@ -34,6 +34,7 @@ import logging
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from sqlalchemy import func, or_
 from services.card_numbers import card_number_variants
+from services.scan_queue import CATALOGUE_UNREACHABLE_RETRY_REASON
 from sqlalchemy.orm import Session
 from api.auth import get_current_user
 from database import get_db
@@ -88,6 +89,21 @@ def _request_gate(request_gate):
     behind a background worker's downloads.
     """
     return request_gate if request_gate is not None else contextlib.nullcontext()
+
+
+class CatalogueUnreachableHTTPException(HTTPException):
+    """A 503 the scan queue can recognise and stop retrying indefinitely.
+
+    Every retry of this failure re-runs the vision extraction first, which on a
+    metered provider is paid for again, and the catalogue being down is not
+    something a retry an hour later is likely to fix during a long outage.
+    Tagging the reason lets the queue bound these attempts without changing how
+    any other transient failure is retried.
+    """
+
+    def __init__(self, detail: str):
+        self.retry_reason = CATALOGUE_UNREACHABLE_RETRY_REASON
+        super().__init__(status_code=503, detail=detail)
 
 
 class GeminiRateLimitHTTPException(HTTPException):
@@ -838,7 +854,7 @@ def _local_catalogue_candidates(db, card_info, search_pairs) -> list:
         db.query(Card)
         .filter(
             Card.tcg_card_id.isnot(None),
-            Card.is_custom.is_(False),
+            Card.is_custom.isnot(True),
             or_(*[Card.name.ilike(name) for name in names]),
             Card.lang.in_(languages),
         )
@@ -927,9 +943,11 @@ async def _search_and_rank_candidates(
                         f"https://api.tcgdex.net/v2/{search_language}/cards",
                         params={"name": search_name},
                     )
-            # A 5xx is the catalogue failing, not an answer. A 4xx is an answer
-            # we should not retry forever, so it is not counted as unreachable.
-            if response.status_code >= 500:
+            # A 5xx is the catalogue failing, not an answer. So are 429 and 408:
+            # the catalogue is declining to answer this request now, which is
+            # not "no such card" either. Any other 4xx is an answer we should
+            # not retry forever, so it is not counted as unreachable.
+            if response.status_code >= 500 or response.status_code in {408, 429}:
                 unreachable += 1
             cards = response.json() if response.status_code == 200 else []
             if trace:
@@ -990,12 +1008,9 @@ async def _search_and_rank_candidates(
         # missing card, and it sent at least one user hunting through their own
         # install during an upstream outage. A 503 is retried with backoff, so
         # the scan recovers on its own once the catalogue is reachable again.
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "The card catalogue could not be reached, so this photo has not "
-                "been matched yet. It will be retried automatically."
-            ),
+        raise CatalogueUnreachableHTTPException(
+            "The card catalogue could not be reached, so this photo has not "
+            "been matched yet. It will be retried automatically."
         )
 
     candidate_set_ids = {

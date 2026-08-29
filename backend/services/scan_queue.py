@@ -36,6 +36,15 @@ LEASE_SECONDS = 10 * 60
 # database connection - see default_composite_processor.
 COMPOSITE_MATCH_CONCURRENCY = 2
 TRANSIENT_BACKOFF_SECONDS = (30, 120, 600, 1800, 3600, 21600)
+# Retries of an unreachable card catalogue are bounded, unlike other transient
+# failures. Each one re-runs the vision extraction before it can reach the
+# catalogue at all, so on a metered provider a multi-day outage would charge
+# for the same photo dozens of times without ever being able to succeed. Three
+# attempts span about twelve minutes, which rides out a blip; a real outage
+# leaves the item failed with the reason on it, and the user's own retry
+# resets the count.
+MAX_CATALOGUE_UNREACHABLE_ATTEMPTS = 3
+CATALOGUE_UNREACHABLE_RETRY_REASON = "catalogue_unreachable"
 RECOGNITION_BACKOFF_SECONDS = (2, 10, 30)
 TERMINAL_ITEM_STATUSES = {"done", "failed"}
 
@@ -340,6 +349,15 @@ def fail_claim(
             item.retry_reason = None
         elif transient:
             item.transient_failures += 1
+            if (
+                retry_reason == CATALOGUE_UNREACHABLE_RETRY_REASON
+                and item.transient_failures >= MAX_CATALOGUE_UNREACHABLE_ATTEMPTS
+            ):
+                item.status = "failed"
+                item.next_attempt_at = None
+                item.retry_reason = retry_reason
+                item.updated_at = now
+                continue
             item.status = "retrying"
             delay = (
                 max(0.0, float(retry_after_seconds))
