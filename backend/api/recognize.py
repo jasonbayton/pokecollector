@@ -34,6 +34,7 @@ import logging
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from sqlalchemy import and_, func, or_
 from services.card_numbers import card_number_variants
+from services.pokemon_api import get_base_url as tcgdex_base_url
 from services.scan_queue import CATALOGUE_UNREACHABLE_RETRY_REASON
 from sqlalchemy.orm import Session
 from api.auth import get_current_user
@@ -812,7 +813,7 @@ async def _fill_candidate_details(
             try:
                 async with _request_gate(request_gate):
                     response = await client.get(
-                        f"https://api.tcgdex.net/v2/{language}/cards/{tcg_id}"
+                        f"{tcgdex_base_url(language)}/cards/{tcg_id}"
                     )
                 if response.status_code != 200:
                     return
@@ -943,7 +944,7 @@ async def _search_and_rank_candidates(
             async with _request_gate(request_gate):
                 async with httpx.AsyncClient(timeout=15) as client:
                     response = await client.get(
-                        f"https://api.tcgdex.net/v2/{search_language}/cards",
+                        f"{tcgdex_base_url(search_language)}/cards",
                         params={"name": search_name},
                     )
             # A 5xx is the catalogue failing, not an answer. So are 429 and 408:

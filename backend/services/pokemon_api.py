@@ -1,3 +1,4 @@
+import os
 import httpx
 import math
 import re
@@ -15,7 +16,13 @@ from services.tcgdex_languages import (
 )
 from services.digital_sets import is_digital_set_data
 
-TCGDEX_BASE = "https://api.tcgdex.net/v2"
+# The public catalogue by default. Pointing this at a self-hosted TCGdex server
+# removes the dependency on a single upstream host being reachable, which is
+# what turned a catalogue outage into an install-wide scanning failure. The
+# value is read once at import: it is deployment configuration, not a runtime
+# setting, and a half-changed base URL part way through a sync would be worse
+# than a restart.
+TCGDEX_BASE = os.environ.get("TCGDEX_API_BASE", "https://api.tcgdex.net/v2").rstrip("/")
 _POKEMON_CATEGORY_VALUES = {"pokemon", "pokémon"}
 _NAME_SUFFIX_TOKENS = {"ex", "gx", "v", "vmax", "vstar"}
 _MEGA_FORM_TOKENS = {"x", "y"}
