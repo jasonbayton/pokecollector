@@ -32,7 +32,8 @@ from services.scan_providers import (
 )
 import logging
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
-from sqlalchemy import or_
+from sqlalchemy import func, or_
+from services.card_numbers import card_number_variants
 from sqlalchemy.orm import Session
 from api.auth import get_current_user
 from database import get_db
@@ -833,7 +834,7 @@ def _local_catalogue_candidates(db, card_info, search_pairs) -> list:
         if language not in languages:
             languages.append(language)
 
-    rows = (
+    query = (
         db.query(Card)
         .filter(
             Card.tcg_card_id.isnot(None),
@@ -841,9 +842,26 @@ def _local_catalogue_candidates(db, card_info, search_pairs) -> list:
             or_(*[Card.name.ilike(name) for name in names]),
             Card.lang.in_(languages),
         )
-        .limit(60)
-        .all()
     )
+
+    # Narrow on the printed number in the query rather than truncating first.
+    # An unordered LIMIT applied before this could drop the right printing while
+    # leaving a different card of the same name and number in the result, which
+    # the ranker then reads as a unique number and marks confident. That is a
+    # wrong card filed automatically by "add all confident", which is worse than
+    # no match at all.
+    printed_number = card_info.get("number_local")
+    number_forms = {
+        form.casefold()
+        for form in card_number_variants(printed_number)
+    } if printed_number else set()
+    if number_forms:
+        query = query.filter(func.lower(Card.number).in_(sorted(number_forms)))
+
+    # Ordered so the row set is deterministic: an arbitrary subset is what made
+    # the truncation above dangerous, and an unordered LIMIT in PostgreSQL may
+    # return a different 60 each time.
+    rows = query.order_by(Card.lang.asc(), Card.set_id.asc(), Card.number.asc(), Card.id.asc()).limit(60).all()
 
     set_names = {}
     set_ids = {row.set_id for row in rows if row.set_id}
@@ -901,6 +919,7 @@ async def _search_and_rank_candidates(
     for search_language, search_name in search_pairs:
         if len(candidates) >= 15:
             break
+        attempted += 1
         try:
             async with _request_gate(request_gate):
                 async with httpx.AsyncClient(timeout=15) as client:
@@ -908,7 +927,6 @@ async def _search_and_rank_candidates(
                         f"https://api.tcgdex.net/v2/{search_language}/cards",
                         params={"name": search_name},
                     )
-            attempted += 1
             # A 5xx is the catalogue failing, not an answer. A 4xx is an answer
             # we should not retry forever, so it is not counted as unreachable.
             if response.status_code >= 500:
@@ -954,11 +972,10 @@ async def _search_and_rank_candidates(
                     count=None,
                     error=type(exc).__name__,
                 )
-            attempted += 1
             unreachable += 1
             continue
 
-    if not candidates and unreachable:
+    if not candidates and attempted and unreachable == attempted:
         # The catalogue is unreachable, but this installation already holds a
         # synced copy of it. Searching that is not as good as a live lookup, it
         # only knows the sets that have been synced, but it is far better than
