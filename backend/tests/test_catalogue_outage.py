@@ -38,7 +38,11 @@ class CatalogueOutageTests(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         self.card_info = {"name": "Sandshrew", "name_en": "Sandshrew", "number_local": "027", "language": "en"}
+        # An empty local catalogue, so these tests still exercise the outage
+        # path rather than the local fallback.
         self.db = Mock()
+        self.db.query.return_value.filter.return_value.limit.return_value.all.return_value = []
+        self.db.query.return_value.filter.return_value.all.return_value = []
 
     async def test_a_network_failure_is_reported_rather_than_returning_no_matches(self):
         # The user-visible problem this fixes: while the catalogue was down,
