@@ -45,6 +45,25 @@ export const resolveCardImageUrl = (card, size = 'small') => {
     || null
 }
 
+// The large image for the card detail view.
+//
+// Prefers the app's own /api/images endpoint over the raw catalogue URL the
+// payload happens to carry. That endpoint fetches server side, caches the
+// bytes, and can be pointed at a mirror of the catalogue CDN, so the picture
+// survives that CDN being unreachable - which it has been, twice in a day.
+// resolveCardImageUrl already falls back to those raw URLs for a card this
+// installation does not hold, so nothing is lost by asking it first.
+export const resolveCardDetailImageUrl = (card, {
+  manualImageProxyUrl = null,
+  customImageProxyUrl = null,
+} = {}) => (
+  manualImageProxyUrl
+  || resolveCardImageUrl(card, 'large')
+  || customImageProxyUrl
+  || resolveCardImageUrl(card)
+  || null
+)
+
 export const resolveSetImageUrl = (set, imageType) => {
   if (set?.id) return setImageUrl(set.id, imageType)
   return imageType === 'logo' ? (set?.images_logo || null) : (set?.images_symbol || null)

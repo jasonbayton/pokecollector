@@ -10,7 +10,7 @@ import { useSettings } from '../contexts/SettingsContext'
 import { useConfirmDialog } from '../contexts/ConfirmDialogContext'
 import toast from 'react-hot-toast'
 import clsx from 'clsx'
-import { cardImageUrl, resolveCardImageUrl } from '../utils/imageUrl'
+import { cardImageUrl, resolveCardDetailImageUrl, resolveCardImageUrl } from '../utils/imageUrl'
 import { CARD_VARIANTS, getAvailableVariants, getDefaultVariant } from '../utils/cardVariants'
 import MoneyInput from './MoneyInput'
 import { getEffectiveCardPrice } from '../utils/prices'
@@ -453,7 +453,7 @@ export const CardItem = memo(function CardItem({ card, showActions = true, onAdd
     },
   })
 
-  const cardImage = card.images?.small || resolveCardImageUrl(card) || (card.image ? `${card.image}/low.webp` : null)
+  const cardImage = resolveCardImageUrl(card) || card.images?.small || (card.image ? `${card.image}/low.webp` : null)
   const selectedPrice = getEffectiveCardPrice(card, null, pricePrimaryField)
   const price = selectedPrice > 0
     ? selectedPrice
@@ -628,15 +628,10 @@ export function CardModal({ card, onClose, onEdit, defaultLang = 'en', ownedItem
     ? `${cardImageUrl(customImageCardId, 'large')}?v=${customImageVersion}`
     : null
   const manualImageProxyUrl = card.is_custom ? resolveCardImageUrl(card, 'large') : null
-  const cardImage = manualImageProxyUrl
-    || card?.images?.large
-    || card?.images_large
-    || (card?.image ? `${card.image}/high.webp` : null)
-    || card?.images?.small
-    || card?.images_small
-    || customImageProxyUrl
-    || resolveCardImageUrl(card, 'large')
-    || resolveCardImageUrl(card)
+  const cardImage = resolveCardDetailImageUrl(card, {
+    manualImageProxyUrl,
+    customImageProxyUrl,
+  })
   const dexIds = [...new Set(
     (Array.isArray(card.dex_ids) ? card.dex_ids : card.dex_id != null ? [card.dex_id] : [])
       .map(Number)

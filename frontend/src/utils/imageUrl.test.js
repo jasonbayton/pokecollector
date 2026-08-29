@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { productImageUrl, resolveCardImageUrl } from './imageUrl'
+import { productImageUrl, resolveCardDetailImageUrl, resolveCardImageUrl } from './imageUrl'
 
 describe('productImageUrl', () => {
   it('uses the opaque product image proxy for configured images', () => {
@@ -48,5 +48,44 @@ describe('resolveCardImageUrl', () => {
   it('is null when a card carries no artwork at all', () => {
     expect(resolveCardImageUrl({ id: 4211 }, 'large')).toBe(null)
     expect(resolveCardImageUrl(null, 'large')).toBe(null)
+  })
+})
+
+describe('resolveCardDetailImageUrl', () => {
+  // The detail view used to prefer whatever raw catalogue URL the payload
+  // carried, which sent the browser straight to the CDN and past both the
+  // app's image cache and any mirror of it. When that CDN is unreachable the
+  // card loses its picture even though the bytes may be held locally.
+  it('prefers the app image endpoint over a raw catalogue URL', () => {
+    expect(resolveCardDetailImageUrl({
+      id: 'base1-4_en',
+      images_large: 'https://assets.tcgdex.net/en/base/base1/4/high.webp',
+    })).toBe('/api/images/card/base1-4_en/large')
+  })
+
+  it('still uses the raw URL for a card this installation does not hold', () => {
+    // No id to look up, so the endpoint has nothing to serve and the payload's
+    // own URL is all there is.
+    expect(resolveCardDetailImageUrl({
+      images_large: 'https://assets.tcgdex.net/en/base/base1/4/high.webp',
+    })).toBe('https://assets.tcgdex.net/en/base/base1/4/high.webp')
+  })
+
+  it('keeps a custom card on its own proxied image', () => {
+    expect(resolveCardDetailImageUrl(
+      { id: 'custom-1', images_large: 'https://assets.tcgdex.net/x/high.webp' },
+      { manualImageProxyUrl: '/api/images/card/custom-1/large' },
+    )).toBe('/api/images/card/custom-1/large')
+  })
+
+  it('falls back to the manual image only when there is nothing else', () => {
+    expect(resolveCardDetailImageUrl(
+      {},
+      { customImageProxyUrl: '/api/images/card/x/large?v=2' },
+    )).toBe('/api/images/card/x/large?v=2')
+  })
+
+  it('returns null when there is no image at all', () => {
+    expect(resolveCardDetailImageUrl({})).toBe(null)
   })
 })
