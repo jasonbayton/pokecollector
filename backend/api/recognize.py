@@ -32,6 +32,7 @@ from services.scan_providers import (
 )
 import logging
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from api.auth import get_current_user
 from database import get_db
@@ -812,6 +813,63 @@ async def _fill_candidate_details(
         await asyncio.gather(*(fetch(card) for card in missing))
 
 
+def _local_catalogue_candidates(db, card_info, search_pairs) -> list:
+    """Candidates from the locally synced catalogue, in the live search's shape.
+
+    Only used when the remote catalogue could not be reached. Custom cards are
+    excluded: they are this installation's own rows rather than catalogue
+    entries, and matching a scan against one would invent a result the live
+    search could never have produced.
+    """
+    names = []
+    for _language, search_name in search_pairs:
+        if search_name and search_name not in names:
+            names.append(search_name)
+    if not names:
+        return []
+
+    languages = []
+    for language, _search_name in search_pairs:
+        if language not in languages:
+            languages.append(language)
+
+    rows = (
+        db.query(Card)
+        .filter(
+            Card.tcg_card_id.isnot(None),
+            Card.is_custom.is_(False),
+            or_(*[Card.name.ilike(name) for name in names]),
+            Card.lang.in_(languages),
+        )
+        .limit(60)
+        .all()
+    )
+
+    set_names = {}
+    set_ids = {row.set_id for row in rows if row.set_id}
+    if set_ids:
+        for local_set in db.query(Set).filter(Set.tcg_set_id.in_(set_ids)).all():
+            set_names.setdefault((local_set.tcg_set_id, local_set.lang), local_set.name)
+
+    candidates = []
+    for row in rows:
+        language = row.lang or "en"
+        candidates.append({
+            "id": f"{row.tcg_card_id}_{language}",
+            "tcg_card_id": row.tcg_card_id,
+            "name": row.name,
+            "set": set_names.get((row.set_id, language)),
+            "number": row.number,
+            "image": row.images_small or row.custom_image_url,
+            "rarity": row.rarity,
+            "lang": language,
+            "_lang": language,
+            "_number_extra": False,
+            "_from_local_catalogue": True,
+        })
+    return candidates
+
+
 async def _search_and_rank_candidates(
     db: Session,
     card_info: dict,
@@ -899,6 +957,15 @@ async def _search_and_rank_candidates(
             attempted += 1
             unreachable += 1
             continue
+
+    if not candidates and unreachable:
+        # The catalogue is unreachable, but this installation already holds a
+        # synced copy of it. Searching that is not as good as a live lookup, it
+        # only knows the sets that have been synced, but it is far better than
+        # telling the user their card does not exist because a remote host is
+        # down. Images come from the synced rows, so they are exactly as
+        # available as they were before.
+        candidates.extend(_local_catalogue_candidates(db, card_info, search_pairs))
 
     if not candidates and attempted and unreachable == attempted:
         # Every lookup failed to reach the catalogue, so we do not know whether
