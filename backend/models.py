@@ -680,7 +680,7 @@ class ScanJobItem(Base):
     # transient, but only the catalogue re-pays for the vision extraction on
     # every retry, so only it gives up. Sharing one counter would let unrelated
     # throttling spend this item's catalogue attempts before it ever met one.
-    catalogue_failures = Column(Integer, default=0, nullable=False)
+    catalogue_failures = Column(Integer, default=0, server_default="0", nullable=False)
     next_attempt_at = Column(DateTime, nullable=True, index=True)
     retry_reason = Column(String, nullable=True)
     lease_token = Column(String, nullable=True, index=True)

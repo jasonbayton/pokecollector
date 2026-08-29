@@ -309,6 +309,11 @@ def complete_claim_group(
             _clear_identity_outcome(item)
             item.next_attempt_at = now
             item.retry_reason = None
+            # A fresh individual cycle gets a fresh catalogue allowance. The
+            # outages this position met as part of a composite were charged to
+            # every member of that group, and carrying them over would end the
+            # individual scan on its first one.
+            item.catalogue_failures = 0
         else:
             item.status = "done"
             item.recognized = result.get("recognized")

@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 try:
-    from sqlalchemy import create_engine
+    from sqlalchemy import create_engine, text
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
 
@@ -294,6 +294,64 @@ class ScanQueueTests(unittest.TestCase):
         items = self.db.query(ScanJobItem).order_by(ScanJobItem.position).all()
         self.assertEqual([item.status for item in items], ["done", "retrying", "done", "done"])
         self.assertEqual([item.transient_failures for item in items], [0, 1, 0, 0])
+
+    def test_an_unclear_position_starts_its_individual_scan_with_a_full_allowance(self):
+        # The composite met the outages, and every member of the group was
+        # charged for each one. A position that then falls out for an
+        # individual scan is starting again, so it must not inherit a budget
+        # that is already nearly spent and die on its first outage.
+        self._job(self.users[0], positions=(0, 1))
+        items = self.db.query(ScanJobItem).order_by(ScanJobItem.position).all()
+        for item in items:
+            item.batch_mode = True
+        self.db.commit()
+
+        composite_claim = claim_next_scan_item(self.db)
+        fail_claim(
+            self.db,
+            composite_claim,
+            "catalogue down",
+            transient=True,
+            retry_reason=CATALOGUE_UNREACHABLE_RETRY_REASON,
+        )
+        self.db.expire_all()
+        items = self.db.query(ScanJobItem).order_by(ScanJobItem.position).all()
+        self.assertEqual([item.catalogue_failures for item in items], [1, 1])
+        for item in items:
+            item.next_attempt_at = datetime.datetime.utcnow()
+        self.db.commit()
+
+        composite_claim = claim_next_scan_item(self.db)
+        self.assertTrue(complete_claim_group(
+            self.db,
+            composite_claim,
+            [{"recognized": {"name": "A"}, "matches": [{"id": "card-A"}]}, None],
+        ))
+        self.db.expire_all()
+        items = self.db.query(ScanJobItem).order_by(ScanJobItem.position).all()
+        self.assertEqual(items[1].status, "pending")
+        self.assertEqual(items[1].catalogue_failures, 0)
+
+    def test_a_fresh_install_and_an_upgraded_one_agree_on_the_new_column(self):
+        # create_all runs before the ALTER migrations, so the ALTER is a no-op
+        # on a fresh install. An ORM-side default alone would leave the fresh
+        # schema without the DEFAULT the upgraded schema gets, and a statement
+        # that does not name the column would fail on one and not the other.
+        job = self._job(self.users[0])
+        self.db.execute(
+            text(
+                "INSERT INTO scan_job_items "
+                "(job_id, user_id, position, image_path, content_type, byte_size, "
+                " batch_mode, status, resolved, attempts, transient_failures, created_at, updated_at) "
+                "VALUES (:job, :user, 500, 'x.jpg', 'image/jpeg', 4, 0, 'pending', 0, 0, 0, :now, :now)"
+            ),
+            {"job": job.id, "user": self.users[0].id, "now": datetime.datetime.utcnow()},
+        )
+        self.db.commit()
+        stored = self.db.execute(
+            text("SELECT catalogue_failures FROM scan_job_items WHERE position = 500")
+        ).scalar()
+        self.assertEqual(stored, 0)
 
     def test_stale_lease_cannot_complete_an_item(self):
         self._job(self.users[0])
