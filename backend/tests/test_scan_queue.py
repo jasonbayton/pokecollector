@@ -423,6 +423,12 @@ class ScanQueueTests(unittest.TestCase):
         # change there would otherwise silently shrink it.
         self.assertGreaterEqual(covered, datetime.timedelta(minutes=12))
         self.assertIsNone(item.next_attempt_at)
+        # The review screen shows item.error. Once there is no next attempt it
+        # must stop saying one is coming, which is what the message said while
+        # the retries were still running.
+        self.assertNotIn("automatically", item.error)
+        self.assertIn("catalogue", item.error.lower())
+        self.assertIn("try it again", item.error.lower())
         self.assertEqual(item.retry_reason, CATALOGUE_UNREACHABLE_RETRY_REASON)
         self.assertEqual(item.attempts, 0, "a catalogue outage is not a recognition failure")
 

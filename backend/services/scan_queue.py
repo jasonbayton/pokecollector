@@ -368,6 +368,15 @@ def fail_claim(
                 item.status = "failed"
                 item.next_attempt_at = None
                 item.retry_reason = retry_reason
+                # The error is what the review screen shows, and there is no
+                # next attempt now, so it must not still read as though one is
+                # coming.
+                item.error = (
+                    "The card catalogue could not be reached, so this photo was "
+                    "not matched. Retrying stopped after "
+                    f"{MAX_CATALOGUE_UNREACHABLE_ATTEMPTS} attempts; try it again "
+                    "once the catalogue is back."
+                )
                 item.updated_at = now
                 continue
             item.status = "retrying"

@@ -32,7 +32,7 @@ from services.scan_providers import (
 )
 import logging
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_
 from services.card_numbers import card_number_variants
 from services.scan_queue import CATALOGUE_UNREACHABLE_RETRY_REASON
 from sqlalchemy.orm import Session
@@ -838,25 +838,28 @@ def _local_catalogue_candidates(db, card_info, search_pairs) -> list:
     entries, and matching a scan against one would invent a result the live
     search could never have produced.
     """
-    names = []
-    for _language, search_name in search_pairs:
-        if search_name and search_name not in names:
-            names.append(search_name)
-    if not names:
+    # Each pair is searched as a pair. Splitting them into a list of names and
+    # a list of languages would admit their product, so a name only ever
+    # searched in English could match a row in another language. That is not
+    # hypothetical: swsh2-201 is Milo in English and Yarrow in Italian, while
+    # swsh7-201 is Milo in Italian, all numbered 201, so an Italian scan of
+    # Yarrow would admit an unrelated Italian Milo through the English name.
+    pairs = []
+    for language, search_name in search_pairs:
+        if search_name and (language, search_name) not in pairs:
+            pairs.append((language, search_name))
+    if not pairs:
         return []
-
-    languages = []
-    for language, _search_name in search_pairs:
-        if language not in languages:
-            languages.append(language)
 
     query = (
         db.query(Card)
         .filter(
             Card.tcg_card_id.isnot(None),
             Card.is_custom.isnot(True),
-            or_(*[Card.name.ilike(name) for name in names]),
-            Card.lang.in_(languages),
+            or_(*[
+                and_(Card.lang == language, Card.name.ilike(search_name))
+                for language, search_name in pairs
+            ]),
         )
     )
 
@@ -1010,7 +1013,7 @@ async def _search_and_rank_candidates(
         # the scan recovers on its own once the catalogue is reachable again.
         raise CatalogueUnreachableHTTPException(
             "The card catalogue could not be reached, so this photo has not "
-            "been matched yet. It will be retried automatically."
+            "been matched yet."
         )
 
     candidate_set_ids = {

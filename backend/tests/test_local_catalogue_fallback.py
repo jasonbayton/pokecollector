@@ -188,6 +188,37 @@ class LocalCatalogueFallbackTests(unittest.IsolatedAsyncioTestCase):
         _add_card(self.db, id="sv03.5-027_fr", lang="fr")
         self.assertEqual(_local_catalogue_candidates(self.db, self.card_info, self.pairs), [])
 
+    def test_a_name_is_only_matched_in_the_language_it_was_searched_in(self):
+        # The real collision: swsh2-201 is Milo in English and Yarrow in
+        # Italian, and swsh7-201 is Milo in Italian, all printed 201. Scanning
+        # the Italian Yarrow searches ("it", "Yarrow") and ("en", "Milo"). If
+        # the pairs are split into a list of names and a list of languages,
+        # their product admits the Italian Milo, which no live search would
+        # ever have returned.
+        _add_card(
+            self.db,
+            id="swsh7-201_it",
+            tcg_card_id="swsh7-201",
+            name="Milo",
+            set_id="swsh7",
+            number="201",
+            lang="it",
+        )
+        _add_card(
+            self.db,
+            id="swsh2-201_it",
+            tcg_card_id="swsh2-201",
+            name="Yarrow",
+            set_id="swsh2",
+            number="201",
+            lang="it",
+        )
+        card_info = {"name": "Yarrow", "name_en": "Milo", "number_local": "201", "language": "it"}
+        candidates = _local_catalogue_candidates(
+            self.db, card_info, [("it", "Yarrow"), ("en", "Milo")]
+        )
+        self.assertEqual([card["tcg_card_id"] for card in candidates], ["swsh2-201"])
+
     def test_the_fallback_shape_matches_the_live_search(self):
         # Downstream ranking reads these keys, so a mismatch would rank the
         # local results wrongly rather than fail loudly.
