@@ -118,22 +118,33 @@ def _add_collection_copy(
             CollectionItem.condition == DEFAULT_CONDITION,
             CollectionItem.purchase_price.is_(None),
             CollectionItem.user_id == current_user.id,
+            # Never merge into a row somebody has confirmed. Doing so would
+            # extend their statement about condition and variant to a copy
+            # nobody has looked at, which is the whole problem this avoids.
+            CollectionItem.attributes_confirmed.isnot(True),
         )
         .with_for_update()
         .first()
     )
     if existing:
         existing.quantity += 1
+        # The row now definitely contains a copy nobody assessed, even if it
+        # previously predated this flag.
+        existing.attributes_confirmed = False
         return
     db.add(CollectionItem(
         card_id=card.id,
         quantity=1,
+        # A confident scan identifies the card. It does not establish what
+        # condition this copy is in, nor - where a card exists as both - which
+        # printing it is. Both are defaults, and the row says so.
         condition=DEFAULT_CONDITION,
         variant=variant,
         purchase_price=None,
         lang=card.lang,
         user_id=current_user.id,
         added_at=datetime.datetime.utcnow(),
+        attributes_confirmed=False,
     ))
 
 

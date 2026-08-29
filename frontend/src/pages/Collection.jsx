@@ -932,6 +932,7 @@ export default function Collection() {
   const [filterMinPrice, setFilterMinPrice] = useState('')
   const [filterMaxPrice, setFilterMaxPrice] = useState('')
   const [filterDuplicates, setFilterDuplicates] = useState(false)
+  const [filterUnconfirmed, setFilterUnconfirmed] = useState(false)
   const [searchText, setSearchText] = useState('')
   const [showFilters, setShowFilters] = useState(false)
   const [showCsvImportModal, setShowCsvImportModal] = useState(false)
@@ -1079,7 +1080,7 @@ export default function Collection() {
     return sortCardFilterLabels(CARD_SUBTYPE_OPTIONS, all)
   }, [items])
 
-  const hasActiveFilters = filterRarity || filterCondition || filterVariant || filterSet || filterType || filterCategories.length > 0 || filterSubtypes.length > 0 || filterLegality || filterLang || filterMinPrice || filterMaxPrice || filterDuplicates || searchText
+  const hasActiveFilters = filterRarity || filterCondition || filterVariant || filterSet || filterType || filterCategories.length > 0 || filterSubtypes.length > 0 || filterLegality || filterLang || filterMinPrice || filterMaxPrice || filterDuplicates || filterUnconfirmed || searchText
 
   const filtered = useMemo(() => {
     let result = items.filter(item => {
@@ -1107,6 +1108,7 @@ export default function Collection() {
       if (filterMinPrice && marketPrice < parseFloat(filterMinPrice)) return false
       if (filterMaxPrice && marketPrice > parseFloat(filterMaxPrice)) return false
       if (filterDuplicates && item.quantity < 2) return false
+      if (filterUnconfirmed && item.attributes_confirmed !== false) return false
       if (searchText) {
         const q = normalizeSearchText(searchText)
         const nameMatch = textIncludes(card?.name, q)
@@ -1147,7 +1149,7 @@ export default function Collection() {
     })
 
     return result
-  }, [items, filterRarity, filterCondition, filterVariant, filterSet, filterType, filterCategories, filterSubtypes, filterLegality, filterLang, filterMinPrice, filterMaxPrice, filterDuplicates, searchText, sortBy, sortOrder, pricePrimaryField])
+  }, [items, filterRarity, filterCondition, filterVariant, filterSet, filterType, filterCategories, filterSubtypes, filterLegality, filterLang, filterMinPrice, filterMaxPrice, filterDuplicates, filterUnconfirmed, searchText, sortBy, sortOrder, pricePrimaryField])
 
   const totalValue = filtered.reduce((sum, item) => sum + (getEffectivePrice(item.card, item.variant) * item.quantity), 0)
   const totalCards = filtered.reduce((sum, item) => sum + item.quantity, 0)
@@ -1373,6 +1375,13 @@ export default function Collection() {
                 <input type="checkbox" checked={filterDuplicates} onChange={(e) => setFilterDuplicates(e.target.checked)}
                   className="w-4 h-4 accent-brand-red" />
                 <span className="text-xs text-text-secondary">{t('collection.filterDuplicates')}</span>
+              </label>
+            </div>
+            <div className="flex items-center gap-2 col-span-2 sm:col-span-1">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={filterUnconfirmed} onChange={(e) => setFilterUnconfirmed(e.target.checked)}
+                  className="w-4 h-4 accent-brand-red" />
+                <span className="text-xs text-text-secondary">{t('collection.filterUnconfirmed')}</span>
               </label>
             </div>
           </div>

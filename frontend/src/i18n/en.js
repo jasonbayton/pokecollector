@@ -389,6 +389,7 @@ const en = {
     filterMinPrice: 'Min',
     filterMaxPrice: 'Max',
     filterDuplicates: 'Duplicates only',
+    filterUnconfirmed: 'Needs checking',
     allSets: 'All Sets',
     allTypes: 'All Types',
     allLegalities: 'All',

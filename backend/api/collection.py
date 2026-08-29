@@ -288,6 +288,7 @@ def _add_collection_item(db: Session, current_user: User, item: CollectionItemCr
 
     if existing:
         existing.quantity += item.quantity or 1
+        existing.attributes_confirmed = True
         if commit:
             db.commit()
         return "updated"
@@ -301,6 +302,7 @@ def _add_collection_item(db: Session, current_user: User, item: CollectionItemCr
         lang=item_lang,
         user_id=current_user.id,
         added_at=datetime.datetime.utcnow(),
+        attributes_confirmed=True,
     ))
     if commit:
         db.commit()
@@ -555,6 +557,7 @@ def add_to_collection(
 
     if existing:
         existing.quantity += item.quantity or 1
+        existing.attributes_confirmed = True
         db.commit()
         db.refresh(existing)
         return _annotate_collection_item(db, current_user, existing)
@@ -568,6 +571,9 @@ def add_to_collection(
             lang=item_lang,
             user_id=current_user.id,
             added_at=datetime.datetime.utcnow(),
+            # The caller supplied condition and variant, so they are stated
+            # rather than assumed.
+            attributes_confirmed=True,
         )
         db.add(db_item)
         db.commit()
@@ -624,6 +630,7 @@ def bulk_add_to_collection(
 
             if existing:
                 existing.quantity += item.quantity or 1
+                existing.attributes_confirmed = True
                 db.commit()
                 updated += 1
             else:
@@ -636,6 +643,7 @@ def bulk_add_to_collection(
                     lang=item_lang,
                     user_id=current_user.id,
                     added_at=datetime.datetime.utcnow(),
+                    attributes_confirmed=True,
                 ))
                 db.commit()
                 added += 1

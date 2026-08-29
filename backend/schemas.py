@@ -196,6 +196,12 @@ class CollectionItemResponse(BaseModel):
     lang: str = "en"
     added_at: Optional[datetime] = None
     standard_legal: bool = False
+    # Whether anybody has confirmed this row's condition and variant. False
+    # means it was filed automatically and both are still defaults; null means
+    # the row predates the question and nothing is known either way. Nullable
+    # on purpose: "nobody knows" and "nobody has checked" are different, and
+    # collapsing them would invent a fact.
+    attributes_confirmed: Optional[bool] = None
     # True when the owner has their own private photo of this card. A flag rather
     # than the image: bytes use a separate authenticated endpoint so collection
     # listings stay small.

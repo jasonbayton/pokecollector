@@ -172,6 +172,21 @@ class CollectionItem(Base):
     lang = Column(String, default="en")  # fixed TCGdex card language
     added_at = Column(DateTime, default=func.now())
     grade = Column(String, default="raw")
+    # Whether anybody has confirmed this row's condition and variant, or
+    # whether they are still the defaults nobody assessed.
+    #
+    # A confident scan establishes WHICH CARD this is. It says nothing about
+    # what condition the copy is in, and nothing about whether this particular
+    # copy is the normal or the reverse holo printing where both exist. Filing
+    # those defaults as though they were observations made the guess
+    # indistinguishable from a statement, and the variant guess reaches
+    # portfolio value: effective_market_price prices a Reverse Holo from the
+    # holo fields, so a reverse holo filed as Normal is valued wrongly.
+    #
+    # NULL means unknown, which is the honest reading of every row written
+    # before this existed. False means the row was filed automatically. True
+    # means somebody chose.
+    attributes_confirmed = Column(Boolean, nullable=True)
 
     card = relationship("Card", back_populates="collection_items")
 
