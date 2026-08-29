@@ -256,7 +256,11 @@ def get_card(card_id: str, lang: str = "en") -> Optional[Dict]:
     be stuck than not matching it at all.
 
     A 404 is an answer and is returned as one. Only an unreachable catalogue
-    moves on to the next.
+    moves on to the next, and a body that cannot be read counts as unreachable
+    for the same reason the scanner counts it that way: a gateway serving an
+    error page with a 200 is the catalogue being unavailable, not an answer.
+    Handling it differently here is what let the scanner match a card through
+    the standby that this call could then not fetch.
     """
     last_error = None
     for base_url in (get_base_url(lang), get_standby_base_url(lang)):
@@ -269,7 +273,7 @@ def get_card(card_id: str, lang: str = "en") -> Optional[Dict]:
                     return None
                 response.raise_for_status()
                 return response.json()
-        except (httpx.HTTPError, httpx.StreamError) as exc:
+        except (httpx.HTTPError, httpx.StreamError, ValueError) as exc:
             # A 4xx other than 404 is the catalogue answering, so it is not
             # something a second catalogue would answer differently.
             status = getattr(getattr(exc, "response", None), "status_code", None)

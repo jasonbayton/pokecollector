@@ -94,6 +94,35 @@ class CardFetchStandbyTests(unittest.TestCase):
             self.assertIsNone(pokemon_api.get_card("sv03.5-027", "en"))
         self.assertTrue(all("standby.local" not in url for url in catalogues.calls))
 
+    def test_an_unreadable_body_falls_through_like_an_outage(self):
+        # The scanner already counts a body it cannot read as the catalogue
+        # being unavailable, so it can match through the standby. If this call
+        # treated the same response as fatal, the user would be offered a card
+        # and then be unable to add it: the exact split this fallback exists to
+        # close.
+        pokemon_api = self._with_standby()
+        broken = Mock()
+        broken.status_code = 200
+        broken.raise_for_status = Mock()
+        broken.json = Mock(side_effect=ValueError("malformed JSON"))
+        catalogues = _Catalogues({
+            "api.tcgdex.net": (200, {}),
+            "standby.local": (200, {"id": "sv03.5-027", "name": "Sandshrew"}),
+        })
+        original_get = catalogues.get
+
+        def get(url, **kwargs):
+            if "api.tcgdex.net" in url:
+                catalogues.calls.append(url)
+                return broken
+            return original_get(url, **kwargs)
+
+        catalogues.get = get
+        with patch("services.pokemon_api.httpx.Client", catalogues):
+            card = pokemon_api.get_card("sv03.5-027", "en")
+        self.assertEqual(card["id"], "sv03.5-027")
+        self.assertTrue(any("standby.local" in url for url in catalogues.calls))
+
     def test_the_failure_still_surfaces_when_neither_can_be_reached(self):
         pokemon_api = self._with_standby()
         catalogues = _Catalogues({
