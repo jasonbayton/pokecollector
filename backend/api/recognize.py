@@ -817,6 +817,12 @@ async def _fill_candidate_details(
             language = card.get("_lang", "en")
             if not tcg_id:
                 return
+            if card.get("_from_local_catalogue"):
+                # These came from the synced rows because no catalogue could be
+                # reached, and the rows have already been read for these fields
+                # above. Asking the network again would only wait out a timeout
+                # against a host known to be down.
+                return
             base_url = _catalogue_base_for(card.get("_catalogue"))
             if base_url is None:
                 return

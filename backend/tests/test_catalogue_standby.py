@@ -161,6 +161,31 @@ class CatalogueStandbyTests(unittest.IsolatedAsyncioTestCase):
             candidates, _ = await recognize._search_and_rank_candidates(self.db, self.card_info, trace=None)
         self.assertEqual([c["_catalogue"] for c in candidates], [recognize.CATALOGUE_STANDBY])
 
+    async def test_local_fallback_candidates_are_not_enriched_over_the_network(self):
+        # They came from the synced rows precisely because nothing could be
+        # reached. Going back out would wait out a timeout per candidate for
+        # data the rows have already supplied.
+        recognize = self._with_standby()
+        from models import Card as CardModel
+        self.db.add(CardModel(
+            id="sv03.5-027_en", tcg_card_id="sv03.5-027", name="Sandshrew",
+            set_id="sv03.5", number="027", lang="en", is_custom=False,
+            images_small="https://assets.tcgdex.net/en/sv/sv03.5/27/low.webp",
+        ))
+        self.db.commit()
+        catalogues = _Catalogues({
+            "api.tcgdex.net": httpx.ConnectTimeout("timed out"),
+            "standby.local": httpx.ConnectTimeout("timed out"),
+        })
+        card_info = dict(self.card_info, artist="kodama")
+        with patch("api.recognize.httpx.AsyncClient", catalogues):
+            candidates = recognize._local_catalogue_candidates(self.db, card_info, [("en", "Sandshrew")])
+            self.assertTrue(candidates, "the local fallback should have produced a candidate")
+            before = len(catalogues.calls)
+            await recognize._fill_candidate_details(self.db, candidates, card_info)
+
+        self.assertEqual(catalogues.calls[before:], [], "no network call should have been made")
+
     async def test_both_unreachable_still_reports_the_outage(self):
         recognize = self._with_standby()
         catalogues = _Catalogues({

@@ -248,14 +248,38 @@ def search_cards(
 
 
 def get_card(card_id: str, lang: str = "en") -> Optional[Dict]:
-    """Get a single card by ID from TCGdex."""
-    base_url = get_base_url(lang)
-    with httpx.Client(timeout=30.0) as client:
-        response = client.get(f"{base_url}/cards/{card_id}")
-        if response.status_code == 404:
-            return None
-        response.raise_for_status()
-        return response.json()
+    """Get a single card by ID, from the standby catalogue if the first is down.
+
+    The scanner can match a card through the standby during an outage, and this
+    is the call that then adds it to the collection. Without the same fallback
+    the user would be shown a card they cannot add, which is a worse place to
+    be stuck than not matching it at all.
+
+    A 404 is an answer and is returned as one. Only an unreachable catalogue
+    moves on to the next.
+    """
+    last_error = None
+    for base_url in (get_base_url(lang), get_standby_base_url(lang)):
+        if base_url is None:
+            continue
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                response = client.get(f"{base_url}/cards/{card_id}")
+                if response.status_code == 404:
+                    return None
+                response.raise_for_status()
+                return response.json()
+        except (httpx.HTTPError, httpx.StreamError) as exc:
+            # A 4xx other than 404 is the catalogue answering, so it is not
+            # something a second catalogue would answer differently.
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status is not None and 400 <= status < 500 and status not in (408, 429):
+                raise
+            last_error = exc
+            continue
+    if last_error is not None:
+        raise last_error
+    return None
 
 
 def get_all_sets(languages: Optional[List[str]] = None, *, include_digital: bool = False) -> List[Dict]:
