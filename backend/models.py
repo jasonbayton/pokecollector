@@ -675,6 +675,12 @@ class ScanJobItem(Base):
     resolved = Column(Boolean, default=False, nullable=False, index=True)
     attempts = Column(Integer, default=0, nullable=False)
     transient_failures = Column(Integer, default=0, nullable=False)
+    # Counted separately from transient_failures because it is bounded and that
+    # one is not. A provider rate limit and an unreachable catalogue are both
+    # transient, but only the catalogue re-pays for the vision extraction on
+    # every retry, so only it gives up. Sharing one counter would let unrelated
+    # throttling spend this item's catalogue attempts before it ever met one.
+    catalogue_failures = Column(Integer, default=0, nullable=False)
     next_attempt_at = Column(DateTime, nullable=True, index=True)
     retry_reason = Column(String, nullable=True)
     lease_token = Column(String, nullable=True, index=True)

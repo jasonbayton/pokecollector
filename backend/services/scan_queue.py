@@ -39,11 +39,13 @@ TRANSIENT_BACKOFF_SECONDS = (30, 120, 600, 1800, 3600, 21600)
 # Retries of an unreachable card catalogue are bounded, unlike other transient
 # failures. Each one re-runs the vision extraction before it can reach the
 # catalogue at all, so on a metered provider a multi-day outage would charge
-# for the same photo dozens of times without ever being able to succeed. Three
-# attempts span about twelve minutes, which rides out a blip; a real outage
-# leaves the item failed with the reason on it, and the user's own retry
-# resets the count.
-MAX_CATALOGUE_UNREACHABLE_ATTEMPTS = 3
+# for the same photo dozens of times without ever being able to succeed.
+#
+# Four attempts follow the backoff above, so the last one falls about twelve
+# minutes after the first: long enough to ride out a blip, short enough that a
+# real outage stops spending. The item is then left failed with the reason on
+# it, and the user's own retry resets the count.
+MAX_CATALOGUE_UNREACHABLE_ATTEMPTS = 4
 CATALOGUE_UNREACHABLE_RETRY_REASON = "catalogue_unreachable"
 RECOGNITION_BACKOFF_SECONDS = (2, 10, 30)
 TERMINAL_ITEM_STATUSES = {"done", "failed"}
@@ -349,9 +351,14 @@ def fail_claim(
             item.retry_reason = None
         elif transient:
             item.transient_failures += 1
+            if retry_reason == CATALOGUE_UNREACHABLE_RETRY_REASON:
+                # Counted apart from transient_failures, which is shared with
+                # unbounded reasons: two provider rate limits must not spend
+                # this item's catalogue attempts before it has met one.
+                item.catalogue_failures += 1
             if (
                 retry_reason == CATALOGUE_UNREACHABLE_RETRY_REASON
-                and item.transient_failures >= MAX_CATALOGUE_UNREACHABLE_ATTEMPTS
+                and item.catalogue_failures >= MAX_CATALOGUE_UNREACHABLE_ATTEMPTS
             ):
                 item.status = "failed"
                 item.next_attempt_at = None
@@ -733,6 +740,7 @@ def _reset_item_for_rescan(item: ScanJobItem, now: datetime.datetime) -> None:
     item.status = "pending"
     item.attempts = 0
     item.transient_failures = 0
+    item.catalogue_failures = 0
     item.next_attempt_at = now
     item.retry_reason = None
     item.lease_token = None

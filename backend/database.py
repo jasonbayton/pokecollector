@@ -488,6 +488,7 @@ def _run_migrations(conn):
             resolved BOOLEAN NOT NULL DEFAULT FALSE,
             attempts INTEGER NOT NULL DEFAULT 0,
             transient_failures INTEGER NOT NULL DEFAULT 0,
+            catalogue_failures INTEGER NOT NULL DEFAULT 0,
             next_attempt_at TIMESTAMP,
             retry_reason VARCHAR,
             lease_token VARCHAR,
@@ -538,6 +539,10 @@ def _run_migrations(conn):
         "ALTER TABLE scan_job_items ADD COLUMN IF NOT EXISTS identity_confident BOOLEAN",
         "ALTER TABLE scan_job_items ADD COLUMN IF NOT EXISTS identity_decision VARCHAR",
         "ALTER TABLE scan_job_items ADD COLUMN IF NOT EXISTS suggested_match_id VARCHAR",
+        # v62: bounded retries for an unreachable card catalogue. Existing rows
+        # start at zero, which is correct: nothing has failed this way yet, and
+        # an upgraded install must not inherit a spent budget.
+        "ALTER TABLE scan_job_items ADD COLUMN IF NOT EXISTS catalogue_failures INTEGER NOT NULL DEFAULT 0",
         "CREATE INDEX IF NOT EXISTS ix_scan_jobs_user_id ON scan_jobs(user_id)",
         "CREATE INDEX IF NOT EXISTS ix_scan_jobs_status ON scan_jobs(status)",
         "CREATE INDEX IF NOT EXISTS ix_scan_jobs_expires_at ON scan_jobs(expires_at)",

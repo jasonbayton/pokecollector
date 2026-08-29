@@ -339,9 +339,11 @@ class ScanQueueTests(unittest.TestCase):
         job_dir = scan_storage.scan_upload_root() / str(job.id)
         job_dir.mkdir()
         (job_dir / "0.jpg").write_bytes(b"jpeg")
+        covered = datetime.timedelta()
         for attempt in range(1, MAX_CATALOGUE_UNREACHABLE_ATTEMPTS + 1):
             claim = claim_next_scan_item(self.db)
             self.assertIsNotNone(claim, f"attempt {attempt} should have been claimable")
+            before = datetime.datetime.utcnow()
             fail_claim(
                 self.db,
                 claim,
@@ -353,9 +355,15 @@ class ScanQueueTests(unittest.TestCase):
             last = attempt == MAX_CATALOGUE_UNREACHABLE_ATTEMPTS
             self.assertEqual(item.status, "failed" if last else "retrying", f"attempt {attempt}")
             if not last:
+                covered += item.next_attempt_at - before
                 item.next_attempt_at = datetime.datetime.utcnow()
                 self.db.commit()
 
+        # The window the attempts actually cover, which is the number that
+        # decides whether a brief outage survives. Asserted rather than
+        # described, because it is the backoff schedule that sets it and a
+        # change there would otherwise silently shrink it.
+        self.assertGreaterEqual(covered, datetime.timedelta(minutes=12))
         self.assertIsNone(item.next_attempt_at)
         self.assertEqual(item.retry_reason, CATALOGUE_UNREACHABLE_RETRY_REASON)
         self.assertEqual(item.attempts, 0, "a catalogue outage is not a recognition failure")
@@ -365,6 +373,29 @@ class ScanQueueTests(unittest.TestCase):
         retry_scan_item(self.db, item)
         self.assertEqual(item.status, "pending")
         self.assertEqual(item.transient_failures, 0)
+        self.assertEqual(item.catalogue_failures, 0, "a user retry must restore the full allowance")
+
+    def test_unrelated_transient_failures_do_not_spend_the_catalogue_budget(self):
+        # The two counts are separate on purpose. An item that has already been
+        # throttled by the provider a few times has met no outage at all, and
+        # must still get its full allowance when it meets one.
+        self._job(self.users[0])
+        item = self.db.query(ScanJobItem).one()
+        item.transient_failures = MAX_CATALOGUE_UNREACHABLE_ATTEMPTS + 2
+        self.db.commit()
+        claim = claim_next_scan_item(self.db)
+
+        fail_claim(
+            self.db,
+            claim,
+            "catalogue down",
+            transient=True,
+            retry_reason=CATALOGUE_UNREACHABLE_RETRY_REASON,
+        )
+
+        self.db.refresh(item)
+        self.assertEqual(item.status, "retrying")
+        self.assertEqual(item.catalogue_failures, 1)
 
     def test_other_transient_failures_are_still_retried_without_a_bound(self):
         # The bound is for the catalogue reason alone. A provider rate limit
@@ -381,6 +412,7 @@ class ScanQueueTests(unittest.TestCase):
         self.db.refresh(item)
         self.assertEqual(item.status, "retrying")
         self.assertIsNotNone(item.next_attempt_at)
+        self.assertEqual(item.catalogue_failures, 0, "only the catalogue reason spends it")
 
     def test_provider_retry_delay_and_reason_are_persisted(self):
         self._job(self.users[0])
