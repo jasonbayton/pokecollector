@@ -1,13 +1,13 @@
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from api.auth import get_current_user
 from api.cards import _card_to_dict
 from database import get_db
-from models import Card, CollectionItem, ProductPurchase, Set, User, UserSetting, WishlistItem
+from models import Binder, BinderSlot, Card, CollectionItem, ProductPurchase, Set, User, UserSetting, WishlistItem
 from services.card_values import effective_market_price, normalize_price_field
 from services.card_visibility import visible_card_filter
 from services.digital_sets import digital_sets_enabled
@@ -15,6 +15,11 @@ from services.public_profile_feature import public_profiles_enabled
 from services.portfolio_valuation import calculate_portfolio_valuation
 
 router = APIRouter()
+
+
+# How many complete pages a binder needs before it counts as full. See the
+# comment where it is used: the model cannot know a binder's real page count.
+FULL_BINDER_MIN_PAGES = 4
 
 
 ACHIEVEMENTS = [
@@ -178,6 +183,142 @@ ACHIEVEMENTS = [
         "metric": "illustration_rare_flag",
         "target": 1,
     },
+    {
+        "id": "holo_hunter_10",
+        "name_key": "achievements.holoHunter10",
+        "description_key": "achievements.holoHunter10Desc",
+        "badge_id": 21,
+        "metric": "holo_cards",
+        "target": 10,
+    },
+    {
+        "id": "holo_hunter_50",
+        "name_key": "achievements.holoHunter50",
+        "description_key": "achievements.holoHunter50Desc",
+        "badge_id": 22,
+        "metric": "holo_cards",
+        "target": 50,
+    },
+    {
+        "id": "holo_hunter_100",
+        "name_key": "achievements.holoHunter100",
+        "description_key": "achievements.holoHunter100Desc",
+        "badge_id": 23,
+        "metric": "holo_cards",
+        "target": 100,
+    },
+    {
+        "id": "reverse_holo_hunter_10",
+        "name_key": "achievements.reverseHoloHunter10",
+        "description_key": "achievements.reverseHoloHunter10Desc",
+        "badge_id": 24,
+        "metric": "reverse_holo_cards",
+        "target": 10,
+    },
+    {
+        "id": "reverse_holo_hunter_50",
+        "name_key": "achievements.reverseHoloHunter50",
+        "description_key": "achievements.reverseHoloHunter50Desc",
+        "badge_id": 25,
+        "metric": "reverse_holo_cards",
+        "target": 50,
+    },
+    {
+        "id": "reverse_holo_hunter_100",
+        "name_key": "achievements.reverseHoloHunter100",
+        "description_key": "achievements.reverseHoloHunter100Desc",
+        "badge_id": 26,
+        "metric": "reverse_holo_cards",
+        "target": 100,
+    },
+    {
+        "id": "first_edition",
+        "name_key": "achievements.firstEdition",
+        "description_key": "achievements.firstEditionDesc",
+        "badge_id": 27,
+        "metric": "first_edition_flag",
+        "target": 1,
+    },
+    {
+        "id": "rare_hunter_10",
+        "name_key": "achievements.rareHunter10",
+        "description_key": "achievements.rareHunter10Desc",
+        "badge_id": 28,
+        "metric": "rare_cards",
+        "target": 10,
+    },
+    {
+        "id": "rare_hunter_50",
+        "name_key": "achievements.rareHunter50",
+        "description_key": "achievements.rareHunter50Desc",
+        "badge_id": 29,
+        "metric": "rare_cards",
+        "target": 50,
+    },
+    {
+        "id": "rare_hunter_100",
+        "name_key": "achievements.rareHunter100",
+        "description_key": "achievements.rareHunter100Desc",
+        "badge_id": 30,
+        "metric": "rare_cards",
+        "target": 100,
+    },
+    {
+        "id": "ultra_rare_finder",
+        "name_key": "achievements.ultraRareFinder",
+        "description_key": "achievements.ultraRareFinderDesc",
+        "badge_id": 31,
+        "metric": "ultra_rare_flag",
+        "target": 1,
+    },
+    {
+        "id": "secret_rare_finder",
+        "name_key": "achievements.secretRareFinder",
+        "description_key": "achievements.secretRareFinderDesc",
+        "badge_id": 32,
+        "metric": "secret_rare_flag",
+        "target": 1,
+    },
+    {
+        "id": "complete_binder_page",
+        "name_key": "achievements.completeBinderPage",
+        "description_key": "achievements.completeBinderPageDesc",
+        "badge_id": 33,
+        "metric": "complete_binder_page_flag",
+        "target": 1,
+    },
+    {
+        "id": "full_binder",
+        "name_key": "achievements.fullBinder",
+        "description_key": "achievements.fullBinderDesc",
+        "badge_id": 34,
+        "metric": "full_binder_flag",
+        "target": 1,
+    },
+    {
+        "id": "artist_explorer_10",
+        "name_key": "achievements.artistExplorer10",
+        "description_key": "achievements.artistExplorer10Desc",
+        "badge_id": 35,
+        "metric": "artist_diversity",
+        "target": 10,
+    },
+    {
+        "id": "artist_explorer_25",
+        "name_key": "achievements.artistExplorer25",
+        "description_key": "achievements.artistExplorer25Desc",
+        "badge_id": 36,
+        "metric": "artist_diversity",
+        "target": 25,
+    },
+    {
+        "id": "artist_explorer_50",
+        "name_key": "achievements.artistExplorer50",
+        "description_key": "achievements.artistExplorer50Desc",
+        "badge_id": 37,
+        "metric": "artist_diversity",
+        "target": 50,
+    },
 ]
 
 
@@ -244,6 +385,7 @@ def _load_user_stats(db: Session, user_ids: list[int] | None = None, price_field
         Card.set_id,
         Card.lang,
         Card.rarity,
+        Card.artist,
     ).join(
         Card, CollectionItem.card_id == Card.id
     ).filter(
@@ -299,6 +441,65 @@ def _load_user_stats(db: Session, user_ids: list[int] | None = None, price_field
         ).all()
     }
 
+    binder_pages_by_user = defaultdict(lambda: defaultdict(dict))
+    for row in db.query(
+        Binder.user_id,
+        Binder.id.label("binder_id"),
+        Binder.grid_rows,
+        Binder.grid_columns,
+        BinderSlot.page,
+        func.count(BinderSlot.id).label("slot_count"),
+    ).join(
+        BinderSlot, BinderSlot.binder_id == Binder.id
+    ).filter(
+        Binder.user_id.in_(active_user_ids),
+        # A wishlist binder lays out cards the user does NOT own, so filling
+        # one is not a collecting milestone. Without this, four filled
+        # wishlist pages earned both binder achievements with nothing owned.
+        #
+        # NULL is a legacy collection binder, not an unknown kind: the rest of
+        # the codebase reads it that way, in binder_allocations and when
+        # updating a binder's type. Testing only for "collection" would have
+        # quietly denied the milestone to every binder made before the column
+        # existed.
+        or_(Binder.binder_type == "collection", Binder.binder_type.is_(None)),
+        Binder.grid_rows.isnot(None),
+        Binder.grid_columns.isnot(None),
+    ).group_by(
+        Binder.user_id,
+        Binder.id,
+        Binder.grid_rows,
+        Binder.grid_columns,
+        BinderSlot.page,
+    ).all():
+        binder_pages_by_user[row.user_id][row.binder_id][row.page] = (
+            row.slot_count,
+            row.grid_rows * row.grid_columns,
+        )
+
+    complete_binder_page_users = set()
+    full_binder_users = set()
+    for user_id, binders in binder_pages_by_user.items():
+        for pages in binders.values():
+            if any(slot_count == capacity for slot_count, capacity in pages.values()):
+                complete_binder_page_users.add(user_id)
+            capacity = next(iter(pages.values()))[1]
+            # A binder does not record how many pages it physically has, only
+            # the geometry of one page, so this cannot mean "every page of the
+            # binder". It means the first FULL_BINDER_MIN_PAGES pages, which
+            # is what the milestone's name and description promise.
+            #
+            # Measuring every page up to the last one in use instead would
+            # both fire on a single complete page, at the same moment as the
+            # page milestone, and revoke itself the moment a card was placed
+            # on a later page - taking an earned achievement away for adding
+            # a card.
+            if all(
+                pages.get(page, (0, capacity))[0] == capacity
+                for page in range(1, FULL_BINDER_MIN_PAGES + 1)
+            ):
+                full_binder_users.add(user_id)
+
     items_by_user = defaultdict(list)
     for row in collection_rows:
         items_by_user[row.user_id].append(row)
@@ -319,12 +520,49 @@ def _load_user_stats(db: Session, user_ids: list[int] | None = None, price_field
         owned_by_set = defaultdict(set)
         owned_set_ids = set()
         has_illustration_rare = False
+        holo_cards = 0
+        reverse_holo_cards = 0
+        rare_cards = 0
+        has_first_edition = False
+        has_ultra_rare = False
+        has_secret_rare = False
+        artists = set()
         for row in rows:
             if row.set_id:
                 owned_by_set[(row.set_id, row.lang)].add(row.card_id)
                 owned_set_ids.add(row.set_id)
-            if row.rarity and "illustration rare" in row.rarity.lower():
+            variant = (row.variant or "").strip().casefold()
+            rarity = (row.rarity or "").strip().casefold()
+            quantity = row.quantity or 0
+            if "illustration rare" in rarity:
                 has_illustration_rare = True
+            # A row of zero, or of a negative left by an edit, is not a card
+            # anybody owns: card_state treats a variant as owned only while
+            # its quantity is positive. Without this a zero-quantity row
+            # unlocked a first-of-its-kind milestone, and a negative one
+            # subtracted from the counted milestones.
+            #
+            # Deliberately guards only the craft metrics below. The set
+            # completion and illustration-rare metrics above predate this
+            # change and read the same rows; correcting those is a change to
+            # existing achievements rather than to these new ones.
+            if quantity <= 0:
+                continue
+            if variant == "holo":
+                holo_cards += quantity
+            elif variant == "reverse holo":
+                reverse_holo_cards += quantity
+            elif variant == "first edition":
+                has_first_edition = True
+            if rarity == "rare":
+                rare_cards += quantity
+            elif rarity == "ultra rare":
+                has_ultra_rare = True
+            elif rarity == "secret rare":
+                has_secret_rare = True
+            artist = (row.artist or "").strip()
+            if artist:
+                artists.add(artist.casefold())
 
         sets_completed = 0
         for set_key, owned_cards in owned_by_set.items():
@@ -355,6 +593,15 @@ def _load_user_stats(db: Session, user_ids: list[int] | None = None, price_field
             "sold_products_count": sold_product_counts.get(user.id, 0),
             "positive_pnl_flag": 1 if pnl > 0 else 0,
             "illustration_rare_flag": 1 if has_illustration_rare else 0,
+            "holo_cards": holo_cards,
+            "reverse_holo_cards": reverse_holo_cards,
+            "first_edition_flag": 1 if has_first_edition else 0,
+            "rare_cards": rare_cards,
+            "ultra_rare_flag": 1 if has_ultra_rare else 0,
+            "secret_rare_flag": 1 if has_secret_rare else 0,
+            "complete_binder_page_flag": 1 if user.id in complete_binder_page_users else 0,
+            "full_binder_flag": 1 if user.id in full_binder_users else 0,
+            "artist_diversity": len(artists),
             "public_handle": user.public_handle if sharing_enabled and user.is_profile_public else None,
         }
 
