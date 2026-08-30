@@ -4,6 +4,7 @@ import { X, Loader2, Plus } from 'lucide-react'
 import { addToCollection, uploadCollectionItemPhoto } from '../api/client'
 import { hasCatalogueImage } from '../utils/imageUrl'
 import { useQueryClient } from '@tanstack/react-query'
+import { initialVariantFor } from '../utils/recognizedFinish'
 import { useSettings } from '../contexts/SettingsContext'
 import toast from 'react-hot-toast'
 import { CARD_VARIANTS, getDefaultVariant } from '../utils/cardVariants'
@@ -46,11 +47,15 @@ export async function attachScanFallbackPhoto({ created, match, getPhoto, upload
   }
 }
 
-export default function ScanAddModal({ match, defaultLang, onClose, onAdded }) {
+export default function ScanAddModal({ match, defaultLang, recognizedFinish, onClose, onAdded }) {
   const { t, exchangeRate, exchangeRateReady } = useSettings()
   const [quantity, setQuantity] = useState(1)
   const [condition, setCondition] = useState('Mint')
-  const [variant, setVariant] = useState(() => getDefaultVariant(match))
+  // Opens on the finish the scanner actually read, when the card offers that
+  // printing. Without this a read reverse holo was filed as Normal through
+  // this path while automatic filing got it right, so the same card landed
+  // differently depending on which route was taken.
+  const [variant, setVariant] = useState(() => initialVariantFor(match, recognizedFinish))
   const [lang, setLang] = useState(match.lang || defaultLang || 'en')
   const [purchasePrice, setPurchasePrice] = useState('')
   const [adding, setAdding] = useState(false)

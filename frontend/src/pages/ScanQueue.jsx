@@ -356,6 +356,7 @@ function JobDetail({ jobId }) {
         <ScanAddModal
           match={addSelection.match}
           defaultLang={addSelection.item.recognized?.language || addSelection.match.lang || 'en'}
+          recognizedFinish={addSelection.item.recognized?.finish}
           getPhoto={() => addSelection.item.has_image
             ? fetchScanJobItemImageBlob(job.id, addSelection.item.id)
             : Promise.resolve(null)}
