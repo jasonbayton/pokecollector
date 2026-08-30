@@ -121,6 +121,19 @@ class CollectionSearchTests(unittest.TestCase):
         found = [item.card_id for item in self._search(q="MEW 25")]
         self.assertEqual(found, [wanted.id])
 
+    def test_owning_a_set_is_not_enough_to_read_a_query_as_a_shortcode(self):
+        # Holding MEW number 1 does not make "MEW 25" a set lookup when MEW 25
+        # is not owned. Discriminating on the set alone returned nothing here,
+        # throwing away the card named "Mew 25" that both pickers found.
+        self.db.add(Set(id="mew_en", tcg_set_id="mew", name="151",
+                        abbreviation="MEW", lang="en"))
+        self.db.commit()
+        self._card("mew-1_en", "Bulbasaur", "1", set_id="mew")
+        named = self._card("sv1-25_en", "Mew 25", "25")
+
+        found = [item.card_id for item in self._search(q="MEW 25")]
+        self.assertEqual(found, [named.id])
+
     def test_a_name_that_looks_like_a_shortcode_still_finds_the_card(self):
         # "Energy Removal 2" searched as "Removal 2" has the shape of a set
         # code and a number, but Removal is not a set this collection holds.

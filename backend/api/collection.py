@@ -528,14 +528,39 @@ def get_collection(
     return _annotate_collection_items(db, current_user, items)
 
 
-def _owns_cards_in_set_code(db: Session, current_user: User, code: str) -> bool:
-    """Whether this collection holds cards from a set written this way.
+def _shortcode_clauses(code: str, number: str):
+    """The filter for one specific card: this set code, this collector number.
 
-    Decides whether a shortcode-shaped query means a set and a number, or is
-    just two words. Only asked when the query has that shape, so it costs one
-    existence check on the queries that could be ambiguous.
+    Shared deliberately. The existence check that decides whether to take the
+    shortcode branch and the filter that branch then applies have to agree
+    about what the shortcode matches; two copies of the predicate would drift.
     """
     lowered = code.casefold()
+    number_forms = {form.casefold() for form in card_number_variants(number)}
+    return (
+        or_(
+            func.lower(Set.abbreviation) == lowered,
+            func.lower(Set.tcg_set_id) == lowered,
+            func.lower(Card.set_id) == lowered,
+        ),
+        func.lower(Card.number).in_(sorted(number_forms)),
+    )
+
+
+def _owns_the_shortcode_card(
+    db: Session, current_user: User, code: str, number: str
+) -> bool:
+    """Whether this collection actually holds that set's card of that number.
+
+    Decides whether a shortcode-shaped query means one specific card or is
+    just two words. Asking about the whole candidate rather than the set alone
+    matters: owning MEW number 1 does not make "MEW 25" a set lookup, and
+    reading it as one would discard a card named "Mew 25" that both old
+    pickers found.
+
+    Deliberately independent of the set, variant and condition filters, so
+    that toggling a facet cannot change what the words are taken to mean.
+    """
     return db.query(
         db.query(CollectionItem)
         .join(Card, Card.id == CollectionItem.card_id)
@@ -543,11 +568,7 @@ def _owns_cards_in_set_code(db: Session, current_user: User, code: str) -> bool:
         .filter(
             CollectionItem.user_id == current_user.id,
             visible_any_card_filter(db, current_user.id, "all"),
-            or_(
-                func.lower(Set.abbreviation) == lowered,
-                func.lower(Set.tcg_set_id) == lowered,
-                func.lower(Card.set_id) == lowered,
-            ),
+            *_shortcode_clauses(code, number),
         )
         .exists()
     ).scalar()
@@ -667,23 +688,14 @@ def search_collection(
         # named Mew that happened to be numbered 25, which neither picker did.
         # Set ids carry dots, as in sv03.5.
         shortcode = re.fullmatch(r"([A-Za-z]+[0-9.]*)\s+([0-9]+[A-Za-z]*)", term)
-        if shortcode and _owns_cards_in_set_code(db, current_user, shortcode.group(1)):
-            code, number = shortcode.groups()
-            number_forms = {form.casefold() for form in card_number_variants(number)}
-            query = query.filter(
-                or_(
-                    func.lower(Set.abbreviation) == code.casefold(),
-                    func.lower(Set.tcg_set_id) == code.casefold(),
-                    func.lower(Card.set_id) == code.casefold(),
-                ),
-                func.lower(Card.number).in_(sorted(number_forms)),
-            )
+        if shortcode and _owns_the_shortcode_card(db, current_user, *shortcode.groups()):
+            query = query.filter(*_shortcode_clauses(*shortcode.groups()))
         else:
-            # Either the query is not shortcode-shaped, or its first token is
-            # not a set this collection has. "Removal 2" looks like a set code
-            # and a number but is the tail of "Energy Removal 2", and treating
-            # it as a set lookup found nothing where both pickers found the
-            # card by name.
+            # Either the query is not shortcode-shaped, or the card it would
+            # name is not one this collection holds. "Removal 2" looks like a
+            # set code and a number but is the tail of "Energy Removal 2", and
+            # treating it as a set lookup found nothing where both pickers
+            # found the card by name.
             # Every word must match something, though not all the same thing.
             # The trade picker searched one concatenated string, so "sprigatito
             # scarlet" found Sprigatito from Scarlet & Violet; checking the
