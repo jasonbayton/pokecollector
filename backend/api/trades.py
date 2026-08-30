@@ -341,6 +341,10 @@ def _merge_locked_collection_item(
         lang=lang,
         purchase_price=purchase_price,
     )
+    # A trade states both halves, so it must not be filed into a row of copies
+    # nobody assessed - that would relabel them. Rows predating the flag are
+    # still acceptable: nothing there is awaiting review.
+    matches = [item for item in matches if item.attributes_confirmed is not False]
     if matches:
         matches[0].quantity = int(matches[0].quantity or 0) + quantity
         return matches[0]
@@ -352,6 +356,7 @@ def _merge_locked_collection_item(
         condition=condition,
         variant=variant,
         purchase_price=purchase_price,
+        attributes_confirmed=True,
         lang=lang,
         added_at=datetime.datetime.utcnow(),
     )

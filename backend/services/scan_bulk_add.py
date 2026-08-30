@@ -118,12 +118,11 @@ def _add_collection_copy(
             CollectionItem.condition == DEFAULT_CONDITION,
             CollectionItem.purchase_price.is_(None),
             CollectionItem.user_id == current_user.id,
-            # Never merge into a row somebody has confirmed. Doing so would
-            # extend their statement about condition and variant to a copy
-            # nobody has looked at, which is the whole problem this avoids.
-            # Rows predating the flag are still joined, and stay unknown: they
-            # were unknown before this copy arrived and remain so.
-            CollectionItem.attributes_confirmed.isnot(True),
+            # Only ever joins other unassessed copies. Merging into a row
+            # somebody confirmed would extend their statement to a copy nobody
+            # looked at; merging into a row that predates the flag would hide
+            # this copy from review for ever, since such a row stays unknown.
+            CollectionItem.attributes_confirmed.is_(False),
         )
         .with_for_update()
         .first()

@@ -62,13 +62,18 @@ def _row_to_merge_into(db, base_filters, *, stated: bool):
     copy therefore joins stated rows, and an unassessed copy joins unassessed
     rows.
 
-    Rows predating the flag are a sink: unknown stays unknown whichever kind of
-    copy joins them. That keeps existing collections merging exactly as they
-    did rather than sprouting a second row per card, at the cost of those rows
-    staying unknown until somebody edits them - which is honest, because nobody
-    knows what they were.
+    Rows predating the flag accept stated copies, because nothing in such a row
+    is awaiting review and merging keeps existing collections behaving as they
+    always did. They do NOT accept unassessed ones. A row of unknown copies
+    stays unknown, so an unassessed copy hidden inside it would never appear in
+    review, and the misvalued-variant defect this exists to catch would survive
+    on precisely the collections that predate the fix. An unassessed copy
+    therefore gets its own row, which is also the only honest representation:
+    the row is a bundle with one flag, and it cannot say "three unknown and one
+    unassessed".
     """
-    for state in (stated, None):
+    states = (stated, None) if stated else (False,)
+    for state in states:
         row = (
             db.query(CollectionItem)
             .filter(*base_filters, CollectionItem.attributes_confirmed.is_(state))
@@ -889,7 +894,9 @@ def update_collection_item(
     # both halves settles the row, because a row whose variant was guessed is
     # still guessed after its condition is corrected, and the variant is the
     # half that reaches valuation.
-    if "condition" in update_data and "variant" in update_data:
+    # Present is not the same as stated: exclude_unset keeps a field the caller
+    # explicitly sent as null, and both are nullable in the update schema.
+    if update_data.get("condition") is not None and update_data.get("variant") is not None:
         item.attributes_confirmed = True
 
     if item.card_id != old_card_id:

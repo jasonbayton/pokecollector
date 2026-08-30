@@ -66,9 +66,16 @@ def get_duplicates(
     # the collection page — needs the same has_scan_photo + nested card shape.
     _annotate_scan_photos(db, current_user, items)
 
+    # One entry per card, not per row. A card held as one Mint and one NM is
+    # two copies of one card, and rendering it as two separate "1x" lines
+    # answers a question nobody asked. The first row supplies the identity and
+    # the photo; quantity and value cover every row.
+    seen_cards = set()
     result = []
     for item in items:
-        if item.card:
+        if item.card and item.card_id not in seen_cards:
+            seen_cards.add(item.card_id)
+            held = held_per_card.get(item.card_id, 0)
             price = _get_item_price(item, price_field)
             result.append({
                 "id": item.id,
@@ -76,9 +83,9 @@ def get_duplicates(
                 "name": item.card.name,
                 "set_name": item.card.set_ref.name if item.card.set_ref else None,
                 "images_small": item.card.images_small,
-                "quantity": item.quantity,
+                "quantity": held,
                 "price_market": round(price, 2),
-                "total_value": round(price * item.quantity, 2),
+                "total_value": round(price * held, 2),
                 "rarity": item.card.rarity,
                 "has_scan_photo": item.has_scan_photo,
                 "card": {
