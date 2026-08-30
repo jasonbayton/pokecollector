@@ -1,3 +1,4 @@
+from collections import defaultdict
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
@@ -42,13 +43,22 @@ def get_duplicates(
     current_user: User = Depends(get_current_user),
 ):
     """Get all cards owned more than once, sorted by total value."""
-    items = db.query(CollectionItem).join(Card, Card.id == CollectionItem.card_id).options(
+    # Owning a card more than once is a fact about the card, not about a row.
+    # Filtering rows at quantity > 1 missed anyone holding two copies in
+    # different rows - one Mint and one NM has always been two copies and
+    # never appeared here - and rows split further now that a copy nobody
+    # assessed is kept apart from one somebody stated.
+    owned = db.query(CollectionItem).join(Card, Card.id == CollectionItem.card_id).options(
         joinedload(CollectionItem.card).joinedload(Card.set_ref)
     ).filter(
         CollectionItem.user_id == current_user.id,
-        CollectionItem.quantity > 1,
         visible_any_card_filter(db, current_user.id, "all"),
     ).all()
+
+    held_per_card = defaultdict(int)
+    for row in owned:
+        held_per_card[row.card_id] += int(row.quantity or 0)
+    items = [row for row in owned if held_per_card.get(row.card_id, 0) > 1]
 
     price_field = normalize_price_field(price_field)
     # Each row is exactly one owned CollectionItem (not an aggregate), so the

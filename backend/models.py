@@ -638,6 +638,9 @@ class DeletedCollectionItem(Base):
     lang = Column(String, nullable=True)
     grade = Column(String, nullable=True)
     added_at = Column(DateTime, nullable=True)
+    # Carried through the snapshot so a restore does not quietly turn a row
+    # somebody had confirmed back into one of unknown provenance.
+    attributes_confirmed = Column(Boolean, nullable=True)
 
     deleted_at = Column(DateTime, nullable=False, default=func.now(), index=True)
     deleted_by_user_id = Column(Integer, nullable=True)

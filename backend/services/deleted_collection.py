@@ -27,6 +27,7 @@ def archive_collection_item(db: Session, item: CollectionItem, actor: User) -> D
     entry = DeletedCollectionItem(
         original_collection_item_id=item.id,
         user_id=item.user_id,
+        attributes_confirmed=item.attributes_confirmed,
         card_id=item.card_id,
         quantity=int(item.quantity or 0),
         condition=item.condition,
@@ -72,6 +73,10 @@ def restore_entry(db: Session, entry: DeletedCollectionItem) -> tuple[Collection
             CollectionItem.condition == entry.condition,
             CollectionItem.lang == entry.lang,
             CollectionItem.purchase_price == entry.purchase_price,
+            # Restoring must not merge a confirmed row into an unassessed one
+            # or the reverse: the flag describes a whole row, so mixing them
+            # would misrepresent one side.
+            CollectionItem.attributes_confirmed.is_(entry.attributes_confirmed),
         )
         # Locked: without this a concurrent edit could change the row's
         # condition, variant, language or price between the match and the
@@ -92,6 +97,7 @@ def restore_entry(db: Session, entry: DeletedCollectionItem) -> tuple[Collection
     restored = CollectionItem(
         card_id=entry.card_id,
         user_id=entry.user_id,
+        attributes_confirmed=entry.attributes_confirmed,
         quantity=int(entry.quantity),
         condition=entry.condition,
         variant=entry.variant or "Normal",

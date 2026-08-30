@@ -150,8 +150,13 @@ class CardWithSet(CardBase):
 class CollectionItemCreate(BaseModel):
     card_id: str
     quantity: int = Field(default=1, ge=1, le=999)
-    condition: str = "Mint"
-    variant: Optional[str] = "Normal"
+    # Both default to None rather than to a value, so a caller that omits them
+    # is distinguishable from one that states them. Omitting still stores the
+    # same defaults as before; what changes is that the row records nobody
+    # chose them. Several callers do omit: the wishlist "I have this now" path
+    # sends a condition and no variant.
+    condition: Optional[str] = None
+    variant: Optional[str] = None
     purchase_price: Optional[float] = None
     lang: str = "en"  # fixed TCGdex language of this card item
 

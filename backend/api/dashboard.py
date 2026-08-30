@@ -35,7 +35,9 @@ def get_dashboard(
     _annotate_scan_photos(db, current_user, items)
 
     total_cards = sum(item.quantity for item in items)
-    unique_cards = len(items)
+    # Distinct cards, not rows. One card held in two rows - a Mint and an NM,
+    # or a stated copy beside one nobody assessed - is one card.
+    unique_cards = len({item.card_id for item in items})
 
     valuation = calculate_portfolio_valuation(
         db,

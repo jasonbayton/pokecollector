@@ -38,6 +38,47 @@ ALLOWED_VARIANTS = {"Normal", "Holo", "Reverse Holo", "First Edition"}
 ALLOWED_LANGS = set(SUPPORTED_TCGDEX_LANGUAGES)
 
 
+DEFAULT_CONDITION = "Mint"
+
+
+def _attributes_stated(item) -> bool:
+    """Whether the caller actually chose this row's condition and variant.
+
+    Both must be present. A caller supplying one and letting the other default
+    has not established the pair, and the variant is the half that reaches
+    valuation: effective_market_price prices a Reverse Holo from the holo
+    fields, so a reverse holo stored as Normal is valued wrongly. The wishlist
+    "I have this now" path sends a condition and no variant, which is exactly
+    the case that must not count as stated.
+    """
+    return getattr(item, "condition", None) is not None and getattr(item, "variant", None) is not None
+
+
+def _row_to_merge_into(db, base_filters, *, stated: bool):
+    """An existing row this add may join without misrepresenting either.
+
+    Rows are never mixed. The flag describes a whole row, so a row holding both
+    stated and unassessed copies could only lie about one of them. A stated
+    copy therefore joins stated rows, and an unassessed copy joins unassessed
+    rows.
+
+    Rows predating the flag are a sink: unknown stays unknown whichever kind of
+    copy joins them. That keeps existing collections merging exactly as they
+    did rather than sprouting a second row per card, at the cost of those rows
+    staying unknown until somebody edits them - which is honest, because nobody
+    knows what they were.
+    """
+    for state in (stated, None):
+        row = (
+            db.query(CollectionItem)
+            .filter(*base_filters, CollectionItem.attributes_confirmed.is_(state))
+            .first()
+        )
+        if row is not None:
+            return row
+    return None
+
+
 def _normalize_collection_variant(variant: Optional[str]) -> str:
     return normalize_collection_variant(variant)
 
@@ -277,18 +318,26 @@ def _add_collection_item(db: Session, current_user: User, item: CollectionItemCr
         effective_card_id = f"{tcg_card_id}_{item_lang}"
         ensure_card_exists(db, effective_card_id, lang=item_lang)
 
-    existing = db.query(CollectionItem).filter(
-        CollectionItem.card_id == effective_card_id,
-        CollectionItem.variant == item_variant,
-        CollectionItem.lang == item_lang,
-        CollectionItem.condition == item.condition,
-        CollectionItem.purchase_price == item.purchase_price,
-        CollectionItem.user_id == current_user.id,
-    ).first()
+    stated = _attributes_stated(item)
+    item_condition = item.condition or DEFAULT_CONDITION
+    existing = _row_to_merge_into(
+        db,
+        (
+            CollectionItem.card_id == effective_card_id,
+            CollectionItem.variant == item_variant,
+            CollectionItem.lang == item_lang,
+            CollectionItem.condition == item_condition,
+            CollectionItem.purchase_price == item.purchase_price,
+            CollectionItem.user_id == current_user.id,
+        ),
+        stated=stated,
+    )
 
     if existing:
         existing.quantity += item.quantity or 1
-        existing.attributes_confirmed = True
+        # The flag is not restated here. Merging must not relabel copies that
+        # were already in the row: one stated copy joining a row of unassessed
+        # ones does not mean anybody looked at those.
         if commit:
             db.commit()
         return "updated"
@@ -296,13 +345,13 @@ def _add_collection_item(db: Session, current_user: User, item: CollectionItemCr
     db.add(CollectionItem(
         card_id=effective_card_id,
         quantity=item.quantity,
-        condition=item.condition,
+        condition=item_condition,
         variant=item_variant,
         purchase_price=item.purchase_price,
         lang=item_lang,
         user_id=current_user.id,
         added_at=datetime.datetime.utcnow(),
-        attributes_confirmed=True,
+        attributes_confirmed=stated,
     ))
     if commit:
         db.commit()
@@ -432,12 +481,15 @@ def _parse_import_row(row: dict, row_number: int) -> CollectionItemCreate:
     if quantity < 1 or quantity > 999:
         raise ValueError("quantity must be between 1 and 999")
 
-    condition = (row.get("condition") or "Mint").strip() or "Mint"
-    if condition not in ALLOWED_CONDITIONS:
+    # Left as None when the file does not say, so an absent column is recorded
+    # as nobody having chosen rather than as a statement of Mint and Normal.
+    condition = ((row.get("condition") or "").strip()) or None
+    if condition is not None and condition not in ALLOWED_CONDITIONS:
         raise ValueError(f"condition must be one of: {', '.join(sorted(ALLOWED_CONDITIONS))}")
 
-    variant = _normalize_collection_variant(row.get("variant"))
-    if variant not in ALLOWED_VARIANTS:
+    variant_raw = (row.get("variant") or "").strip()
+    variant = _normalize_collection_variant(variant_raw) if variant_raw else None
+    if variant is not None and variant not in ALLOWED_VARIANTS:
         raise ValueError(f"variant must be blank or one of: {', '.join(sorted(ALLOWED_VARIANTS))}")
 
     lang = (row.get("lang") or "en").strip().lower() or "en"
@@ -546,18 +598,23 @@ def add_to_collection(
         ensure_card_exists(db, effective_card_id, lang=item_lang)
 
     # Find existing entry for same card + variant + lang + condition + purchase_price combination
-    existing = db.query(CollectionItem).filter(
-        CollectionItem.card_id == effective_card_id,
-        CollectionItem.variant == item_variant,
-        CollectionItem.lang == item_lang,
-        CollectionItem.condition == item.condition,
-        CollectionItem.purchase_price == item.purchase_price,
-        CollectionItem.user_id == current_user.id,
-    ).first()
+    stated = _attributes_stated(item)
+    item_condition = item.condition or DEFAULT_CONDITION
+    existing = _row_to_merge_into(
+        db,
+        (
+            CollectionItem.card_id == effective_card_id,
+            CollectionItem.variant == item_variant,
+            CollectionItem.lang == item_lang,
+            CollectionItem.condition == item_condition,
+            CollectionItem.purchase_price == item.purchase_price,
+            CollectionItem.user_id == current_user.id,
+        ),
+        stated=stated,
+    )
 
     if existing:
         existing.quantity += item.quantity or 1
-        existing.attributes_confirmed = True
         db.commit()
         db.refresh(existing)
         return _annotate_collection_item(db, current_user, existing)
@@ -565,15 +622,13 @@ def add_to_collection(
         db_item = CollectionItem(
             card_id=effective_card_id,
             quantity=item.quantity,
-            condition=item.condition,
+            condition=item_condition,
             variant=item_variant,
             purchase_price=item.purchase_price,
             lang=item_lang,
             user_id=current_user.id,
             added_at=datetime.datetime.utcnow(),
-            # The caller supplied condition and variant, so they are stated
-            # rather than assumed.
-            attributes_confirmed=True,
+            attributes_confirmed=stated,
         )
         db.add(db_item)
         db.commit()
@@ -619,31 +674,36 @@ def bulk_add_to_collection(
                 effective_card_id = f"{tcg_card_id}_{item_lang}"
                 ensure_card_exists(db, effective_card_id, lang=item_lang)
 
-            existing = db.query(CollectionItem).filter(
-                CollectionItem.card_id == effective_card_id,
-                CollectionItem.variant == item_variant,
-                CollectionItem.lang == item_lang,
-                CollectionItem.condition == item.condition,
-                CollectionItem.purchase_price == item.purchase_price,
-                CollectionItem.user_id == current_user.id,
-            ).first()
+            stated = _attributes_stated(item)
+            item_condition = item.condition or DEFAULT_CONDITION
+            existing = _row_to_merge_into(
+                db,
+                (
+                    CollectionItem.card_id == effective_card_id,
+                    CollectionItem.variant == item_variant,
+                    CollectionItem.lang == item_lang,
+                    CollectionItem.condition == item_condition,
+                    CollectionItem.purchase_price == item.purchase_price,
+                    CollectionItem.user_id == current_user.id,
+                ),
+                stated=stated,
+            )
 
             if existing:
                 existing.quantity += item.quantity or 1
-                existing.attributes_confirmed = True
                 db.commit()
                 updated += 1
             else:
                 db.add(CollectionItem(
                     card_id=effective_card_id,
                     quantity=item.quantity,
-                    condition=item.condition,
+                    condition=item_condition,
                     variant=item_variant,
                     purchase_price=item.purchase_price,
                     lang=item_lang,
                     user_id=current_user.id,
                     added_at=datetime.datetime.utcnow(),
-                    attributes_confirmed=True,
+                    attributes_confirmed=stated,
                 ))
                 db.commit()
                 added += 1
@@ -824,6 +884,13 @@ def update_collection_item(
 
     for field, value in update_data.items():
         setattr(item, field, value)
+
+    # Editing a row is somebody stating what it is. Only a change that names
+    # both halves settles the row, because a row whose variant was guessed is
+    # still guessed after its condition is corrected, and the variant is the
+    # half that reaches valuation.
+    if "condition" in update_data and "variant" in update_data:
+        item.attributes_confirmed = True
 
     if item.card_id != old_card_id:
         # A physical photo belongs to the old printing and must not silently

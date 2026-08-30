@@ -7,7 +7,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from api.auth import get_current_user
-from api.collection import ensure_card_exists
+from api.collection import _row_to_merge_into, ensure_card_exists
 from database import get_db
 from models import Card, CollectionItem, ProductCard, ProductLedgerEntry, ProductPurchase, Trade, TradeItem, User
 from schemas import TradeCreate, TradeResponse, TradeUpdate, TradeValuationRequest
@@ -128,14 +128,20 @@ def _merge_or_create_collection_item(
     lang: str,
     purchase_price,
 ) -> CollectionItem:
-    existing = db.query(CollectionItem).filter(
-        CollectionItem.card_id == card.id,
-        CollectionItem.variant == variant,
-        CollectionItem.lang == lang,
-        CollectionItem.condition == condition,
-        CollectionItem.purchase_price == purchase_price,
-        CollectionItem.user_id == current_user.id,
-    ).first()
+    # A trade states both halves: the incoming form has condition and variant
+    # selects, so the person recording it chose them.
+    existing = _row_to_merge_into(
+        db,
+        (
+            CollectionItem.card_id == card.id,
+            CollectionItem.variant == variant,
+            CollectionItem.lang == lang,
+            CollectionItem.condition == condition,
+            CollectionItem.purchase_price == purchase_price,
+            CollectionItem.user_id == current_user.id,
+        ),
+        stated=True,
+    )
 
     if existing:
         existing.quantity += quantity
@@ -150,6 +156,7 @@ def _merge_or_create_collection_item(
         purchase_price=purchase_price,
         lang=lang,
         added_at=datetime.datetime.utcnow(),
+        attributes_confirmed=True,
     )
     db.add(item)
     db.flush()

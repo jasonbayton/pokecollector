@@ -101,9 +101,12 @@ class UnconfirmedAttributeTests(unittest.TestCase):
         self.assertIs(rows[0].attributes_confirmed, True)
         self.assertIs(rows[1].attributes_confirmed, False)
 
-    def test_a_row_predating_the_flag_becomes_unconfirmed_when_one_joins_it(self):
-        # NULL means nobody knows. Once an unassessed copy lands in the row,
-        # something is known: it contains one.
+    def test_a_row_predating_the_flag_stays_unknown_when_one_joins_it(self):
+        # Review pushed back on the earlier behaviour here, rightly: marking
+        # the row false would claim the whole row was filed automatically,
+        # when its earlier copies are of unknown origin. Unknown stays
+        # unknown. Merging is still allowed, so existing collections do not
+        # sprout a second row for every card.
         legacy = CollectionItem(
             card_id=self.card.id,
             quantity=3,
@@ -121,9 +124,95 @@ class UnconfirmedAttributeTests(unittest.TestCase):
         self.db.commit()
 
         rows = self._rows()
-        self.assertEqual(len(rows), 1)
+        self.assertEqual(len(rows), 1, "it should still merge rather than duplicate the card")
         self.assertEqual(rows[0].quantity, 4)
-        self.assertIs(rows[0].attributes_confirmed, False)
+        self.assertIsNone(rows[0].attributes_confirmed, "unknown must not be relabelled")
+
+    def test_stating_only_a_condition_does_not_count_as_assessed(self):
+        # The wishlist "I have this now" path sends a condition and no variant.
+        # Treating that as fully stated reproduced the expensive half of the
+        # original defect, because the variant is what reaches valuation.
+        from api.collection import _attributes_stated
+        from schemas import CollectionItemCreate
+
+        self.assertFalse(_attributes_stated(CollectionItemCreate(card_id="x", condition="NM")))
+        self.assertFalse(_attributes_stated(CollectionItemCreate(card_id="x", variant="Holo")))
+        self.assertFalse(_attributes_stated(CollectionItemCreate(card_id="x")))
+        self.assertTrue(_attributes_stated(CollectionItemCreate(card_id="x", condition="NM", variant="Holo")))
+
+    def test_a_stated_copy_does_not_confirm_the_row_it_joins(self):
+        # The row is a bundle. One stated copy arriving says nothing about the
+        # copies already in it, and marking the whole row confirmed hid a
+        # possibly misvalued variant from review.
+        _add_collection_copy(self.db, card=self.card, current_user=self.user)
+        self.db.commit()
+        auto_row = self._rows()[0]
+        self.assertIs(auto_row.attributes_confirmed, False)
+
+        from api.collection import _row_to_merge_into
+        from models import CollectionItem as CI
+
+        joined = _row_to_merge_into(
+            self.db,
+            (
+                CI.card_id == self.card.id,
+                CI.variant == "Normal",
+                CI.lang == "en",
+                CI.condition == DEFAULT_CONDITION,
+                CI.user_id == self.user.id,
+            ),
+            stated=True,
+        )
+        self.assertIsNone(
+            joined,
+            "a stated copy must not join a row of copies nobody assessed",
+        )
+
+    def test_an_unassessed_copy_does_not_join_a_stated_row(self):
+        from api.collection import _row_to_merge_into
+        from models import CollectionItem as CI
+
+        self.db.add(CI(
+            card_id=self.card.id, quantity=1, condition=DEFAULT_CONDITION,
+            variant="Normal", lang="en", user_id=self.user.id,
+            attributes_confirmed=True,
+        ))
+        self.db.commit()
+        joined = _row_to_merge_into(
+            self.db,
+            (
+                CI.card_id == self.card.id,
+                CI.variant == "Normal",
+                CI.lang == "en",
+                CI.condition == DEFAULT_CONDITION,
+                CI.user_id == self.user.id,
+            ),
+            stated=False,
+        )
+        self.assertIsNone(joined)
+
+    def test_a_row_predating_the_flag_accepts_either_kind(self):
+        # Unknown rows are a sink, so an existing collection keeps merging as
+        # it always did instead of growing a second row for every card.
+        from api.collection import _row_to_merge_into
+        from models import CollectionItem as CI
+
+        self.db.add(CI(
+            card_id=self.card.id, quantity=1, condition=DEFAULT_CONDITION,
+            variant="Normal", lang="en", user_id=self.user.id,
+            attributes_confirmed=None,
+        ))
+        self.db.commit()
+        filters = (
+            CI.card_id == self.card.id,
+            CI.variant == "Normal",
+            CI.lang == "en",
+            CI.condition == DEFAULT_CONDITION,
+            CI.user_id == self.user.id,
+        )
+        for stated in (True, False):
+            with self.subTest(stated=stated):
+                self.assertIsNotNone(_row_to_merge_into(self.db, filters, stated=stated))
 
     def test_rows_predating_the_flag_are_left_unknown_rather_than_guessed(self):
         legacy = CollectionItem(

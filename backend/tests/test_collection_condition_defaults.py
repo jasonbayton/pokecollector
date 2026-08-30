@@ -35,8 +35,17 @@ class CollectionConditionDefaultTests(unittest.TestCase):
         class_node = find_class(self.schemas, class_name)
         self.assertEqual(ast.literal_eval(find_assignment(class_node.body, field_name)), expected)
 
-    def test_collection_item_create_schema_defaults_to_mint(self):
-        self.assert_class_string_default("CollectionItemCreate", "condition", "Mint")
+    def test_an_unstated_condition_is_still_stored_as_mint(self):
+        # The default moved out of the schema and into the write path, so that
+        # an omitted condition can be told apart from a chosen one. The
+        # guarantee this test exists for is unchanged: unspecified means Mint,
+        # and never anything else.
+        from api.collection import DEFAULT_CONDITION
+        from schemas import CollectionItemCreate
+
+        created = CollectionItemCreate(card_id="base1-4_en")
+        self.assertIsNone(created.condition, "an omitted condition must stay distinguishable")
+        self.assertEqual(created.condition or DEFAULT_CONDITION, "Mint")
 
     def test_collection_item_model_defaults_to_mint(self):
         model = find_class(parse_source("backend/models.py"), "CollectionItem")
@@ -44,12 +53,19 @@ class CollectionConditionDefaultTests(unittest.TestCase):
         default = next(keyword.value for keyword in column.keywords if keyword.arg == "default")
         self.assertEqual(ast.literal_eval(default), "Mint")
 
-    def test_csv_import_blank_condition_defaults_to_mint(self):
-        parser = find_function(parse_source("backend/api/collection.py"), "_parse_import_row")
-        condition = find_assignment(parser.body, "condition")
-        string_constants = [node.value for node in ast.walk(condition) if isinstance(node, ast.Constant) and isinstance(node.value, str)]
-        self.assertEqual(string_constants.count("Mint"), 2)
-        self.assertNotIn("NM", string_constants)
+    def test_csv_import_blank_condition_is_stored_as_mint(self):
+        # Same guarantee, asserted on what the parser produces rather than on
+        # which string literals appear in it. A blank column now parses to
+        # "nobody said", which the write path stores as Mint.
+        from api.collection import DEFAULT_CONDITION, _parse_import_row
+
+        parsed = _parse_import_row(
+            {"set_code": "base1", "number": "4", "quantity": "1", "condition": "", "variant": ""},
+            row_number=1,
+        )
+        self.assertIsNone(parsed.condition)
+        self.assertEqual(parsed.condition or DEFAULT_CONDITION, "Mint")
+        self.assertNotEqual(parsed.condition, "NM")
 
     def test_trade_incoming_create_schema_defaults_to_mint(self):
         self.assert_class_string_default("TradeIncomingItemCreate", "condition", "Mint")

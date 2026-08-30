@@ -121,6 +121,8 @@ def _add_collection_copy(
             # Never merge into a row somebody has confirmed. Doing so would
             # extend their statement about condition and variant to a copy
             # nobody has looked at, which is the whole problem this avoids.
+            # Rows predating the flag are still joined, and stay unknown: they
+            # were unknown before this copy arrived and remain so.
             CollectionItem.attributes_confirmed.isnot(True),
         )
         .with_for_update()
@@ -128,9 +130,8 @@ def _add_collection_copy(
     )
     if existing:
         existing.quantity += 1
-        # The row now definitely contains a copy nobody assessed, even if it
-        # previously predated this flag.
-        existing.attributes_confirmed = False
+        # The flag is left exactly as it was. Relabelling an unknown row as
+        # automatic would claim to know how its earlier copies got there.
         return
     db.add(CollectionItem(
         card_id=card.id,
