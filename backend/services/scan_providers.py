@@ -30,7 +30,8 @@ import httpx
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from models import UserSetting
+from models import Setting, UserSetting
+from services.digital_sets import setting_truthy
 # Fork-local: upstream has no installation-wide key sharing. Kept in its own
 # module so the rest of this file stays identical to the branch offered upstream.
 from services.scanner_key_sharing import installation_provider, shared_env_key
@@ -44,6 +45,7 @@ PROVIDERS = (GEMINI, OPENAI)
 SCANNER_PROVIDER_SETTING = "scanner_provider"
 VISUAL_VERIFICATION_SETTING = "scanner_visual_verification"
 SCANNER_MODEL_SETTING = "scanner_model"
+SCANNER_HIGH_RESOLUTION_SETTING = "scanner_high_resolution"
 
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 # Measured against gpt-4o-mini on real card scans: same name and number
@@ -162,6 +164,12 @@ def visual_verification_enabled(db: Session, user_id: int | None, provider: str)
     return visual_verification_default(provider)
 
 
+def high_resolution_samples_enabled(db: Session) -> bool:
+    """Whether new scanner uploads and requests use the installation-wide high limits."""
+    row = db.query(Setting).filter(Setting.key == SCANNER_HIGH_RESOLUTION_SETTING).first()
+    return setting_truthy(row.value if row else "false")
+
+
 class ProviderRateLimitError(HTTPException):
     """A 429 carrying the retry metadata scan_queue reads off the exception.
 
@@ -241,6 +249,14 @@ def _openai_content(parts: list[dict]) -> list[dict]:
     Neutral part shapes, shared with the Gemini serialiser:
         {"text": "..."}
         {"image": {"mime_type": "image/jpeg", "data": "<base64>"}}
+
+    Deliberately sends NO ``detail`` key, at either resolution setting.
+    OpenAI documents an omitted key as ``auto``, which for the GPT-5.6 family
+    means ``original`` and preserves what we send. ``detail: "high"`` is the
+    opposite of what its name suggests here: it is capped at 2048 px and 2,500
+    patches, so asking for it would shrink the larger image the setting exists
+    to send, and the high-resolution mode would quietly deliver FEWER
+    effective pixels than the low one.
     """
     content = []
     for part in parts:
@@ -511,7 +527,9 @@ class ScanProvider:
             api_key,
             {
                 "model": self.model(),
-                "messages": [{"role": "user", "content": _openai_content(parts)}],
+                "messages": [{"role": "user", "content": _openai_content(
+                    parts
+                )}],
             },
             max_attempts=max_attempts,
         )
@@ -529,4 +547,6 @@ class ScanProvider:
 
 def get_provider(db: Session, user_id: int | None) -> ScanProvider:
     name = resolve_provider_name(db, user_id)
+    # The resolution setting deliberately does not reach the provider: it
+    # changes the SIZE of the image we send, not how we ask for it to be read.
     return ScanProvider(name, resolve_model(db, user_id, name))

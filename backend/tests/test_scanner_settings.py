@@ -244,6 +244,16 @@ class SettingScopeTests(unittest.TestCase):
         self.assertIn(SCANNER_PROVIDER_SETTING, PER_USER_KEYS)
         self.assertNotIn(SCANNER_PROVIDER_SETTING, ADMIN_ONLY_KEYS)
 
+    def test_high_resolution_samples_are_an_admin_boolean_with_an_off_default(self):
+        from api.settings import ADMIN_ONLY_KEYS, DEFAULT_SETTINGS, PER_USER_KEYS, _coerce_setting_value
+        from services.scan_providers import SCANNER_HIGH_RESOLUTION_SETTING
+
+        self.assertIn(SCANNER_HIGH_RESOLUTION_SETTING, ADMIN_ONLY_KEYS)
+        self.assertNotIn(SCANNER_HIGH_RESOLUTION_SETTING, PER_USER_KEYS)
+        self.assertEqual(DEFAULT_SETTINGS[SCANNER_HIGH_RESOLUTION_SETTING], "false")
+        self.assertEqual(_coerce_setting_value(SCANNER_HIGH_RESOLUTION_SETTING, "yes"), "true")
+        self.assertEqual(_coerce_setting_value(SCANNER_HIGH_RESOLUTION_SETTING, "anything else"), "false")
+
 
 @skip_without_deps
 class ExportCurrencyTests(unittest.TestCase):

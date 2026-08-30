@@ -30,8 +30,13 @@ MAX_FILES_PER_JOB = 50
 MAX_FILE_BYTES = 15 * 1024 * 1024
 MAX_JOB_BYTES = 200 * 1024 * 1024
 MAX_IMAGE_PIXELS = 50_000_000
-MAX_IMAGE_EDGE = 2048
-JPEG_QUALITY = 90
+LOW_RESOLUTION_MAX_IMAGE_EDGE = 2048
+HIGH_RESOLUTION_MAX_IMAGE_EDGE = 4096
+LOW_RESOLUTION_JPEG_QUALITY = 90
+HIGH_RESOLUTION_JPEG_QUALITY = 92
+# Kept as aliases for callers and tests that need the shipped default limits.
+MAX_IMAGE_EDGE = LOW_RESOLUTION_MAX_IMAGE_EDGE
+JPEG_QUALITY = LOW_RESOLUTION_JPEG_QUALITY
 SCAN_RETENTION_DAYS = 14
 ALLOWED_IMAGE_FORMATS = frozenset({"JPEG", "PNG", "WEBP", "HEIF", "HEIC"})
 
@@ -100,7 +105,7 @@ async def read_limited_upload(upload, *, remaining_job_bytes: int) -> bytes:
     return b"".join(chunks)
 
 
-def sanitize_image_bytes(raw: bytes) -> SanitizedScanImage:
+def sanitize_image_bytes(raw: bytes, *, high_resolution: bool = False) -> SanitizedScanImage:
     """Decode, verify, orient, resize, and metadata-strip a scan photo."""
     if not raw:
         raise ScanUploadError("An uploaded scan photo is empty.")
@@ -130,12 +135,20 @@ def sanitize_image_bytes(raw: bytes) -> SanitizedScanImage:
                     oriented = rgb
                 else:
                     oriented = oriented.convert("RGB")
-                oriented.thumbnail((MAX_IMAGE_EDGE, MAX_IMAGE_EDGE), Image.Resampling.LANCZOS)
+                max_edge = (
+                    HIGH_RESOLUTION_MAX_IMAGE_EDGE
+                    if high_resolution else LOW_RESOLUTION_MAX_IMAGE_EDGE
+                )
+                jpeg_quality = (
+                    HIGH_RESOLUTION_JPEG_QUALITY
+                    if high_resolution else LOW_RESOLUTION_JPEG_QUALITY
+                )
+                oriented.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
                 output = io.BytesIO()
                 oriented.save(
                     output,
                     format="JPEG",
-                    quality=JPEG_QUALITY,
+                    quality=jpeg_quality,
                     optimize=True,
                     progressive=True,
                 )
@@ -267,16 +280,36 @@ async def create_scan_job(
         {"user_id": user_id},
     )
 
-    raw_total = 0
+    from services.scan_providers import high_resolution_samples_enabled
+
+    high_resolution = high_resolution_samples_enabled(db)
+    # Budget what is STORED, not what was uploaded. Sanitising re-encodes, and
+    # the result can be far larger than its input: a compact 4096 px PNG of
+    # noise arrives at about 1 MB and leaves as about 14 MB of JPEG. Charging
+    # the upload let fifty such files pass a 200 MB job limit while writing
+    # nearly 700 MB to disk.
+    stored_total = 0
     try:
         for position, upload in enumerate(uploads):
+            # Bound the READ by the raw ceiling only. Charging the upload
+            # against the remaining STORED budget mixed the two: with 10 MB of
+            # stored budget left, a 15 MB photograph that sanitises down to
+            # 2 MB was refused before anything looked at it. Per-photo size is
+            # still capped by MAX_FILE_BYTES inside the reader, and the real
+            # job budget is enforced below on what actually lands on disk.
             raw = await read_limited_upload(
                 upload,
-                remaining_job_bytes=MAX_JOB_BYTES - raw_total,
+                remaining_job_bytes=MAX_FILE_BYTES,
             )
-            raw_total += len(raw)
-            sanitized = sanitize_image_bytes(raw)
+            sanitized = sanitize_image_bytes(raw, high_resolution=high_resolution)
             relative_path, byte_size = store_sanitized_image(job.id, sanitized)
+            stored_total += byte_size
+            if stored_total > MAX_JOB_BYTES:
+                delete_scan_image(relative_path)
+                raise ScanJobBytesExceeded(
+                    "These photos are too large to scan in one job. "
+                    "Please split them across more than one scan."
+                )
             db.add(
                 ScanJobItem(
                     job_id=job.id,

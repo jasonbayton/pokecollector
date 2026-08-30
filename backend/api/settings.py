@@ -35,6 +35,7 @@ from services.scan_trace import (
 from services.scan_providers import (
     PROVIDERS,
     SCANNER_MODEL_SETTING,
+    SCANNER_HIGH_RESOLUTION_SETTING,
     ScanProvider,
     resolve_provider_name,
     visual_verification_default,
@@ -87,6 +88,7 @@ ADMIN_ONLY_KEYS = {
     "cross_language_price_fallback", "cross_language_image_fallback",
     DIGITAL_SETS_SETTING_KEY,
     PUBLIC_PROFILES_SETTING_KEY,
+    SCANNER_HIGH_RESOLUTION_SETTING,
 }
 
 # Settings that can be supplied by the service environment when the user has
@@ -153,6 +155,7 @@ DEFAULT_SETTINGS = {
     # Existing installations have no stored provider, and this keeps them on
     # Gemini exactly as before.
     SCANNER_PROVIDER_SETTING: "gemini",
+    SCANNER_HIGH_RESOLUTION_SETTING: "false",
     PHOTO_PREFERENCE_SETTING_KEY: "false",
 }
 
@@ -173,6 +176,7 @@ def _coerce_setting_value(key: str, value) -> str:
         PUBLIC_PROFILES_SETTING_KEY, SCAN_DIAGNOSTICS_SETTING_KEY,
         "share_collection",
         PHOTO_PREFERENCE_SETTING_KEY,
+        SCANNER_HIGH_RESOLUTION_SETTING,
     }:
         return "true" if str(value).lower() in {"true", "1", "yes", "on"} else "false"
     if key == SCANNER_PROVIDER_SETTING:

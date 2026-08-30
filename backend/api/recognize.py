@@ -28,6 +28,7 @@ from services.scan_providers import (
     get_provider,
     image_part,
     image_part_from_bytes,
+    high_resolution_samples_enabled,
     text_part,
     visual_verification_enabled,
 )
@@ -1725,7 +1726,10 @@ async def recognize_card(
 ):
     try:
         raw_image = await read_limited_upload(file, remaining_job_bytes=MAX_FILE_BYTES)
-        sanitized = sanitize_image_bytes(raw_image)
+        sanitized = sanitize_image_bytes(
+            raw_image,
+            high_resolution=high_resolution_samples_enabled(db),
+        )
     except ScanUploadError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

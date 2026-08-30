@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass
 
 from fastapi import HTTPException
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from models import ScanJob, ScanJobItem, ScanQueueUserState, User
@@ -469,7 +469,7 @@ async def default_composite_processor(
         match_composite_card_info,
         recognize_composite_card_info,
     )
-    from services.scan_providers import get_provider
+    from services.scan_providers import get_provider, high_resolution_samples_enabled
     from services.card_composite import build_composite
     from services.scan_trace import create_scan_trace
 
@@ -506,7 +506,7 @@ async def default_composite_processor(
             try:
                 recognized_by_position = await recognize_composite_card_info(
                     api_key,
-                    build_composite(images),
+                    build_composite(images, high_resolution=high_resolution_samples_enabled(db)),
                     len(images),
                     traces=traces,
                     provider=provider,
@@ -804,11 +804,44 @@ def replace_scan_item_photo(db: Session, item: ScanJobItem, raw_image: bytes) ->
     file its old candidate and resolve it, so the preconditions are taken again
     here under a row lock before anything is written.
     """
-    sanitized = sanitize_image_bytes(raw_image)
+    from services.scan_providers import high_resolution_samples_enabled
+
+    from services.scan_storage import MAX_JOB_BYTES, ScanJobBytesExceeded
+
+    sanitized = sanitize_image_bytes(
+        raw_image,
+        high_resolution=high_resolution_samples_enabled(db),
+    )
     new_path, byte_size = store_sanitized_image(item.job.id, sanitized)
     now = datetime.datetime.utcnow()
 
     try:
+        # The endpoint bounded the UPLOAD, but re-encoding can produce far more
+        # than arrived, so a job could be pushed past its disk budget one
+        # re-take at a time. The size is not known until it is stored, so the
+        # check happens here rather than on arrival.
+        #
+        # Serialised on the JOB row, not the item. Two re-takes of DIFFERENT
+        # items would otherwise each read a total that did not include the
+        # other, both conclude they fitted, and commit a job over the limit:
+        # two 10 MB photos becoming 15 MB in a 195 MB job each see 185 + 15,
+        # while the committed result is 205.
+        db.query(ScanJob).filter(ScanJob.id == item.job.id).with_for_update().first()
+        # Only photos still on disk. byte_size survives resolution, but the
+        # file does not, so counting a released photo would charge a job for
+        # storage it is no longer using.
+        others = db.query(func.coalesce(func.sum(ScanJobItem.byte_size), 0)).filter(
+            ScanJobItem.job_id == item.job.id,
+            ScanJobItem.id != item.id,
+            ScanJobItem.image_path.isnot(None),
+        ).scalar() or 0
+        if others + byte_size > MAX_JOB_BYTES:
+            delete_scan_image(new_path)
+            raise ScanJobBytesExceeded(
+                "This photo would take the scan job over its size limit. "
+                "Please remove some photos, or scan it in a job of its own."
+            )
+
         locked = (
             db.query(ScanJobItem)
             .filter(ScanJobItem.id == item.id)

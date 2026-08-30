@@ -44,6 +44,7 @@ const DEFAULT_SETTINGS = {
   set_overview_filters: '{}',
   hidden_set_ids: '[]',
   debug_mode: 'false',
+  scanner_high_resolution: 'false',
   public_profiles_enabled: 'false',
   prefer_own_card_photos: 'false',
 }

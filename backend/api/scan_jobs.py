@@ -28,6 +28,7 @@ from services.scan_bulk_add import (
     candidate_ids_to_prepare,
 )
 from services.scan_storage import (
+    MAX_FILE_BYTES,
     MAX_JOB_BYTES,
     ScanItemNoLongerReviewable,
     ScanJobBytesExceeded,
@@ -387,7 +388,12 @@ async def replace_scan_job_item_photo(
         for candidate in item.job.items
         if candidate.image_path
     )
-    remaining_bytes = MAX_JOB_BYTES - (current_bytes - int(item.byte_size or 0))
+    # Bound the READ by the per-photo ceiling only. Charging a re-take's raw
+    # upload against the remaining STORED budget refused a 15 MB photograph
+    # that sanitises to 2 MB and would have fitted, and photographs usually do
+    # get smaller. replace_scan_item_photo enforces the job limit on what
+    # actually lands on disk, which is the only place the real cost is known.
+    remaining_bytes = MAX_FILE_BYTES
     try:
         raw_image = await read_limited_upload(files[0], remaining_job_bytes=remaining_bytes)
     except ScanJobBytesExceeded as exc:
@@ -401,6 +407,11 @@ async def replace_scan_job_item_photo(
         # Another review action claimed the row while the upload was being
         # sanitised. Same status as the guard above, because from the user's
         # side it is the same refusal.
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ScanJobBytesExceeded as exc:
+        # Must precede ScanUploadError, which it subclasses. The job being too
+        # large is a 409 wherever it is detected, and only the post-store check
+        # can detect it when re-encoding is what pushed it over.
         raise HTTPException(status_code=409, detail=str(exc))
     except ScanUploadError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
