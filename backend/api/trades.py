@@ -7,7 +7,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from api.auth import get_current_user
-from api.collection import _row_to_merge_into, ensure_card_exists
+from api.collection import ensure_card_exists
 from database import get_db
 from models import Card, CollectionItem, ProductCard, ProductLedgerEntry, ProductPurchase, Trade, TradeItem, User
 from schemas import TradeCreate, TradeResponse, TradeUpdate, TradeValuationRequest
@@ -128,20 +128,14 @@ def _merge_or_create_collection_item(
     lang: str,
     purchase_price,
 ) -> CollectionItem:
-    # A trade states both halves: the incoming form has condition and variant
-    # selects, so the person recording it chose them.
-    existing = _row_to_merge_into(
-        db,
-        (
-            CollectionItem.card_id == card.id,
-            CollectionItem.variant == variant,
-            CollectionItem.lang == lang,
-            CollectionItem.condition == condition,
-            CollectionItem.purchase_price == purchase_price,
-            CollectionItem.user_id == current_user.id,
-        ),
-        stated=True,
-    )
+    existing = db.query(CollectionItem).filter(
+        CollectionItem.card_id == card.id,
+        CollectionItem.variant == variant,
+        CollectionItem.lang == lang,
+        CollectionItem.condition == condition,
+        CollectionItem.purchase_price == purchase_price,
+        CollectionItem.user_id == current_user.id,
+    ).first()
 
     if existing:
         existing.quantity += quantity
@@ -341,10 +335,6 @@ def _merge_locked_collection_item(
         lang=lang,
         purchase_price=purchase_price,
     )
-    # A trade states both halves, so it must not be filed into a row of copies
-    # nobody assessed - that would relabel them. Rows predating the flag are
-    # still acceptable: nothing there is awaiting review.
-    matches = [item for item in matches if item.attributes_confirmed is not False]
     if matches:
         matches[0].quantity = int(matches[0].quantity or 0) + quantity
         return matches[0]

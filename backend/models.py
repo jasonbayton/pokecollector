@@ -172,8 +172,13 @@ class CollectionItem(Base):
     lang = Column(String, default="en")  # fixed TCGdex card language
     added_at = Column(DateTime, default=func.now())
     grade = Column(String, default="raw")
-    # Whether anybody has confirmed this row's condition and variant, or
-    # whether they are still the defaults nobody assessed.
+    # Whether every copy in this row has had its condition and variant stated.
+    #
+    # A property of the row's contents, not of how the row was made. False
+    # means at least one copy in here was filed on defaults nobody chose, so
+    # the row wants checking. That is expressible by a single flag on a bundle
+    # of copies, whereas "which copy was guessed" is not - the row has one
+    # condition and one variant for all of them.
     #
     # A confident scan establishes WHICH CARD this is. It says nothing about
     # what condition the copy is in, and nothing about whether this particular

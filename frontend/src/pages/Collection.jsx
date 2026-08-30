@@ -1158,7 +1158,8 @@ export default function Collection() {
   const resetFilters = () => {
     setFilterRarity(''); setFilterCondition(''); setFilterVariant('')
     setFilterSet(''); setFilterType(''); setFilterCategories([]); setFilterSubtypes([]); setFilterLegality(''); setFilterLang(''); setFilterMinPrice('')
-    setFilterMaxPrice(''); setFilterDuplicates(false); setSearchText('')
+    setFilterMaxPrice(''); setFilterDuplicates(false)
+    setFilterUnconfirmed(false); setSearchText('')
   }
 
   if (isLoading) {

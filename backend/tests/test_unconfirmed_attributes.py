@@ -66,7 +66,7 @@ class UnconfirmedAttributeTests(unittest.TestCase):
         self.assertEqual(row.condition, DEFAULT_CONDITION)
         self.assertIs(row.attributes_confirmed, False)
 
-    def test_a_second_automatic_copy_joins_the_unconfirmed_row(self):
+    def test_a_second_automatic_copy_joins_it(self):
         for _ in range(2):
             _add_collection_copy(self.db, card=self.card, current_user=self.user)
         self.db.commit()
@@ -75,31 +75,58 @@ class UnconfirmedAttributeTests(unittest.TestCase):
         self.assertEqual(rows[0].quantity, 2)
         self.assertIs(rows[0].attributes_confirmed, False)
 
-    def test_an_automatic_add_never_joins_a_row_somebody_confirmed(self):
-        # The case that matters. Merging here would silently extend the
-        # owner's statement about condition and variant to a copy nobody has
-        # looked at.
-        stated = CollectionItem(
-            card_id=self.card.id,
-            quantity=1,
-            condition=DEFAULT_CONDITION,
-            variant="Normal",
-            purchase_price=None,
-            lang="en",
-            user_id=self.user.id,
-            attributes_confirmed=True,
+    def _seed_row(self, confirmed):
+        from models import CollectionItem as CI
+        row = CI(
+            card_id=self.card.id, quantity=1, condition=DEFAULT_CONDITION,
+            variant="Normal", purchase_price=None, lang="en",
+            user_id=self.user.id, attributes_confirmed=confirmed,
         )
-        self.db.add(stated)
+        self.db.add(row)
         self.db.commit()
+        return row
+
+    def test_an_unassessed_copy_taints_whatever_row_it_joins(self):
+        # The flag describes the row's contents, so a row that gains a copy
+        # nobody assessed wants checking - whether it was previously settled or
+        # merely unknown. Merging rather than splitting matters: every existing
+        # collection is entirely unknown rows, and splitting them would grow a
+        # second row per card while hiding nothing that this does not surface.
+        for previous in (True, None):
+            with self.subTest(previous=previous):
+                self.setUp()
+                row = self._seed_row(previous)
+                _add_collection_copy(self.db, card=self.card, current_user=self.user)
+                self.db.commit()
+
+                rows = self._rows()
+                self.assertEqual(len(rows), 1, "it should merge, not split")
+                self.assertEqual(rows[0].quantity, 2)
+                self.assertIs(
+                    rows[0].attributes_confirmed, False,
+                    "the row now holds a copy nobody assessed, so it needs checking",
+                )
+
+    def test_a_stated_copy_does_not_clear_an_existing_taint(self):
+        # One stated copy arriving says nothing about the copies already there.
+        from api.collection import _add_collection_item
+        from schemas import CollectionItemCreate
 
         _add_collection_copy(self.db, card=self.card, current_user=self.user)
         self.db.commit()
 
+        _add_collection_item(
+            self.db, self.user,
+            CollectionItemCreate(
+                card_id=self.card.id, quantity=1,
+                condition=DEFAULT_CONDITION, variant="Normal",
+            ),
+            commit=True,
+        )
         rows = self._rows()
-        self.assertEqual(len(rows), 2, "the confirmed row should not have absorbed it")
-        self.assertEqual(rows[0].quantity, 1)
-        self.assertIs(rows[0].attributes_confirmed, True)
-        self.assertIs(rows[1].attributes_confirmed, False)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].quantity, 2)
+        self.assertIs(rows[0].attributes_confirmed, False)
 
     def test_stating_only_a_condition_does_not_count_as_assessed(self):
         # The wishlist "I have this now" path sends a condition and no variant.
@@ -113,110 +140,9 @@ class UnconfirmedAttributeTests(unittest.TestCase):
         self.assertFalse(_attributes_stated(CollectionItemCreate(card_id="x")))
         self.assertTrue(_attributes_stated(CollectionItemCreate(card_id="x", condition="NM", variant="Holo")))
 
-    def test_a_stated_copy_does_not_join_a_row_of_unassessed_copies(self):
-        # The row is a bundle. One stated copy arriving says nothing about the
-        # copies already in it, and marking the whole row confirmed hid a
-        # possibly misvalued variant from review.
-        from api.collection import _row_to_merge_into
-        from models import CollectionItem as CI
-
-        _add_collection_copy(self.db, card=self.card, current_user=self.user)
-        self.db.commit()
-        self.assertIs(self._rows()[0].attributes_confirmed, False)
-
-        joined = _row_to_merge_into(
-            self.db,
-            (
-                CI.card_id == self.card.id,
-                CI.variant == "Normal",
-                CI.lang == "en",
-                CI.condition == DEFAULT_CONDITION,
-                CI.user_id == self.user.id,
-            ),
-            stated=True,
-        )
-        self.assertIsNone(joined)
-
-    def test_an_unassessed_copy_does_not_join_a_stated_row(self):
-        from api.collection import _row_to_merge_into
-        from models import CollectionItem as CI
-
-        self.db.add(CI(
-            card_id=self.card.id, quantity=1, condition=DEFAULT_CONDITION,
-            variant="Normal", lang="en", user_id=self.user.id,
-            attributes_confirmed=True,
-        ))
-        self.db.commit()
-        joined = _row_to_merge_into(
-            self.db,
-            (
-                CI.card_id == self.card.id,
-                CI.variant == "Normal",
-                CI.lang == "en",
-                CI.condition == DEFAULT_CONDITION,
-                CI.user_id == self.user.id,
-            ),
-            stated=False,
-        )
-        self.assertIsNone(joined)
-
-    def test_a_row_predating_the_flag_takes_stated_copies_but_not_unassessed_ones(self):
-        # Review caught the hole this closes: an unassessed copy merged into an
-        # unknown row would never show up in review, because such a row stays
-        # unknown - so on any collection that predates the flag, which is every
-        # existing one, the misvalued variant would go on being invisible.
-        from api.collection import _row_to_merge_into
-        from models import CollectionItem as CI
-
-        self.db.add(CI(
-            card_id=self.card.id, quantity=1, condition=DEFAULT_CONDITION,
-            variant="Normal", lang="en", user_id=self.user.id,
-            attributes_confirmed=None,
-        ))
-        self.db.commit()
-        filters = (
-            CI.card_id == self.card.id,
-            CI.variant == "Normal",
-            CI.lang == "en",
-            CI.condition == DEFAULT_CONDITION,
-            CI.user_id == self.user.id,
-        )
-        self.assertIsNotNone(
-            _row_to_merge_into(self.db, filters, stated=True),
-            "a stated copy may join it: nothing there is awaiting review",
-        )
-        self.assertIsNone(
-            _row_to_merge_into(self.db, filters, stated=False),
-            "an unassessed copy must get its own row so it stays reviewable",
-        )
-
-    def test_an_automatic_copy_does_not_disappear_into_a_legacy_row(self):
-        # The same rule through the real automatic path, on the shape every
-        # existing collection has: rows that predate the flag.
-        from models import CollectionItem as CI
-
-        self.db.add(CI(
-            card_id=self.card.id, quantity=3, condition=DEFAULT_CONDITION,
-            variant="Normal", lang="en", user_id=self.user.id,
-            attributes_confirmed=None,
-        ))
-        self.db.commit()
-
-        _add_collection_copy(self.db, card=self.card, current_user=self.user)
-        self.db.commit()
-
-        rows = self._rows()
-        self.assertEqual(len(rows), 2, "the unassessed copy needs its own row")
-        self.assertIsNone(rows[0].attributes_confirmed)
-        self.assertEqual(rows[0].quantity, 3, "the legacy row is untouched")
-        self.assertIs(rows[1].attributes_confirmed, False)
-        self.assertEqual(rows[1].quantity, 1)
-
-    def test_an_unstated_condition_is_written_as_mint_by_the_write_path(self):
-        # Review rightly called the first version of this weak: it recomputed
-        # "condition or DEFAULT_CONDITION" inside the test, so it would have
-        # passed even if the write path stopped applying the default. This
-        # goes through the real add and reads the row back.
+    def test_an_unstated_add_is_written_as_mint_and_needs_checking(self):
+        # Through the real add path, reading the row back, so it would fail if
+        # the write path stopped storing what it claims to store.
         from api.collection import _add_collection_item
         from schemas import CollectionItemCreate
 
@@ -228,10 +154,7 @@ class UnconfirmedAttributeTests(unittest.TestCase):
         row = self._rows()[0]
         self.assertEqual(row.condition, "Mint")
         self.assertEqual(row.variant, "Normal")
-        self.assertIs(
-            row.attributes_confirmed, False,
-            "nobody chose either value, so the row must say so",
-        )
+        self.assertIs(row.attributes_confirmed, False)
 
     def test_a_fully_stated_add_is_written_as_confirmed(self):
         from api.collection import _add_collection_item
@@ -239,7 +162,10 @@ class UnconfirmedAttributeTests(unittest.TestCase):
 
         _add_collection_item(
             self.db, self.user,
-            CollectionItemCreate(card_id=self.card.id, quantity=1, condition="NM", variant="Reverse Holo"),
+            CollectionItemCreate(
+                card_id=self.card.id, quantity=1,
+                condition="NM", variant="Reverse Holo",
+            ),
             commit=True,
         )
         row = self._rows()[0]
@@ -254,7 +180,6 @@ class UnconfirmedAttributeTests(unittest.TestCase):
         _add_collection_copy(self.db, card=self.card, current_user=self.user)
         self.db.commit()
         row = self._rows()[0]
-        self.assertIs(row.attributes_confirmed, False)
 
         update_collection_item(
             row.id,
@@ -266,9 +191,8 @@ class UnconfirmedAttributeTests(unittest.TestCase):
         self.assertIs(row.attributes_confirmed, True)
 
     def test_editing_with_explicit_nulls_settles_nothing(self):
-        # exclude_unset keeps a field the caller explicitly sent as null, and
-        # both are nullable in the update schema, so presence is not a
-        # statement. Review found this reachable.
+        # exclude_unset keeps a field explicitly sent as null, and both are
+        # nullable in the update schema, so presence is not a statement.
         from api.collection import update_collection_item
         from schemas import CollectionItemUpdate
 
@@ -283,25 +207,13 @@ class UnconfirmedAttributeTests(unittest.TestCase):
             db=self.db,
         )
         self.db.refresh(row)
-        self.assertIs(
-            row.attributes_confirmed, False,
-            "sending nulls states nothing, so the row still needs checking",
-        )
+        self.assertIs(row.attributes_confirmed, False)
 
     def test_rows_predating_the_flag_are_left_unknown_rather_than_guessed(self):
-        legacy = CollectionItem(
-            card_id=self.card.id,
-            quantity=1,
-            condition="NM",
-            variant="Holo",
-            lang="en",
-            user_id=self.user.id,
-        )
-        self.db.add(legacy)
-        self.db.commit()
-        self.db.refresh(legacy)
+        row = self._seed_row(None)
+        self.db.refresh(row)
         self.assertIsNone(
-            legacy.attributes_confirmed,
+            row.attributes_confirmed,
             "an untouched row must not claim to have been assessed or not",
         )
 

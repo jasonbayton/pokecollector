@@ -118,19 +118,14 @@ def _add_collection_copy(
             CollectionItem.condition == DEFAULT_CONDITION,
             CollectionItem.purchase_price.is_(None),
             CollectionItem.user_id == current_user.id,
-            # Only ever joins other unassessed copies. Merging into a row
-            # somebody confirmed would extend their statement to a copy nobody
-            # looked at; merging into a row that predates the flag would hide
-            # this copy from review for ever, since such a row stays unknown.
-            CollectionItem.attributes_confirmed.is_(False),
         )
         .with_for_update()
         .first()
     )
     if existing:
         existing.quantity += 1
-        # The flag is left exactly as it was. Relabelling an unknown row as
-        # automatic would claim to know how its earlier copies got there.
+        # Whatever the row was, it now contains a copy nobody assessed.
+        existing.attributes_confirmed = False
         return
     db.add(CollectionItem(
         card_id=card.id,

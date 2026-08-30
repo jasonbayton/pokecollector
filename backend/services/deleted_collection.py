@@ -73,10 +73,6 @@ def restore_entry(db: Session, entry: DeletedCollectionItem) -> tuple[Collection
             CollectionItem.condition == entry.condition,
             CollectionItem.lang == entry.lang,
             CollectionItem.purchase_price == entry.purchase_price,
-            # Restoring must not merge a confirmed row into an unassessed one
-            # or the reverse: the flag describes a whole row, so mixing them
-            # would misrepresent one side.
-            CollectionItem.attributes_confirmed.is_(entry.attributes_confirmed),
         )
         # Locked: without this a concurrent edit could change the row's
         # condition, variant, language or price between the match and the
@@ -86,10 +82,16 @@ def restore_entry(db: Session, entry: DeletedCollectionItem) -> tuple[Collection
     )
 
     if match:
+        values = {"quantity": CollectionItem.quantity + int(entry.quantity)}
+        # Restoring copies that were never assessed taints the row they join,
+        # exactly as adding them the first time did. Restoring assessed ones
+        # cannot clear a taint the row already carries.
+        if entry.attributes_confirmed is False:
+            values["attributes_confirmed"] = False
         db.execute(
             update(CollectionItem)
             .where(CollectionItem.id == match.id)
-            .values(quantity=CollectionItem.quantity + int(entry.quantity))
+            .values(**values)
         )
         db.refresh(match)
         return match, "merged"

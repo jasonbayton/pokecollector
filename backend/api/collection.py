@@ -54,36 +54,6 @@ def _attributes_stated(item) -> bool:
     return getattr(item, "condition", None) is not None and getattr(item, "variant", None) is not None
 
 
-def _row_to_merge_into(db, base_filters, *, stated: bool):
-    """An existing row this add may join without misrepresenting either.
-
-    Rows are never mixed. The flag describes a whole row, so a row holding both
-    stated and unassessed copies could only lie about one of them. A stated
-    copy therefore joins stated rows, and an unassessed copy joins unassessed
-    rows.
-
-    Rows predating the flag accept stated copies, because nothing in such a row
-    is awaiting review and merging keeps existing collections behaving as they
-    always did. They do NOT accept unassessed ones. A row of unknown copies
-    stays unknown, so an unassessed copy hidden inside it would never appear in
-    review, and the misvalued-variant defect this exists to catch would survive
-    on precisely the collections that predate the fix. An unassessed copy
-    therefore gets its own row, which is also the only honest representation:
-    the row is a bundle with one flag, and it cannot say "three unknown and one
-    unassessed".
-    """
-    states = (stated, None) if stated else (False,)
-    for state in states:
-        row = (
-            db.query(CollectionItem)
-            .filter(*base_filters, CollectionItem.attributes_confirmed.is_(state))
-            .first()
-        )
-        if row is not None:
-            return row
-    return None
-
-
 def _normalize_collection_variant(variant: Optional[str]) -> str:
     return normalize_collection_variant(variant)
 
@@ -325,24 +295,22 @@ def _add_collection_item(db: Session, current_user: User, item: CollectionItemCr
 
     stated = _attributes_stated(item)
     item_condition = item.condition or DEFAULT_CONDITION
-    existing = _row_to_merge_into(
-        db,
-        (
-            CollectionItem.card_id == effective_card_id,
-            CollectionItem.variant == item_variant,
-            CollectionItem.lang == item_lang,
-            CollectionItem.condition == item_condition,
-            CollectionItem.purchase_price == item.purchase_price,
-            CollectionItem.user_id == current_user.id,
-        ),
-        stated=stated,
-    )
+    existing = db.query(CollectionItem).filter(
+        CollectionItem.card_id == effective_card_id,
+        CollectionItem.variant == item_variant,
+        CollectionItem.lang == item_lang,
+        CollectionItem.condition == item_condition,
+        CollectionItem.purchase_price == item.purchase_price,
+        CollectionItem.user_id == current_user.id,
+    ).first()
 
     if existing:
         existing.quantity += item.quantity or 1
-        # The flag is not restated here. Merging must not relabel copies that
-        # were already in the row: one stated copy joining a row of unassessed
-        # ones does not mean anybody looked at those.
+        if not stated:
+            # The row now holds a copy nobody assessed, whatever it held
+            # before. A stated copy arriving says nothing about the rest, so
+            # it never clears the flag.
+            existing.attributes_confirmed = False
         if commit:
             db.commit()
         return "updated"
@@ -605,21 +573,19 @@ def add_to_collection(
     # Find existing entry for same card + variant + lang + condition + purchase_price combination
     stated = _attributes_stated(item)
     item_condition = item.condition or DEFAULT_CONDITION
-    existing = _row_to_merge_into(
-        db,
-        (
-            CollectionItem.card_id == effective_card_id,
-            CollectionItem.variant == item_variant,
-            CollectionItem.lang == item_lang,
-            CollectionItem.condition == item_condition,
-            CollectionItem.purchase_price == item.purchase_price,
-            CollectionItem.user_id == current_user.id,
-        ),
-        stated=stated,
-    )
+    existing = db.query(CollectionItem).filter(
+        CollectionItem.card_id == effective_card_id,
+        CollectionItem.variant == item_variant,
+        CollectionItem.lang == item_lang,
+        CollectionItem.condition == item_condition,
+        CollectionItem.purchase_price == item.purchase_price,
+        CollectionItem.user_id == current_user.id,
+    ).first()
 
     if existing:
         existing.quantity += item.quantity or 1
+        if not stated:
+            existing.attributes_confirmed = False
         db.commit()
         db.refresh(existing)
         return _annotate_collection_item(db, current_user, existing)
@@ -681,21 +647,19 @@ def bulk_add_to_collection(
 
             stated = _attributes_stated(item)
             item_condition = item.condition or DEFAULT_CONDITION
-            existing = _row_to_merge_into(
-                db,
-                (
-                    CollectionItem.card_id == effective_card_id,
-                    CollectionItem.variant == item_variant,
-                    CollectionItem.lang == item_lang,
-                    CollectionItem.condition == item_condition,
-                    CollectionItem.purchase_price == item.purchase_price,
-                    CollectionItem.user_id == current_user.id,
-                ),
-                stated=stated,
-            )
+            existing = db.query(CollectionItem).filter(
+                CollectionItem.card_id == effective_card_id,
+                CollectionItem.variant == item_variant,
+                CollectionItem.lang == item_lang,
+                CollectionItem.condition == item_condition,
+                CollectionItem.purchase_price == item.purchase_price,
+                CollectionItem.user_id == current_user.id,
+            ).first()
 
             if existing:
                 existing.quantity += item.quantity or 1
+                if not stated:
+                    existing.attributes_confirmed = False
                 db.commit()
                 updated += 1
             else:
