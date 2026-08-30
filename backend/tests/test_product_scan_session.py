@@ -93,6 +93,52 @@ class ProductScanSessionApiTests(unittest.TestCase):
                 files={"files": ("scan.jpg", _jpeg_bytes(), "image/jpeg")},
             )
 
+    def _open_scan(self, product_id=None, **payload):
+        body = {"condition": "NM", "lang": "de"}
+        body.update(payload)
+        return self.client.post(
+            f"/api/products/{product_id or self.product.id}/open-scan", json=body
+        )
+
+    def test_open_scan_refuses_a_condition_or_language_it_does_not_support(self):
+        # The batch defaults are written to the job and applied to every card
+        # filed from it, so an unchecked value would be stamped across a whole
+        # session rather than one row.
+        self.assertEqual(self._open_scan(condition="Pristine").status_code, 422)
+        self.assertEqual(self._open_scan(lang="kl").status_code, 422)
+        self.assertEqual(
+            self.db.get(ProductPurchase, self.product.id).lifecycle_status,
+            "sealed",
+            "a rejected request still marked the product opened",
+        )
+
+    def test_a_sold_product_cannot_be_opened_for_scanning(self):
+        # A completed whole-product sale is defined by explicit proceeds.
+        self.product.sold_price = 60
+        self.db.commit()
+
+        self.assertEqual(self._open_scan().status_code, 409)
+        self.assertEqual(
+            self.db.get(ProductPurchase, self.product.id).lifecycle_status,
+            "sealed",
+        )
+
+    def test_a_product_sold_after_opening_cannot_take_a_new_scan_job(self):
+        # The sale can land between opening and uploading, so enqueue has to
+        # check it again rather than trust the earlier open-scan call.
+        self.assertEqual(self._open_scan().status_code, 200)
+        self.product.sold_price = 60
+        self.db.commit()
+
+        response = self._enqueue({
+            "product_id": str(self.product.id),
+            "default_condition": "NM",
+            "default_lang": "de",
+        })
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self.db.query(ScanJob).count(), 0)
+
     def test_opening_then_enqueueing_persists_session_fields_and_payload(self):
         opened = self.client.post(
             f"/api/products/{self.product.id}/open-scan",

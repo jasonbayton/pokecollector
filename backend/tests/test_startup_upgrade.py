@@ -395,6 +395,24 @@ class ProductScanSessionMigrationTests(unittest.TestCase):
             ), {"id": job_id}).one()
         self.assertEqual((row[0], row[1], row[2]), ("Mint", "en", None))
 
+    def test_the_upgraded_delete_action_also_keeps_the_scan_job(self):
+        # The sibling test below recreates the schema from the model, so it
+        # exercises the FRESH INSTALL foreign key. Changing only the migration
+        # SQL from SET NULL to CASCADE left it passing. The two paths build the
+        # constraint independently and both have to be checked.
+        database = self._pre_feature_schema()
+        database.init_db()
+
+        job_id, product_id = self._seed_job(with_product=True)
+        with self.engine.begin() as conn:
+            conn.execute(text("DELETE FROM product_purchases WHERE id = :id"), {"id": product_id})
+            survived = conn.execute(text(
+                "SELECT product_id FROM scan_jobs WHERE id = :id"
+            ), {"id": job_id}).one_or_none()
+
+        self.assertIsNotNone(survived, "the migrated schema deleted the job with its product")
+        self.assertIsNone(survived[0], "the migrated schema left a dangling reference")
+
     def test_deleting_a_product_keeps_the_unfinished_scan_job(self):
         # The reason product_id is a real foreign key with SET NULL: an
         # abandoned opening must not take the user's queued review work with

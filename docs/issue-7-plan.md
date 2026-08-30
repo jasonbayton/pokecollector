@@ -137,13 +137,25 @@ flushed `CollectionItem`. It must not commit. Before the locking phase, prepare
 every selected catalogue card in the requested job language. After preparation,
 release the read transaction exactly as the current bulk path does.
 
-For a product-owned job, one filing transaction has this fixed order:
+One filing transaction has this fixed order. It is the same order for an
+ordinary job, which simply skips the product step.
 
-1. Lock `ScanJob` by id and user id. This serialises duplicate submissions of
-   the same job.
-2. Lock its `ProductPurchase` by id and user id. Re-read the job association
-   after this lock and reject the request if the product was deleted or sold
-   while preparation was running.
+0. Read the job's `product_id` WITHOUT holding a lock, purely to learn whether
+   a product is involved.
+1. Lock that `ProductPurchase` by id and user id FIRST, when there is one.
+   Locking the job first would deadlock against product deletion: filing would
+   hold the job and wait for the product, while deletion holds the product and
+   then waits to apply its `SET NULL` to the job.
+2. Lock `ScanJob` by id and user id, which serialises duplicate submissions of
+   the same job, then revalidate the association read in step 0. Reject the
+   request if the product was deleted or sold while preparation was running.
+
+   The request must carry an `expected_product_id` and it must be compared
+   against the locked job. Once a product deletion has committed,
+   `job.product_id` is null and is indistinguishable from a job that was never
+   product-owned, so without that token the common endpoint would silently file
+   the card with no provenance instead of returning the conflict this design
+   promises.
 3. Lock eligible `ScanJobItem` rows by ascending `position`, then revalidate
    their stored suggested candidate and prepared catalogue membership.
 4. Combine candidate copies by the full collection merge identity, sort those
@@ -232,13 +244,16 @@ provenance or relies on retrospective matching.
    and migration/API tests. A product can be opened and a linked job can be
    created, but filing remains the current behaviour until the next slice.
 2. **Atomic filing slice.** Extract the product-link service, implement the
-   common fixed-lock filing path for confident bulk and individual product
-   review, and add real PostgreSQL concurrency and rollback tests. Ship only
+   common fixed-lock filing path for confident bulk and for individual review
+   of EVERY job, product-owned or not, and add real PostgreSQL concurrency and rollback tests. Ship only
    once every successful product-job file creates or extends `ProductCard` in
    the same commit as its collection copy and scan resolution.
 3. **Continuous frontend slice.** Add the product Open and scan entry, batch
-   condition and language prompt, product-aware review Add action, progress
-   context, and product recap navigation. Preserve all ordinary scanner paths.
+   condition and language prompt, the review Add action for every job, progress
+   context, and product recap navigation. Review must initialise its condition
+   and language from the job's batch defaults while still allowing an
+   item-level correction. Preserve all ordinary scanner behaviour other than
+   the move to the atomic endpoint.
 4. **Polish after usage.** Improve recap presentation and translations based on
    real family use. Do not expand database scope before evidence shows that the
    product-level recap is insufficient.
@@ -272,9 +287,11 @@ temporary local mutation before the implementation is accepted.
   but retains job/items; deleting after a filed card is still rejected; expiry
   or discard does not alter existing `ProductCard` history.
 - Frontend tests around `UnifiedCardScanner`, `ScanQueue`, `ScanAddModal`, and
-  `Products`: the product prompt's chosen values reach the API, a product job
-  calls the atomic file endpoint rather than `addToCollection`, a normal job
-  retains current calls, and recap labels do not imply one-job-only history.
+  `Products`: the product prompt's chosen values reach the API, and BOTH a
+  product job and an ordinary job call the atomic file endpoint rather than
+  `addToCollection`. An ordinary job retaining its current calls would preserve
+  the orphan-card bug this endpoint exists to remove. Recap labels must not
+  imply one-job-only history.
 
 Use a unique PostgreSQL schema for each new concurrency test. Do not run tests
 against the live family instance, and do not broaden an existing test's
