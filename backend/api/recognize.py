@@ -492,6 +492,21 @@ async def post_gemini_generate(
     raise HTTPException(status_code=500, detail=f"The Gemini request failed: {last_error}")
 
 
+# A vision model reading a card is not a quick request. The single 30 second
+# budget covered connecting, uploading a base64 image of several megabytes AND
+# waiting for inference, so a busy provider or a large composite exhausted it
+# and surfaced as httpx.RequestError - which the provider layer reports as
+# "The scanner endpoint could not be reached". The endpoint was reachable; it
+# was thinking.
+#
+# Split apart, connect stays short so a genuinely unreachable host still fails
+# fast, while read is generous because that is the part that legitimately
+# takes minutes.
+def recognition_timeout() -> httpx.Timeout:
+    return httpx.Timeout(connect=10.0, read=180.0, write=120.0, pool=10.0)
+
+
+
 RECOGNIZE_PROMPT = """Look at this Pokemon Trading Card Game card image.
 
 IMPORTANT ACCURACY RULES:
@@ -1341,7 +1356,7 @@ async def recognize_sanitized_card(
 
     image_b64 = base64.b64encode(image_bytes).decode()
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=recognition_timeout()) as client:
             response_text, usage = await provider.generate_text(
                 client,
                 api_key,
@@ -1468,7 +1483,7 @@ async def recognize_composite_card_info(
     provider = provider or ScanProvider(GEMINI)
     image_b64 = base64.b64encode(image_bytes).decode()
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=recognition_timeout()) as client:
             response_text, usage = await provider.generate_text(
                 client,
                 api_key,

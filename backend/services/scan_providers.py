@@ -370,6 +370,17 @@ async def post_openai_chat(
             if attempt < max_attempts - 1:
                 await asyncio.sleep(2 ** attempt)
                 continue
+            # A timeout is not unreachability, and saying so sent people to
+            # check a connection that was fine. Separated so the message
+            # matches what actually happened.
+            if isinstance(exc, httpx.TimeoutException):
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "The scanner took too long to answer. It may be busy, "
+                        "or the photo may be large. Please try again."
+                    ),
+                )
             raise HTTPException(
                 status_code=503,
                 detail="The scanner endpoint could not be reached. Check the connection and try again.",
