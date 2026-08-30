@@ -721,15 +721,29 @@ async def drain_scan_queue(
     return processed
 
 
-def resolve_scan_item(db: Session, item: ScanJobItem) -> ScanJobItem:
-    """Mark one review complete and immediately remove its stored photo."""
+def resolve_scan_item(
+    db: Session, item: ScanJobItem, *, keep_image: bool = False
+) -> ScanJobItem:
+    """Mark one review complete, removing its stored photo unless asked not to.
+
+    Photos are deleted on resolution so that reviewing a batch does not leave
+    the disk full of images nobody will look at again.
+
+    A manually identified card is the exception. There the photo is the only
+    record of what the recogniser could not read, and it is the evidence for
+    whether a later change to retrieval would have found the card. Tracing
+    keeps its own copy, but only when SCAN_TRACE_DIR is configured, so it
+    cannot be relied on to retain it.
+    """
     relative_path = item.image_path
     item.resolved = True
-    item.image_path = None
+    if not keep_image:
+        item.image_path = None
     item.updated_at = datetime.datetime.utcnow()
     db.commit()
     db.refresh(item)
-    delete_scan_image(relative_path)
+    if not keep_image:
+        delete_scan_image(relative_path)
     return item
 
 

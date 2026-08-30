@@ -129,9 +129,10 @@ export const enqueueScanJob = (files = [], individualPositions = []) => {
 }
 export const getScanJobs = () => api.get('/cards/recognize/jobs').then(r => r.data)
 export const getScanJob = jobId => api.get(`/cards/recognize/jobs/${jobId}`).then(r => r.data)
-export const resolveScanJobItem = (jobId, itemId, cardId = null) =>
+export const resolveScanJobItem = (jobId, itemId, cardId = null, lang = null) =>
   api.post(`/cards/recognize/jobs/${jobId}/items/${itemId}/resolve`, {
     card_id: cardId,
+    lang,
   }).then(r => r.data)
 export const addAllConfidentScanJobItems = jobId =>
   api.post(`/cards/recognize/jobs/${jobId}/add-all-confident`).then(r => r.data)

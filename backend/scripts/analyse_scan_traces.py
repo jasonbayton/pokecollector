@@ -63,6 +63,14 @@ def main():
             print(f"  ranked below #1: {below_first} (retrieval worked; ranking missed)")
         if ranks.get(None):
             print(f"  never retrieved: {ranks[None]}")
+        correction_sources = Counter(
+            trace.get("ground_truth_source") or "candidate" for trace in labelled
+        )
+        print(
+            "correction source: " + ", ".join(
+                f"{source}={count}" for source, count in sorted(correction_sources.items())
+            )
+        )
 
     by_mechanism = defaultdict(lambda: [0, 0, 0])
     for _, trace in traces:

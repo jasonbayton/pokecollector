@@ -574,12 +574,12 @@ describe('reviewing the items on a job', () => {
     // The scan's own language beats the candidate's, which is 'en' here.
     expect(dialog.props.defaultLang).toBe('de')
 
-    dialog.props.onAdded()
+    dialog.props.onAdded({ cardId: candidate.tcg_card_id, lang: 'de' })
     const resolve = mutationCalling(api.resolveScanJobItem, { item: { id: 0 } })
-    expect(resolve.mutate).toHaveBeenCalledWith({ item, cardId: candidate.tcg_card_id })
+    expect(resolve.mutate).toHaveBeenCalledWith({ item, cardId: candidate.tcg_card_id, lang: 'de' })
 
-    resolve.mutationFn({ item, cardId: candidate.tcg_card_id })
-    expect(api.resolveScanJobItem).toHaveBeenCalledWith(7, item.id, candidate.tcg_card_id)
+    resolve.mutationFn({ item, cardId: candidate.tcg_card_id, lang: 'de' })
+    expect(api.resolveScanJobItem).toHaveBeenCalledWith(7, item.id, candidate.tcg_card_id, 'de')
 
     dialog.props.onClose()
     expect(setAddSelection).toHaveBeenCalledWith(null)
@@ -825,4 +825,3 @@ describe('what the page has to keep doing', () => {
     expect(markup).not.toContain('scanner.processing')
   })
 })
-

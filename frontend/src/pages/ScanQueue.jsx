@@ -181,7 +181,7 @@ function JobDetail({ jobId }) {
   }
 
   const resolveMutation = useMutation({
-    mutationFn: ({ item, cardId = null }) => resolveScanJobItem(jobId, item.id, cardId),
+    mutationFn: ({ item, cardId = null, lang = null }) => resolveScanJobItem(jobId, item.id, cardId, lang),
     onSuccess: (_data, { item }) => {
       const remaining = (job?.items || []).filter(candidate => candidate.id !== item.id)
       setConfirmation(null)
@@ -360,10 +360,11 @@ function JobDetail({ jobId }) {
             ? fetchScanJobItemImageBlob(job.id, addSelection.item.id)
             : Promise.resolve(null)}
           onClose={() => setAddSelection(null)}
-          onAdded={() => {
+          onAdded={({ cardId, lang }) => {
             resolveMutation.mutate({
               item: addSelection.item,
-              cardId: addSelection.match.tcg_card_id,
+              cardId,
+              lang,
             })
             setAddSelection(null)
           }}
