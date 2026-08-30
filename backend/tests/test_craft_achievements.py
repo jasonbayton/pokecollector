@@ -128,11 +128,43 @@ class CraftAchievementTests(unittest.TestCase):
         stats = _load_user_stats(self.db, [self.user.id])[self.user.id]
         self.assertEqual(stats["full_binder_flag"], 1)
 
-        # A gap below the last page in use still disqualifies it.
+        # Adding a card to a later page must not take the milestone away.
+        # Measuring every page up to the highest one in use did exactly that:
+        # a single card on page five revoked an achievement already earned.
         self._add_slot(complete_page_binder, "holo", page=6, pocket=1)
         self.db.commit()
         stats = _load_user_stats(self.db, [self.user.id])[self.user.id]
+        self.assertEqual(stats["full_binder_flag"], 1)
+
+        # A gap inside the promised range still disqualifies it.
+        self.db.query(BinderSlot).filter(
+            BinderSlot.binder_id == complete_page_binder.id,
+            BinderSlot.page == 3,
+            BinderSlot.pocket == 5,
+        ).delete()
+        self.db.commit()
+        stats = _load_user_stats(self.db, [self.user.id])[self.user.id]
         self.assertEqual(stats["full_binder_flag"], 0)
+
+    def test_rows_of_zero_or_fewer_are_not_cards_anybody_owns(self):
+        # card_state counts a variant as owned only while its quantity is
+        # positive. A zero-quantity row unlocked a first-of-its-kind
+        # milestone, and a negative one subtracted from the counted ones.
+        self._add_owned_card("zero-edition", quantity=0, variant="First Edition")
+        self._add_owned_card("zero-ultra", quantity=0, rarity="Ultra Rare")
+        self._add_owned_card("zero-secret", quantity=0, rarity="Secret Rare")
+        self._add_owned_card("zero-artist", quantity=0, artist="Ghost Artist")
+        self._add_owned_card("real-holo", quantity=10, variant="Holo", artist="Real Artist")
+        self._add_owned_card("negative-holo", quantity=-5, variant="Holo")
+        self.db.commit()
+
+        stats = _load_user_stats(self.db, [self.user.id])[self.user.id]
+
+        self.assertEqual(stats["first_edition_flag"], 0)
+        self.assertEqual(stats["ultra_rare_flag"], 0)
+        self.assertEqual(stats["secret_rare_flag"], 0)
+        self.assertEqual(stats["artist_diversity"], 1)
+        self.assertEqual(stats["holo_cards"], 10)
 
     def test_a_filled_wishlist_binder_earns_no_binder_milestone(self):
         # A wishlist binder lays out cards the user does not own. Counting it

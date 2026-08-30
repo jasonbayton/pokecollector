@@ -477,21 +477,20 @@ def _load_user_stats(db: Session, user_ids: list[int] | None = None, price_field
         for pages in binders.values():
             if any(slot_count == capacity for slot_count, capacity in pages.values()):
                 complete_binder_page_users.add(user_id)
-            highest_page = max(pages)
             capacity = next(iter(pages.values()))[1]
             # A binder does not record how many pages it physically has, only
-            # the geometry of one page, so "full" cannot mean "every page of
-            # the binder". It means every page up to the last one in use.
+            # the geometry of one page, so this cannot mean "every page of the
+            # binder". It means the first FULL_BINDER_MIN_PAGES pages, which
+            # is what the milestone's name and description promise.
             #
-            # That alone would fire on a single completed page, at the same
-            # moment as the page achievement, leaving the harder tier no
-            # harder than the easier one. FULL_BINDER_MIN_PAGES is a floor
-            # chosen to keep them distinct, not a real binder size.
-            if highest_page < FULL_BINDER_MIN_PAGES:
-                continue
+            # Measuring every page up to the last one in use instead would
+            # both fire on a single complete page, at the same moment as the
+            # page milestone, and revoke itself the moment a card was placed
+            # on a later page - taking an earned achievement away for adding
+            # a card.
             if all(
                 pages.get(page, (0, capacity))[0] == capacity
-                for page in range(1, highest_page + 1)
+                for page in range(1, FULL_BINDER_MIN_PAGES + 1)
             ):
                 full_binder_users.add(user_id)
 
@@ -529,6 +528,20 @@ def _load_user_stats(db: Session, user_ids: list[int] | None = None, price_field
             variant = (row.variant or "").strip().casefold()
             rarity = (row.rarity or "").strip().casefold()
             quantity = row.quantity or 0
+            if "illustration rare" in rarity:
+                has_illustration_rare = True
+            # A row of zero, or of a negative left by an edit, is not a card
+            # anybody owns: card_state treats a variant as owned only while
+            # its quantity is positive. Without this a zero-quantity row
+            # unlocked a first-of-its-kind milestone, and a negative one
+            # subtracted from the counted milestones.
+            #
+            # Deliberately guards only the craft metrics below. The set
+            # completion and illustration-rare metrics above predate this
+            # change and read the same rows; correcting those is a change to
+            # existing achievements rather than to these new ones.
+            if quantity <= 0:
+                continue
             if variant == "holo":
                 holo_cards += quantity
             elif variant == "reverse holo":
@@ -541,8 +554,6 @@ def _load_user_stats(db: Session, user_ids: list[int] | None = None, price_field
                 has_ultra_rare = True
             elif rarity == "secret rare":
                 has_secret_rare = True
-            if "illustration rare" in rarity:
-                has_illustration_rare = True
             artist = (row.artist or "").strip()
             if artist:
                 artists.add(artist.casefold())
