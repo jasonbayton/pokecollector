@@ -6,12 +6,12 @@ import { cardNumberMatches } from '../utils/cardNumbers'
 import { CARD_VARIANTS } from '../utils/cardVariants'
 import { COLLECTION_CONDITIONS } from '../utils/collectionOptions'
 import { invalidateCardState } from '../utils/queryInvalidation'
-import { addCopy } from '../utils/rapidEntryRows'
+import { addCopy, applyRowChange, variantChoices } from '../utils/rapidEntryRows'
 import TcgdexLanguageSelect from './TcgdexLanguageSelect'
 import QuantityInput from './ui/QuantityInput'
 
 export default function RapidSetEntry({ set, cards, queryClient, t, onClose }) {
-  const [defaults, setDefaults] = useState({ condition: 'Mint', variant: 'Normal', lang: set.lang || 'en' })
+  const [defaults, setDefaults] = useState({ condition: 'Mint', variant: '', lang: set.lang || 'en' })
   const [number, setNumber] = useState('')
   const [rows, setRows] = useState([])
   const [summary, setSummary] = useState(null)
@@ -35,7 +35,7 @@ export default function RapidSetEntry({ set, cards, queryClient, t, onClose }) {
   }
 
   const updateRow = (rowId, change) => {
-    setRows(current => current.map(row => row.id === rowId ? { ...row, ...change } : row))
+    setRows(current => applyRowChange(current, rowId, change))
   }
 
   const changeQuantity = (rowId, delta) => {
@@ -86,6 +86,7 @@ export default function RapidSetEntry({ set, cards, queryClient, t, onClose }) {
         </label>
         <label className="text-xs text-text-muted">{t('card.variant')}
           <select value={defaults.variant} onChange={event => setDefaults(value => ({ ...value, variant: event.target.value }))} className="select mt-1 w-full">
+            <option value="">{t('rapidEntry.variantAutomatic')}</option>
             {CARD_VARIANTS.map(variant => <option key={variant}>{variant}</option>)}
           </select>
         </label>
@@ -127,7 +128,7 @@ export default function RapidSetEntry({ set, cards, queryClient, t, onClose }) {
             {row.expanded && <div className="mt-3 grid gap-2 sm:grid-cols-4">
               <label className="text-xs text-text-muted">{t('common.quantity')}<QuantityInput value={row.quantity} onChange={quantity => updateRow(row.id, { quantity })} className="input mt-1 w-full" /></label>
               <label className="text-xs text-text-muted">{t('card.condition')}<select value={row.condition} onChange={event => updateRow(row.id, { condition: event.target.value })} className="select mt-1 w-full">{COLLECTION_CONDITIONS.map(condition => <option key={condition}>{condition}</option>)}</select></label>
-              <label className="text-xs text-text-muted">{t('card.variant')}<select value={row.variant} onChange={event => updateRow(row.id, { variant: event.target.value })} className="select mt-1 w-full">{CARD_VARIANTS.map(variant => <option key={variant}>{variant}</option>)}</select></label>
+              <label className="text-xs text-text-muted">{t('card.variant')}<select value={row.variant} onChange={event => updateRow(row.id, { variant: event.target.value })} className="select mt-1 w-full">{variantChoices(row.card, CARD_VARIANTS).map(variant => <option key={variant}>{variant}</option>)}</select></label>
               <label className="text-xs text-text-muted">{t('rapidEntry.language')}<TcgdexLanguageSelect value={row.lang} onChange={lang => updateRow(row.id, { lang })} className="select mt-1 w-full" /></label>
             </div>}
           </div>

@@ -1182,6 +1182,7 @@ const en = {
     title: 'Rapid set entry',
     subtitle: 'Add a sorted pile by collector number, then commit it once.',
     language: 'Language',
+    variantAutomatic: 'Match each card',
     collectorNumber: 'Collector number',
     collectorNumberPlaceholder: 'e.g. 044 or 74a',
     numberNotFound: 'That collector number is not in this checklist.',
