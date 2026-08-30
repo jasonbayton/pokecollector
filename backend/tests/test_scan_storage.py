@@ -149,6 +149,55 @@ class ScanJobStorageTests(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertEqual(list(scan_storage.scan_upload_root().iterdir()), [])
 
+    async def test_a_large_upload_that_shrinks_when_stored_is_accepted(self):
+        # The ordinary case, and the one the first fix got wrong. Photographs
+        # usually get SMALLER when sanitised. Charging the raw upload against
+        # the remaining stored budget refused a big photograph that would have
+        # left plenty of room once encoded.
+        small = _image_bytes(size=(8, 8))
+        real_sanitize = scan_storage.sanitize_image_bytes
+
+        def shrink(raw, *, high_resolution=False):
+            sanitized = real_sanitize(raw, high_resolution=high_resolution)
+            return sanitized.__class__(data=b"\xff\xd8\x00", content_type=sanitized.content_type)
+
+        # A budget smaller than the upload, but larger than what it stores.
+        with patch.object(scan_storage, "MAX_JOB_BYTES", len(small) - 1), \
+                patch.object(scan_storage, "sanitize_image_bytes", shrink):
+            job = await create_scan_job(self.db, self.user.id, [_upload(small)])
+
+        self.assertIsNotNone(job)
+        self.assertEqual(
+            self.db.query(ScanJobItem).filter(ScanJobItem.job_id == job.id).count(), 1
+        )
+
+    async def test_the_budget_is_exact_at_its_limit_and_one_byte_over(self):
+        small = _image_bytes(size=(8, 8))
+        real_sanitize = scan_storage.sanitize_image_bytes
+        stored_size = 64
+
+        def fixed(raw, *, high_resolution=False):
+            sanitized = real_sanitize(raw, high_resolution=high_resolution)
+            return sanitized.__class__(
+                data=b"\xff\xd8" + b"\x00" * (stored_size - 2),
+                content_type=sanitized.content_type,
+            )
+
+        with patch.object(scan_storage, "sanitize_image_bytes", fixed):
+            # Exactly at the limit is allowed.
+            with patch.object(scan_storage, "MAX_JOB_BYTES", stored_size * 2):
+                job = await create_scan_job(
+                    self.db, self.user.id, [_upload(small), _upload(small)],
+                )
+                self.assertIsNotNone(job)
+
+            # One byte less of budget is not.
+            with patch.object(scan_storage, "MAX_JOB_BYTES", stored_size * 2 - 1):
+                with self.assertRaises(ScanUploadError):
+                    await create_scan_job(
+                        self.db, self.user.id, [_upload(small), _upload(small)],
+                    )
+
     async def test_the_job_budget_counts_stored_bytes_not_uploaded_ones(self):
         # Sanitising re-encodes, and the result can be far larger than its
         # input. Charging the upload let a job pass its limit on arrival and

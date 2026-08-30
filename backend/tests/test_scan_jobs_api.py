@@ -620,6 +620,41 @@ class ScanJobsApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json()["detail"], "The scan job exceeds the 200 MB upload limit.")
 
+    def test_retake_refuses_when_re_encoding_is_what_exceeds_the_budget(self):
+        # The arrival guard only sees the upload. Re-encoding can produce more
+        # than arrived, so a photo small enough to accept can still take the
+        # job over its disk budget once stored, and only a check after storing
+        # can tell. It stays a 409, which needs its own catch because
+        # ScanJobBytesExceeded subclasses ScanUploadError and would otherwise
+        # be reported as a 400.
+        created = self._enqueue()
+        item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
+        item.status = "done"
+        original_path = item.image_path
+        self.db.commit()
+        stored = resolve_scan_path(original_path)
+
+        real_sanitize = scan_queue_module.sanitize_image_bytes
+
+        def inflate(raw, **kwargs):
+            sanitized = real_sanitize(raw, **kwargs)
+            return sanitized.__class__(
+                data=b"\xff\xd8" + b"\x00" * (MAX_JOB_BYTES * 2),
+                content_type=sanitized.content_type,
+            )
+
+        with patch.object(scan_queue_module, "sanitize_image_bytes", inflate), \
+                patch("api.scan_jobs.drain_scan_queue", new=AsyncMock(return_value=0)):
+            response = self.client.post(
+                f"/api/cards/recognize/jobs/{created['id']}/items/{item.id}/photo",
+                files={"file": ("retake.jpg", _jpeg_bytes(size=(64, 90)), "image/jpeg")},
+            )
+
+        self.assertEqual(response.status_code, 409, response.text)
+        persisted = self.db.get(ScanJobItem, item.id)
+        self.assertEqual(persisted.image_path, original_path, "the old photo was replaced anyway")
+        self.assertTrue(stored.is_file(), "the original file was removed")
+
     def test_retake_replaces_the_photo_and_clears_the_previous_scan_result(self):
         created = self._enqueue()
         job = self.db.get(ScanJob, created["id"])

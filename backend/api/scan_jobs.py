@@ -340,6 +340,10 @@ async def replace_scan_job_item_photo(
         for candidate in item.job.items
         if candidate.image_path
     )
+    # A guard on arrival, kept as it was: it refuses an upload that is already
+    # too big for the job. replace_scan_item_photo then re-checks once the
+    # STORED size is known, because re-encoding can produce more than arrived
+    # and only that second check can see it.
     remaining_bytes = MAX_JOB_BYTES - (current_bytes - int(item.byte_size or 0))
     try:
         raw_image = await read_limited_upload(files[0], remaining_job_bytes=remaining_bytes)
@@ -354,6 +358,11 @@ async def replace_scan_job_item_photo(
         # Another review action claimed the row while the upload was being
         # sanitised. Same status as the guard above, because from the user's
         # side it is the same refusal.
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ScanJobBytesExceeded as exc:
+        # Must precede ScanUploadError, which it subclasses. The job being too
+        # large is a 409 wherever it is detected, and only the post-store check
+        # can detect it when re-encoding is what pushed it over.
         raise HTTPException(status_code=409, detail=str(exc))
     except ScanUploadError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

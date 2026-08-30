@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass
 
 from fastapi import HTTPException
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from models import ScanJob, ScanJobItem, ScanQueueUserState, User
@@ -799,12 +799,33 @@ def replace_scan_item_photo(db: Session, item: ScanJobItem, raw_image: bytes) ->
     """
     from services.scan_providers import high_resolution_samples_enabled
 
+    from services.scan_storage import MAX_JOB_BYTES, ScanJobBytesExceeded
+
     sanitized = sanitize_image_bytes(
         raw_image,
         high_resolution=high_resolution_samples_enabled(db),
     )
     new_path, byte_size = store_sanitized_image(item.job.id, sanitized)
     now = datetime.datetime.utcnow()
+
+    # The endpoint bounded the UPLOAD, but re-encoding can produce far more
+    # than arrived, so a job could be pushed past its disk budget one re-take
+    # at a time. Counted after storing because the size is not known until
+    # then; the replacement is removed and the existing photo left untouched.
+    # Only photos still on disk. byte_size survives resolution, but the file
+    # does not, so counting a released photo would charge a job for storage it
+    # is no longer using.
+    others = db.query(func.coalesce(func.sum(ScanJobItem.byte_size), 0)).filter(
+        ScanJobItem.job_id == item.job.id,
+        ScanJobItem.id != item.id,
+        ScanJobItem.image_path.isnot(None),
+    ).scalar() or 0
+    if others + byte_size > MAX_JOB_BYTES:
+        delete_scan_image(new_path)
+        raise ScanJobBytesExceeded(
+            "This photo would take the scan job over its size limit. "
+            "Please remove some photos, or scan it in a job of its own."
+        )
 
     try:
         locked = (

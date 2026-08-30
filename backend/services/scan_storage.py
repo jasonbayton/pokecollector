@@ -285,9 +285,15 @@ async def create_scan_job(
     stored_total = 0
     try:
         for position, upload in enumerate(uploads):
+            # Bound the READ by the raw ceiling only. Charging the upload
+            # against the remaining STORED budget mixed the two: with 10 MB of
+            # stored budget left, a 15 MB photograph that sanitises down to
+            # 2 MB was refused before anything looked at it. Per-photo size is
+            # still capped by MAX_FILE_BYTES inside the reader, and the real
+            # job budget is enforced below on what actually lands on disk.
             raw = await read_limited_upload(
                 upload,
-                remaining_job_bytes=MAX_JOB_BYTES - stored_total,
+                remaining_job_bytes=MAX_FILE_BYTES,
             )
             sanitized = sanitize_image_bytes(raw, high_resolution=high_resolution)
             relative_path, byte_size = store_sanitized_image(job.id, sanitized)
