@@ -654,6 +654,48 @@ class TradeApiTests(unittest.TestCase):
             "a copy added without naming condition or variant must not be recorded as settled",
         )
 
+    def test_editing_an_existing_incoming_item_without_naming_its_attributes(self):
+        # Distinct from adding a new card: this is the caller that reads an
+        # existing trade item and changes its quantity. Review found the
+        # statedness being derived after the values had already been
+        # defaulted, so an edit naming neither field claimed both.
+        created = create_trade(
+            TradeCreate(
+                trade_date=datetime.date(2026, 7, 15),
+                incoming=[TradeIncomingItemCreate(
+                    card_id=self.incoming_card.id, quantity=1,
+                    condition="NM", variant="Holo", lang="en",
+                )],
+            ),
+            current_user=self.user,
+            db=self.db,
+        )
+        historical = [item for item in created.items if item.direction == "incoming"][0]
+
+        update_trade(
+            created.id,
+            TradeUpdate(
+                trade_date=created.trade_date,
+                incoming=[TradeIncomingItemUpdate(trade_item_id=historical.id, quantity=2)],
+            ),
+            current_user=self.user,
+            db=self.db,
+        )
+
+        rows = (
+            self.db.query(CollectionItem)
+            .filter(
+                CollectionItem.user_id == self.user.id,
+                CollectionItem.card_id == self.incoming_card.id,
+            )
+            .all()
+        )
+        self.assertTrue(rows)
+        self.assertFalse(
+            any(row.attributes_confirmed is True and row.condition == "Mint" for row in rows),
+            "an edit naming neither field must not record Mint/Normal as chosen",
+        )
+
     def test_reversing_an_outgoing_trade_restores_the_rows_review_state(self):
         # A row that wanted checking, traded away and then taken back off the
         # trade, must come back wanting checking. Recreating it as settled hid

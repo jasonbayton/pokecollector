@@ -818,6 +818,7 @@ def create_trade(
                 value_total=value_total,
                 variant=variant,
                 condition=condition,
+                attributes_confirmed=prepared["attributes_stated"],
                 lang=item_lang,
                 notes=incoming.notes,
                 created_at=datetime.datetime.utcnow(),
@@ -1120,6 +1121,14 @@ def update_trade(
             old_condition = trade_item.condition or "Mint"
             old_variant = trade_item.variant or "Normal"
             old_lang = trade_item.lang or "en"
+            # Read before defaulting. Deriving this from new_condition and
+            # new_variant asked whether the defaults were non-null, which they
+            # always are, so an edit naming neither field claimed both.
+            requested_stated = bool(
+                requested is not None
+                and requested.condition is not None
+                and requested.variant is not None
+            )
             new_condition = (requested.condition or "Mint") if requested else old_condition
             new_variant = normalize_collection_variant(requested.variant) if requested else old_variant
             new_lang = _normalize_lang(requested.lang) if requested else old_lang
@@ -1164,8 +1173,7 @@ def update_trade(
                             quantity=new_quantity,
                             condition=new_condition or "Mint",
                             variant=new_variant or "Normal",
-                            # Defaulted here means the edit did not name them.
-                            stated=new_condition is not None and new_variant is not None,
+                            stated=requested_stated,
                             lang=new_lang or "en",
                             purchase_price=purchase_price,
                         )
@@ -1241,6 +1249,7 @@ def update_trade(
                 value_total=round(value_per_card * requested.quantity, 2),
                 variant=prepared["variant"],
                 condition=prepared["condition"],
+                attributes_confirmed=prepared["attributes_stated"],
                 lang=prepared["lang"],
                 notes=requested.notes,
                 purchase_price=prepared["purchase_price"],
