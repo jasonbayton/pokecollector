@@ -166,7 +166,7 @@ export function ScanItemPanel({ jobId, item, onAdd, onRetry, onRetake, onDismiss
       {photoExpanded && (
         <ScanZoomModal photoUrl={photoUrl} onClose={() => setPhotoExpanded(false)} t={t} />
       )}
-      {manualPickerOpen && (
+      {manualPickerOpen && !active && (
         <ScanManualPicker
           defaultLang={item.recognized?.language || 'en'}
           onSelect={match => {
@@ -231,7 +231,8 @@ export function ScanItemPanel({ jobId, item, onAdd, onRetry, onRetake, onDismiss
                 className="btn-secondary justify-center">
                 <RefreshCw size={14} /> {t('scanner.retryIndividually')}
               </button>
-              <button type="button" onClick={() => setManualPickerOpen(true)} className="btn-secondary justify-center">
+              <button type="button" onClick={() => setManualPickerOpen(true)} disabled={active}
+                className="btn-secondary justify-center disabled:opacity-50">
                 {t('scanner.manualPick')}
               </button>
             </div>
@@ -252,7 +253,8 @@ export function ScanItemPanel({ jobId, item, onAdd, onRetry, onRetake, onDismiss
             {t('scanner.bestMatches')} ({item.matches.length})
           </p>
           <CandidateGrid item={item} matches={item.matches} photoUrl={photoUrl} onSelect={match => onAdd(item, match)} t={t} />
-          <button type="button" onClick={() => setManualPickerOpen(true)} className="btn-secondary mt-3 justify-center">
+          <button type="button" onClick={() => setManualPickerOpen(true)} disabled={active}
+            className="btn-secondary mt-3 justify-center disabled:opacity-50">
             {t('scanner.manualPick')}
           </button>
         </div>

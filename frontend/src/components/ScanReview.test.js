@@ -203,6 +203,24 @@ describe('manually identifying a scan item', () => {
 
     expect(buttonLabelled('scanner.manualPick')).toBeDefined()
   })
+
+  it('does not offer manual selection while a retry or re-take is in flight', () => {
+    // The picker writes to the collection before the scan is resolved, the
+    // same hazard the candidate grid is already withdrawn for. A retry resets
+    // the item server-side, so a manual add landing afterwards fails to
+    // resolve with a 409 and leaves an added card beside an unresolved scan.
+    renderPanel({ item: { ...reviewItem, status: 'failed', matches: [] }, isBusy: true })
+
+    expect(buttonLabelled('scanner.manualPick')?.props?.disabled).toBe(true)
+  })
+
+  it('offers it on the same item once nothing is in flight', () => {
+    // The bystander: disabling it unconditionally would satisfy the test
+    // above while removing the feature entirely.
+    renderPanel({ item: { ...reviewItem, status: 'failed', matches: [] }, isBusy: false })
+
+    expect(buttonLabelled('scanner.manualPick')?.props?.disabled).toBe(false)
+  })
 })
 
 describe('retaking a scan photo', () => {
