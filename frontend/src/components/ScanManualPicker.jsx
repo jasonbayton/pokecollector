@@ -4,6 +4,7 @@ import { searchCards } from '../api/client'
 import Modal from './ui/Modal'
 import TcgdexLanguageSelect from './TcgdexLanguageSelect'
 import { manualSearchParams, toManualScanRows } from './scanManualPickerHelpers'
+import { resolveCardImageUrl } from '../utils/imageUrl'
 
 export default function ScanManualPicker({ defaultLang = 'en', onSelect, onClose, t }) {
   const [query, setQuery] = useState('')
@@ -76,9 +77,28 @@ export default function ScanManualPicker({ defaultLang = 'en', onSelect, onClose
         <div className="max-h-72 space-y-2 overflow-y-auto">
           {results.map(card => (
             <button key={card.id} type="button" onClick={() => onSelect(card)}
-              className="w-full rounded-xl border border-border bg-bg-card p-3 text-left hover:border-brand-red/60">
-              <p className="font-semibold text-text-primary">{card.name}</p>
-              <p className="text-xs text-text-muted">{`${(card.set_abbreviation || '').toUpperCase()} ${card.number || ''}`.trim()}</p>
+              className="flex w-full items-center gap-3 rounded-xl border border-border bg-bg-card p-3 text-left hover:border-brand-red/60">
+              {/* The picker exists because the scanner could not read the card,
+                  so the artwork is how the user confirms this is the right one.
+                  A name and a number cannot separate two printings that share
+                  both. resolveCardImageUrl routes through the app's own image
+                  endpoint, so a configured mirror is honoured here too. */}
+              <img
+                src={resolveCardImageUrl(card)}
+                alt=""
+                loading="lazy"
+                className="h-20 w-14 shrink-0 rounded-md border border-border bg-bg-muted object-cover"
+                onError={event => { event.currentTarget.style.visibility = 'hidden' }}
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-semibold text-text-primary">{card.name}</span>
+                <span className="block font-mono text-xs font-bold text-brand-red">
+                  {`${(card.set_abbreviation || '').toUpperCase()} ${card.number || ''}`.trim()}
+                </span>
+                {card.set_ref?.name && (
+                  <span className="block truncate text-xs text-text-muted">{card.set_ref.name}</span>
+                )}
+              </span>
             </button>
           ))}
         </div>

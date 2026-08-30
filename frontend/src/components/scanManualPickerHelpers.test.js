@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { manualSearchParams, tcgCardIdFrom, toManualScanMatch, toManualScanRows } from './scanManualPickerHelpers'
+import { resolveCardImageUrl } from '../utils/imageUrl'
 
 // The shape GET /api/cards/search actually returns, per _card_to_dict in
 // backend/api/cards.py: set_ref and images_small, no tcg_card_id, no
@@ -81,5 +82,21 @@ describe('toManualScanRows', () => {
   it('survives a response with no results', () => {
     expect(toManualScanRows({})).toEqual([])
     expect(toManualScanRows(undefined)).toEqual([])
+  })
+})
+
+describe('picker artwork', () => {
+  it('resolves a searched card to the app\'s own image endpoint', () => {
+    // The picker is reached because the scanner could not read the card, so
+    // the artwork is how the user confirms the right printing. Going through
+    // the app endpoint rather than images_small also keeps a configured
+    // mirror in play.
+    const [row] = toManualScanRows({ data: { data: [catalogueCard] } })
+    expect(resolveCardImageUrl(row)).toBe('/api/images/card/base1-64_en/small')
+  })
+
+  it('still resolves when the catalogue supplied no image fields at all', () => {
+    const [row] = toManualScanRows({ data: { data: [{ id: 'sv1-25_en', name: 'Sprigatito' }] } })
+    expect(resolveCardImageUrl(row)).toBe('/api/images/card/sv1-25_en/small')
   })
 })
