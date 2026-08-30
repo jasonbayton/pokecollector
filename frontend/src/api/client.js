@@ -195,6 +195,7 @@ export const deleteAllCollectionCardPhotos = () =>
   api.delete('/settings/card-photos').then(r => r.data)
 
 export const bulkAddToCollection = (items) => api.post('/collection/bulk-add', { items }).then(r => r.data)
+export const rapidSetEntry = (data) => api.post('/collection/rapid-set-entry', data).then(r => r.data)
 export const importCollectionCsv = (file) => {
   const formData = new FormData()
   formData.append('file', file)

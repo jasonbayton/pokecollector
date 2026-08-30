@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { createPortal, flushSync } from 'react-dom'
 import { useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Plus, X, BookMarked, HelpCircle } from 'lucide-react'
+import { ArrowLeft, Plus, X, BookMarked, HelpCircle, Zap } from 'lucide-react'
 import { getSetChecklist, getBinders, addOwnedSetToBinder, addOwnedSetToAutoBinder } from '../api/client'
 import { useSettings } from '../contexts/SettingsContext'
 import toast from 'react-hot-toast'
@@ -12,6 +12,7 @@ import { HOLO_FIELD_MAP } from '../utils/prices'
 import { useDetailBackNavigation, useScrollToTopOnPush } from '../hooks/useListScrollRestoration'
 import { CardDisplay, CardLegend } from '../components/card-system'
 import { CardModal } from '../components/CardItem'
+import RapidSetEntry from '../components/RapidSetEntry'
 
 const SET_SORT_OPTIONS = [
   'number',
@@ -90,6 +91,7 @@ export default function SetDetail() {
   const [selectedCardTab, setSelectedCardTab] = useState('add')
   const [binderPickerOpen, setBinderPickerOpen] = useState(false)
   const [badgeLegendOpen, setBadgeLegendOpen] = useState(false)
+  const [rapidEntryOpen, setRapidEntryOpen] = useState(false)
   const [isReturningToSets, setIsReturningToSets] = useState(false)
 
   const returnToSets = () => {
@@ -245,7 +247,12 @@ export default function SetDetail() {
         >
           <BookMarked size={14} /> {t('setDetail.addOwnedToBinder')}
         </button>
+        <button onClick={() => setRapidEntryOpen(open => !open)} className="btn-primary flex items-center justify-center gap-1.5 text-sm whitespace-nowrap w-full mt-2 md:w-auto md:ml-auto">
+          <Zap size={14} /> {t('rapidEntry.open')}
+        </button>
       </div>
+
+      {rapidEntryOpen && <RapidSetEntry set={set} cards={cards} queryClient={queryClient} t={t} onClose={() => setRapidEntryOpen(false)} />}
 
       {/* Filter Tabs */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
