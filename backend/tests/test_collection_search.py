@@ -121,6 +121,15 @@ class CollectionSearchTests(unittest.TestCase):
         found = [item.card_id for item in self._search(q="MEW 25")]
         self.assertEqual(found, [wanted.id])
 
+    def test_a_name_that_looks_like_a_shortcode_still_finds_the_card(self):
+        # "Energy Removal 2" searched as "Removal 2" has the shape of a set
+        # code and a number, but Removal is not a set this collection holds.
+        # Treating it as a set lookup found nothing, where both pickers found
+        # the card by name.
+        card = self._card("ex1-80_en", "Energy Removal 2", "80")
+        found = [item.card_id for item in self._search(q="Removal 2")]
+        self.assertEqual(found, [card.id])
+
     def test_a_padded_number_matches_the_shortcode(self):
         self._card("sv1-007_en", "Charmander", "007")
         self.assertEqual(len(self._search(q="SVI 7")), 1)
