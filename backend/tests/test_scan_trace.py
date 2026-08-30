@@ -20,6 +20,7 @@ try:
         create_scan_trace,
         delete_user_traces,
         record_ground_truth,
+        record_variant_decision,
         revoke_user_traces,
         trace_available,
         trace_deletion_available,
@@ -169,6 +170,36 @@ class ScanTraceTests(unittest.TestCase):
         self.assertNotIn("eyJheader", payload["error"])
         self.assertNotIn("123456789:", payload["error"])
         self.assertIn("[REDACTED", payload["error"])
+
+    def test_variant_trace_keeps_the_read_finish_beside_the_filed_variant(self):
+        self._enable(self.user)
+        trace = create_scan_trace(
+            self.db,
+            self.user.id,
+            mode="single",
+            job_id=7,
+            item_id=9,
+        )
+        path = trace.save()
+
+        self.assertEqual(
+            record_variant_decision(
+                self.user.id,
+                7,
+                9,
+                recognized_finish="face_foil",
+                recognized_variant="Reverse Holo",
+                filed_variant="Reverse Holo",
+            ),
+            1,
+        )
+
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(payload["variant"], {
+            "recognized_finish": "face_foil",
+            "recognized_variant": "Reverse Holo",
+            "filed_variant": "Reverse Holo",
+        })
 
     def test_ground_truth_labels_all_attempts_for_one_item(self):
         self._enable(self.user)

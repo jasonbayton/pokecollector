@@ -67,7 +67,7 @@ class ScanBulkAddTests(unittest.TestCase):
         return card
 
     def _item(self, position, *, card_id="card-1_en", status="done", confident=True,
-              suggested=None, resolved=False, image=True, matches=None):
+              suggested=None, resolved=False, image=True, matches=None, recognized=None):
         suggested = card_id if suggested is None else suggested
         relative_path = f"{self.job.id}/bulk-add-{position}.jpg" if image else None
         if relative_path:
@@ -83,6 +83,7 @@ class ScanBulkAddTests(unittest.TestCase):
             status=status,
             resolved=resolved,
             matches=matches if matches is not None else [{"id": card_id}],
+            recognized=recognized,
             identity_confident=confident,
             suggested_match_id=suggested,
         )
@@ -154,6 +155,76 @@ class ScanBulkAddTests(unittest.TestCase):
         row = self.db.query(CollectionItem).one()
         self.assertEqual(row.variant, "Holo")
         self.assertEqual(row.condition, "Mint")
+
+    def test_files_a_recognized_reverse_holo_when_the_card_offers_it(self):
+        card = self._card(
+            "normal-and-reverse_en",
+            variants_normal=True,
+            variants_reverse=True,
+        )
+        self._item(
+            0,
+            card_id=card.id,
+            recognized={"finish": "foil across the border and card face; artwork is matte"},
+        )
+
+        scan_bulk_add._add_collection_copy(
+            self.db,
+            card=card,
+            current_user=self.user,
+            recognized_finish="foil across the border and card face; artwork is matte",
+        )
+        self.db.commit()
+
+        self.assertEqual(self.db.query(CollectionItem).one().variant, "Reverse Holo")
+
+    def test_ignores_a_recognized_finish_the_card_does_not_offer(self):
+        card = self._card(
+            "reverse-only_en",
+            variants_normal=False,
+            variants_reverse=True,
+            variants_holo=False,
+        )
+
+        self.assertEqual(
+            scan_bulk_add.variant_for_recognized_finish(
+                card,
+                "foil in the artwork panel",
+            ),
+            "Reverse Holo",
+        )
+
+    def test_keeps_the_default_variant_when_no_finish_was_read(self):
+        card = self._card(
+            "normal-and-reverse_en",
+            variants_normal=True,
+            variants_reverse=True,
+        )
+
+        self.assertEqual(scan_bulk_add.variant_for_recognized_finish(card, None), "Normal")
+        self.assertEqual(
+            scan_bulk_add.variant_for_recognized_finish(card, "unfamiliar metallic pattern"),
+            "Normal",
+        )
+        self.assertEqual(
+            scan_bulk_add.variant_for_recognized_finish(card, "first edition"),
+            "Normal",
+        )
+
+    def test_a_read_finish_is_filed_even_when_it_differs_from_the_default(self):
+        # The ordinary case this exists for: a reverse holo pulled from a pack,
+        # on a card that also has a normal printing. The default is not a
+        # competing observation, it is what is assumed when nothing has been
+        # read, so escalating here would halt on exactly the cards the feature
+        # is meant to get right.
+        card = self._card("card-1_en", variants_normal=True, variants_reverse=True)
+        self._item(0, card_id=card.id, recognized={"finish": "face_foil"})
+
+        self.assertEqual(self._file({card.id}), 1)
+        row = self.db.query(CollectionItem).filter(
+            CollectionItem.card_id == card.id
+        ).one()
+        self.assertEqual(row.variant, "Reverse Holo")
 
     def test_a_mid_transaction_failure_rolls_back_cards_and_resolutions(self):
         first = self._card("card-1_en")
