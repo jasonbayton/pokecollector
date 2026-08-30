@@ -43,7 +43,7 @@ class CollectionSearchTests(unittest.TestCase):
     def tearDown(self):
         self.db.close()
 
-    def _card(self, card_id, name, number, set_id="sv1_en"):
+    def _card(self, card_id, name, number, set_id="sv1"):
         card = Card(id=card_id, tcg_card_id=card_id.rsplit("_", 1)[0], name=name,
                     set_id=set_id, number=number, lang="en", is_custom=False)
         self.db.add(card)
@@ -132,6 +132,43 @@ class CollectionSearchTests(unittest.TestCase):
         )
         self.db.commit()
         self.assertEqual(self._search(q="sprig"), [])
+
+
+@unittest.skipUnless(DEPS_AVAILABLE, "backend dependencies unavailable")
+class CollectionFacetTests(CollectionSearchTests):
+    """The dropdowns that were the binder picker's other reason to load everything."""
+
+    def _facets(self):
+        from api.collection import get_collection_facets
+        return get_collection_facets(current_user=self.user, db=self.db)
+
+    def test_it_lists_the_sets_present_in_the_collection(self):
+        self._card("sv1-25_en", "Sprigatito", "25")
+        facets = self._facets()
+        self.assertEqual(facets["sets"], [{"id": "sv1_en", "name": "Scarlet & Violet"}])
+
+    def test_it_lists_each_set_once_however_many_cards_are_owned(self):
+        self._card("sv1-25_en", "Sprigatito", "25")
+        self._card("sv1-30_en", "Fuecoco", "30")
+        self.assertEqual(len(self._facets()["sets"]), 1)
+
+    def test_it_lists_the_variants_present(self):
+        self._card("sv1-25_en", "Sprigatito", "25")
+        row = self.db.query(CollectionItem).one()
+        row.variant = "Reverse Holo"
+        self.db.commit()
+        self.assertEqual(self._facets()["variants"], ["Reverse Holo"])
+
+    def test_it_does_not_leak_another_users_sets(self):
+        other = User(username="someone-else", hashed_password="x")
+        self.db.add(other)
+        self.db.commit()
+        self._card("sv1-25_en", "Sprigatito", "25")
+        self.db.query(CollectionItem).update({CollectionItem.user_id: other.id})
+        self.db.commit()
+        facets = self._facets()
+        self.assertEqual(facets["sets"], [])
+        self.assertEqual(facets["variants"], [])
 
 
 if __name__ == "__main__":

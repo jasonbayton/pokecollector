@@ -521,6 +521,48 @@ def get_collection(
 COLLECTION_SEARCH_LIMIT_MAX = 50
 
 
+@router.get("/facets")
+def get_collection_facets(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """The distinct sets and variants present in this collection.
+
+    The binder picker builds its two filter dropdowns from the whole
+    collection, which is the other reason that page downloads every row. These
+    are two DISTINCT queries returning a few dozen values, so the dropdowns
+    stop being a reason to fetch everything.
+    """
+    set_rows = (
+        db.query(Set.id, Set.name)
+        .join(Card, Card.set_id == Set.tcg_set_id)
+        .join(CollectionItem, CollectionItem.card_id == Card.id)
+        .filter(
+            CollectionItem.user_id == current_user.id,
+            Card.lang == Set.lang,
+            visible_any_card_filter(db, current_user.id, "all"),
+        )
+        .distinct()
+        .all()
+    )
+    variant_rows = (
+        db.query(CollectionItem.variant)
+        .filter(
+            CollectionItem.user_id == current_user.id,
+            CollectionItem.variant.isnot(None),
+        )
+        .distinct()
+        .all()
+    )
+    return {
+        "sets": sorted(
+            ({"id": row[0], "name": row[1]} for row in set_rows if row[0] and row[1]),
+            key=lambda entry: entry["name"],
+        ),
+        "variants": sorted(row[0] for row in variant_rows if row[0]),
+    }
+
+
 @router.get("/search", response_model=List[CollectionItemResponse])
 def search_collection(
     q: Optional[str] = None,
@@ -591,7 +633,10 @@ def search_collection(
                     func.lower(Card.number).in_(sorted(number_forms)),
                 )
             )
-        query = query.outerjoin(Set, Set.id == Card.set_id).filter(or_(*clauses))
+        query = query.outerjoin(
+            Set,
+            and_(Set.tcg_set_id == Card.set_id, Set.lang == Card.lang),
+        ).filter(or_(*clauses))
 
     items = (
         query.order_by(Card.name.asc(), Card.number.asc(), CollectionItem.id.asc())

@@ -162,8 +162,12 @@ export const dismissCustomMatch = (matchId) => api.post(`/cards/custom/dismiss/$
 
 // Collection
 export const getCollection = (params) => api.get('/collection/', { params })
+// Bounded lookups for pickers. getCollection returns every row and is for the
+// collection page, which genuinely renders all of them; anything showing a
+// short list of owned cards should use these instead.
+export const searchCollection = (params) => api.get('/collection/search', { params })
+export const getCollectionFacets = () => api.get('/collection/facets')
 export const getUserCollection = (userId, params = {}) => api.get(`/collection/user/${userId}`, { params }).then(r => r.data)
-export const searchCollection = (params) => api.get('/collection/', { params })
 export const addToCollection = (data) => api.post('/collection/', data)
 
 // The owner's own photo of a card the catalogue has no scan of. A blob rather

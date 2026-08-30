@@ -7,7 +7,7 @@ import {
   createTrade,
   cloneCustomCard,
   getApiErrorMessage,
-  getCollection,
+  searchCollection,
   getCustomCards,
   getTrade,
   getTrades,
@@ -284,9 +284,12 @@ export default function Trades() {
     return () => observer.disconnect()
   }, [tab])
 
+  // Searched on the server and bounded to what this list shows. It used to
+  // download every row to display twelve.
   const { data: collectionItems = [] } = useQuery({
-    queryKey: ['collection', 'trades'],
-    queryFn: () => getCollection({ sort_by: 'added_at', order: 'desc' }).then(r => r.data),
+    queryKey: ['collection-search', 'trades', collectionFilter],
+    queryFn: () => searchCollection({ q: collectionFilter.trim(), limit: 12 }).then(r => r.data),
+    keepPreviousData: true,
   })
 
   const { data: trades = [] } = useQuery({
@@ -305,17 +308,8 @@ export default function Trades() {
     queryFn: () => getCustomCards().then(r => r.data),
   })
 
-  const filteredCollection = useMemo(() => {
-    const term = collectionFilter.trim().toLowerCase()
-    return collectionItems
-      .filter(item => !term || [
-        item.card?.name,
-        item.card?.set_ref?.name,
-        item.card?.set_id,
-        item.card?.number,
-      ].filter(Boolean).join(' ').toLowerCase().includes(term))
-      .slice(0, 12)
-  }, [collectionFilter, collectionItems])
+  // The server already applied the search and the limit.
+  const filteredCollection = collectionItems
 
   const incomingResults = useMemo(() => {
     const term = incomingSearch.trim().toLowerCase()
