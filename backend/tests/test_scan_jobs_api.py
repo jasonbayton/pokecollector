@@ -19,6 +19,7 @@ try:
     from models import Card, CollectionItem, ScanJob, ScanJobItem, User
     from services.scan_storage import MAX_JOB_BYTES, resolve_scan_path
     from services import scan_queue as scan_queue_module
+    from services import scan_storage as scan_storage_module
 
     DEPS_AVAILABLE = True
 except ModuleNotFoundError:
@@ -610,15 +611,18 @@ class ScanJobsApiTests(unittest.TestCase):
         item.status = "done"
         self.db.commit()
 
-        with patch("api.scan_jobs.MAX_JOB_BYTES", item.byte_size), \
+        # The limit is enforced on STORED bytes now, not on arrival, because
+        # re-encoding decides the real cost. Patched where it is actually
+        # applied; the refusal is still a 409.
+        with patch.object(scan_storage_module, "MAX_JOB_BYTES", item.byte_size), \
                 patch("api.scan_jobs.drain_scan_queue", new=AsyncMock(return_value=0)):
             response = self.client.post(
                 f"/api/cards/recognize/jobs/{created['id']}/items/{item.id}/photo",
                 files={"file": ("retake.jpg", _jpeg_bytes(size=(400, 560)), "image/jpeg")},
             )
 
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.json()["detail"], "The scan job exceeds the 200 MB upload limit.")
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertIn("size limit", response.json()["detail"])
 
     def test_retake_refuses_when_re_encoding_is_what_exceeds_the_budget(self):
         # The arrival guard only sees the upload. Re-encoding can produce more

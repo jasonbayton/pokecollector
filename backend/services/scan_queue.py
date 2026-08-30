@@ -808,26 +808,33 @@ def replace_scan_item_photo(db: Session, item: ScanJobItem, raw_image: bytes) ->
     new_path, byte_size = store_sanitized_image(item.job.id, sanitized)
     now = datetime.datetime.utcnow()
 
-    # The endpoint bounded the UPLOAD, but re-encoding can produce far more
-    # than arrived, so a job could be pushed past its disk budget one re-take
-    # at a time. Counted after storing because the size is not known until
-    # then; the replacement is removed and the existing photo left untouched.
-    # Only photos still on disk. byte_size survives resolution, but the file
-    # does not, so counting a released photo would charge a job for storage it
-    # is no longer using.
-    others = db.query(func.coalesce(func.sum(ScanJobItem.byte_size), 0)).filter(
-        ScanJobItem.job_id == item.job.id,
-        ScanJobItem.id != item.id,
-        ScanJobItem.image_path.isnot(None),
-    ).scalar() or 0
-    if others + byte_size > MAX_JOB_BYTES:
-        delete_scan_image(new_path)
-        raise ScanJobBytesExceeded(
-            "This photo would take the scan job over its size limit. "
-            "Please remove some photos, or scan it in a job of its own."
-        )
-
     try:
+        # The endpoint bounded the UPLOAD, but re-encoding can produce far more
+        # than arrived, so a job could be pushed past its disk budget one
+        # re-take at a time. The size is not known until it is stored, so the
+        # check happens here rather than on arrival.
+        #
+        # Serialised on the JOB row, not the item. Two re-takes of DIFFERENT
+        # items would otherwise each read a total that did not include the
+        # other, both conclude they fitted, and commit a job over the limit:
+        # two 10 MB photos becoming 15 MB in a 195 MB job each see 185 + 15,
+        # while the committed result is 205.
+        db.query(ScanJob).filter(ScanJob.id == item.job.id).with_for_update().first()
+        # Only photos still on disk. byte_size survives resolution, but the
+        # file does not, so counting a released photo would charge a job for
+        # storage it is no longer using.
+        others = db.query(func.coalesce(func.sum(ScanJobItem.byte_size), 0)).filter(
+            ScanJobItem.job_id == item.job.id,
+            ScanJobItem.id != item.id,
+            ScanJobItem.image_path.isnot(None),
+        ).scalar() or 0
+        if others + byte_size > MAX_JOB_BYTES:
+            delete_scan_image(new_path)
+            raise ScanJobBytesExceeded(
+                "This photo would take the scan job over its size limit. "
+                "Please remove some photos, or scan it in a job of its own."
+            )
+
         locked = (
             db.query(ScanJobItem)
             .filter(ScanJobItem.id == item.id)

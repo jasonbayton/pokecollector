@@ -26,6 +26,7 @@ from services.scan_bulk_add import (
     candidate_ids_to_prepare,
 )
 from services.scan_storage import (
+    MAX_FILE_BYTES,
     MAX_JOB_BYTES,
     ScanItemNoLongerReviewable,
     ScanJobBytesExceeded,
@@ -340,11 +341,12 @@ async def replace_scan_job_item_photo(
         for candidate in item.job.items
         if candidate.image_path
     )
-    # A guard on arrival, kept as it was: it refuses an upload that is already
-    # too big for the job. replace_scan_item_photo then re-checks once the
-    # STORED size is known, because re-encoding can produce more than arrived
-    # and only that second check can see it.
-    remaining_bytes = MAX_JOB_BYTES - (current_bytes - int(item.byte_size or 0))
+    # Bound the READ by the per-photo ceiling only. Charging a re-take's raw
+    # upload against the remaining STORED budget refused a 15 MB photograph
+    # that sanitises to 2 MB and would have fitted, and photographs usually do
+    # get smaller. replace_scan_item_photo enforces the job limit on what
+    # actually lands on disk, which is the only place the real cost is known.
+    remaining_bytes = MAX_FILE_BYTES
     try:
         raw_image = await read_limited_upload(files[0], remaining_job_bytes=remaining_bytes)
     except ScanJobBytesExceeded as exc:
