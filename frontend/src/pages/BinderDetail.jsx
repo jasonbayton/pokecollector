@@ -1,11 +1,12 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Plus, Trash2, Package, Star, Download, Upload, X, Heart, Minus, HelpCircle, Check } from 'lucide-react'
-import { getBinderCards, removeCardFromBinder, removeBinderEntry, addCardToBinder, addCollectionItemToBinder, searchCards, getCollection, updateBinderEntry, getBinderEntryEquivalentPrints, getBinderPrintOptimization, applyBinderPrintOptimization, switchBinderEntryCard, addBinderEntryToWishlist, addBinderCardsToWishlist, convertWishlistBinderToCollection, convertCollectionBinderToWishlist, importBinderCsv, exportBinderCsv, getApiErrorMessage } from '../api/client'
+import { getBinderCards, removeCardFromBinder, removeBinderEntry, addCardToBinder, addCollectionItemToBinder, searchCards, searchCollection, getCollectionFacets, updateBinderEntry, getBinderEntryEquivalentPrints, getBinderPrintOptimization, applyBinderPrintOptimization, switchBinderEntryCard, addBinderEntryToWishlist, addBinderCardsToWishlist, convertWishlistBinderToCollection, convertCollectionBinderToWishlist, importBinderCsv, exportBinderCsv, getApiErrorMessage } from '../api/client'
 import { useSettings } from '../contexts/SettingsContext'
 import toast from 'react-hot-toast'
 import { hasCatalogueImage, resolveCardImageUrl } from '../utils/imageUrl'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { cardNumberMatches } from '../utils/cardNumbers'
 import { normalizeSearchText, textIncludes } from '../utils/textSearch'
 import { tcgdexLanguageLabel } from '../utils/tcgdexLanguages'
@@ -281,10 +282,37 @@ export default function BinderDetail() {
   const isCollection = binderType === 'collection'
   const availableCollectionItemQuantities = data?.available_collection_item_quantities || {}
 
+  // Searched on the server and bounded to what the picker shows. This used to
+  // fetch every collection row to display twenty-four of them.
+  const debouncedSearchQuery = useDebouncedValue(searchQuery)
   const { data: collectionData } = useQuery({
-    queryKey: ['collection'],
-    queryFn: () => getCollection({}).then(r => r.data),
-    enabled: isWishlist === false,
+    queryKey: ['collection-search', 'binder', debouncedSearchQuery, filterSet, filterVariant, filterCondition],
+    queryFn: () => searchCollection({
+      q: debouncedSearchQuery,
+      set_id: filterSet || undefined,
+      variant: filterVariant || undefined,
+      condition: filterCondition || undefined,
+      limit: 24,
+    }).then(r => r.data),
+    // Not until the binder itself has loaded: isWishlist defaults to false,
+    // so a wishlist binder otherwise fires both collection requests before
+    // switching to its own branch.
+    enabled: isWishlist === false && Boolean(data),
+    // React Query 5 removed keepPreviousData as an option; without this the
+    // picker returns undefined while a new search is pending and flashes its
+    // empty state on every keystroke.
+    placeholderData: keepPreviousData,
+  })
+
+  // The two filter dropdowns were the other reason this page loaded
+  // everything: they enumerate what the collection contains.
+  const { data: collectionFacets } = useQuery({
+    queryKey: ['collection-facets'],
+    queryFn: () => getCollectionFacets().then(r => r.data),
+    // Not until the binder itself has loaded: isWishlist defaults to false,
+    // so a wishlist binder otherwise fires both collection requests before
+    // switching to its own branch.
+    enabled: isWishlist === false && Boolean(data),
   })
 
   const { data: searchResults, isLoading: searching } = useQuery({
@@ -293,45 +321,18 @@ export default function BinderDetail() {
     enabled: isWishlist && searchQuery.length > 2,
   })
 
-  const collectionSearchResults = useMemo(() => {
-    if (!collectionData || isWishlist) return []
-    const q = normalizeSearchText(searchQuery)
-    return collectionData.filter(item => {
-      const card = item.card
-      if (!card) return false
-      if (filterSet && card.set_ref?.id !== filterSet) return false
-      if (filterVariant && (item.variant || '') !== filterVariant) return false
-      if (filterCondition && item.condition !== filterCondition) return false
-      if (!q) return true
-      const nameMatch = textIncludes(card.name, q)
-      const setMatch = textIncludes(card.set_ref?.name, q)
-      const numberMatch = cardNumberMatches(card.number, q)
-      const codeMatch = /^([A-Za-z]+\d*)\s+(\d+)$/.exec(q)
-      let shortcodeMatch = false
-      if (codeMatch) {
-        const [, setCode, num] = codeMatch
-        const normalizedNum = String(parseInt(num, 10))
-        shortcodeMatch = [card.set_ref?.abbreviation, card.set_id, card.set_ref?.tcg_set_id]
-          .some(value => normalizeSearchText(value) === setCode) && cardNumberMatches(card.number, normalizedNum)
-      }
-      return nameMatch || setMatch || numberMatch || shortcodeMatch
-    }).slice(0, 24)
-  }, [collectionData, searchQuery, isWishlist, filterSet, filterVariant, filterCondition])
+  // The server applied the search, the filters and the limit.
+  const collectionSearchResults = isWishlist ? [] : (collectionData || [])
 
-  const collectionSets = useMemo(() => {
-    const map = new Map()
-    ;(collectionData || []).forEach(item => {
-      const s = item.card?.set_ref
-      if (s?.id) map.set(s.id, s.name)
-    })
-    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]))
-  }, [collectionData])
+  const collectionSets = useMemo(
+    () => (collectionFacets?.sets || []).map(entry => [entry.id, entry.name]),
+    [collectionFacets],
+  )
 
-  const collectionVariants = useMemo(() => {
-    const variants = new Set()
-    ;(collectionData || []).forEach(item => { if (item.variant) variants.add(item.variant) })
-    return [...variants].sort()
-  }, [collectionData])
+  const collectionVariants = useMemo(
+    () => collectionFacets?.variants || [],
+    [collectionFacets],
+  )
 
   const pickerSelectionMutation = useMutation({
     mutationFn: async ({ items }) => {

@@ -151,11 +151,18 @@ def accent_insensitive_contains(db: Session, column, value: str | None):
     if not value:
         return None
 
-    if _postgres_unaccent_available(db):
-        pattern = f"%{value}%"
-        return func.unaccent(func.lower(column)).like(func.unaccent(func.lower(literal(pattern))))
+    # A search box is not a pattern language. Without this, typing % matches
+    # every row and _ matches any character, which is never what somebody
+    # looking for a card meant.
+    escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
-    normalized = strip_diacritics(value)
+    if _postgres_unaccent_available(db):
+        pattern = f"%{escaped}%"
+        return func.unaccent(func.lower(column)).like(
+            func.unaccent(func.lower(literal(pattern))), escape="\\"
+        )
+
+    normalized = strip_diacritics(escaped)
     if not normalized:
         return None
-    return _portable_unaccent_expr(db, column).like(f"%{normalized}%")
+    return _portable_unaccent_expr(db, column).like(f"%{normalized}%", escape="\\")

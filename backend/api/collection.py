@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Response
-from sqlalchemy import func, or_
+import re
+
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from api.auth import get_current_user
@@ -8,7 +10,8 @@ from models import BinderCard, CollectionItem, CollectionCardPhoto, Card, Delete
 from schemas import CollectionItemCreate, CollectionItemUpdate, CollectionItemResponse, BulkCollectionAddRequest, BulkCollectionAddResponse
 from services import pokemon_api
 from services.card_fallbacks import apply_cross_language_fallbacks, build_missing_language_card
-from services.card_numbers import card_number_matches
+from services.card_numbers import card_number_matches, card_number_variants
+from services.text_search import accent_insensitive_contains, strip_diacritics
 from services.collection_photos import MAX_UPLOAD_BYTES, InvalidPhoto, normalize_photo
 from services.deleted_collection import (
     archive_collection_item,
@@ -147,8 +150,18 @@ def _annotate_scan_photos(db: Session, current_user: User, items: list[Collectio
     return items
 
 
-def _annotate_collection_items(db: Session, current_user: User, items: list[CollectionItem]) -> list[CollectionItem]:
-    _annotate_standard_legality(items, _collection_standard_legal_fingerprints(db))
+def _annotate_collection_items(
+    db: Session,
+    current_user: User,
+    items: list[CollectionItem],
+    *,
+    include_legality: bool = True,
+) -> list[CollectionItem]:
+    # The legality pass scans the whole catalogue for playable fingerprints, so
+    # a picker showing twenty-four rows should not pay for it. Nothing in
+    # either picker reads standard_legal.
+    if include_legality:
+        _annotate_standard_legality(items, _collection_standard_legal_fingerprints(db))
     _annotate_scan_photos(db, current_user, items)
     return _annotate_product_sources(db, current_user, items)
 
@@ -513,6 +526,207 @@ def get_collection(
 
     items = query.all()
     return _annotate_collection_items(db, current_user, items)
+
+
+def _shortcode_clauses(code: str, number: str):
+    """The filter for one specific card: this set code, this collector number.
+
+    Shared deliberately. The existence check that decides whether to take the
+    shortcode branch and the filter that branch then applies have to agree
+    about what the shortcode matches; two copies of the predicate would drift.
+    """
+    lowered = code.casefold()
+    number_forms = {form.casefold() for form in card_number_variants(number)}
+    return (
+        or_(
+            func.lower(Set.abbreviation) == lowered,
+            func.lower(Set.tcg_set_id) == lowered,
+            func.lower(Card.set_id) == lowered,
+        ),
+        func.lower(Card.number).in_(sorted(number_forms)),
+    )
+
+
+def _owns_the_shortcode_card(
+    db: Session, current_user: User, code: str, number: str
+) -> bool:
+    """Whether this collection actually holds that set's card of that number.
+
+    Decides whether a shortcode-shaped query means one specific card or is
+    just two words. Asking about the whole candidate rather than the set alone
+    matters: owning MEW number 1 does not make "MEW 25" a set lookup, and
+    reading it as one would discard a card named "Mew 25" that both old
+    pickers found.
+
+    Deliberately independent of the set, variant and condition filters, so
+    that toggling a facet cannot change what the words are taken to mean.
+    """
+    return db.query(
+        db.query(CollectionItem)
+        .join(Card, Card.id == CollectionItem.card_id)
+        .outerjoin(Set, and_(Set.tcg_set_id == Card.set_id, Set.lang == Card.lang))
+        .filter(
+            CollectionItem.user_id == current_user.id,
+            visible_any_card_filter(db, current_user.id, "all"),
+            *_shortcode_clauses(code, number),
+        )
+        .exists()
+    ).scalar()
+
+
+COLLECTION_SEARCH_LIMIT_MAX = 50
+
+
+@router.get("/facets")
+def get_collection_facets(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """The distinct sets and variants present in this collection.
+
+    The binder picker builds its two filter dropdowns from the whole
+    collection, which is the other reason that page downloads every row. These
+    are two DISTINCT queries returning a few dozen values, so the dropdowns
+    stop being a reason to fetch everything.
+    """
+    visible = visible_any_card_filter(db, current_user.id, "all")
+    set_rows = (
+        # The composite Set.id, which identifies a set in one language. The
+        # search endpoint filters on the same value.
+        db.query(Set.id, Set.name)
+        .join(Card, Card.set_id == Set.tcg_set_id)
+        .join(CollectionItem, CollectionItem.card_id == Card.id)
+        .filter(
+            CollectionItem.user_id == current_user.id,
+            Card.lang == Set.lang,
+            visible,
+        )
+        .distinct()
+        .all()
+    )
+    variant_rows = (
+        db.query(CollectionItem.variant)
+        .join(Card, Card.id == CollectionItem.card_id)
+        .filter(
+            CollectionItem.user_id == current_user.id,
+            CollectionItem.variant.isnot(None),
+            # Without this a hidden card, a digital one for instance, still
+            # contributed its variant to the dropdown.
+            visible,
+        )
+        .distinct()
+        .all()
+    )
+    return {
+        "sets": sorted(
+            ({"id": row[0], "name": row[1]} for row in set_rows if row[0] and row[1]),
+            # Accent-insensitive, because the browser sorted with localeCompare
+            # and Python's codepoint order files "Ecarlate et Violet" after Z.
+            key=lambda entry: (strip_diacritics(entry["name"]).casefold(), entry["name"]),
+        ),
+        "variants": sorted(row[0] for row in variant_rows if row[0]),
+    }
+
+
+@router.get("/search", response_model=List[CollectionItemResponse])
+def search_collection(
+    q: Optional[str] = None,
+    set_id: Optional[str] = None,
+    variant: Optional[str] = None,
+    condition: Optional[str] = None,
+    limit: int = 24,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Find owned cards for a picker, bounded to what the picker will show.
+
+    The trade and binder pickers previously loaded the whole collection and
+    filtered it in the browser to display at most twelve or twenty-four rows.
+    That is fine at a few hundred rows and gets worse exactly as a collection
+    becomes big enough to need a picker at all. It also meant every new screen
+    that wanted "cards I own" reached for the same full download.
+
+    Matching mirrors what those pickers did client-side: card name, set name,
+    and collector number, plus the "SV1 25" shortcode of a set code and a
+    number, all accent-insensitive.
+    """
+    limit = max(1, min(int(limit or 24), COLLECTION_SEARCH_LIMIT_MAX))
+
+    query = db.query(CollectionItem).join(Card, Card.id == CollectionItem.card_id).options(
+        joinedload(CollectionItem.card).joinedload(Card.set_ref)
+    ).filter(
+        CollectionItem.user_id == current_user.id,
+        visible_any_card_filter(db, current_user.id, "all"),
+    )
+
+    # Always joined: the set is needed to filter by it and to search its name,
+    # and one join keeps the two consistent.
+    query = query.outerjoin(
+        Set, and_(Set.tcg_set_id == Card.set_id, Set.lang == Card.lang)
+    )
+
+    if set_id:
+        # The composite Set.id, which is what the facets offer. Filtering
+        # Card.set_id instead matched nothing, and filtering the bare TCGdex id
+        # collapsed a set's languages together: an English and a German sv1 are
+        # different options and must stay so.
+        query = query.filter(Set.id == set_id)
+    if variant:
+        if variant not in ALLOWED_VARIANTS:
+            raise HTTPException(status_code=422, detail="variant is not supported")
+        query = query.filter(CollectionItem.variant == variant)
+    if condition:
+        if condition not in ALLOWED_CONDITIONS:
+            raise HTTPException(status_code=422, detail="condition is not supported")
+        query = query.filter(CollectionItem.condition == condition)
+
+    term = (q or "").strip()
+    if term:
+        # "SV1 25": a set code and a number together. A query of that shape
+        # asks for one specific card, so it replaces word matching rather than
+        # widening it - evaluating both meant "MEW 25" also returned any card
+        # named Mew that happened to be numbered 25, which neither picker did.
+        # Set ids carry dots, as in sv03.5.
+        shortcode = re.fullmatch(r"([A-Za-z]+[0-9.]*)\s+([0-9]+[A-Za-z]*)", term)
+        if shortcode and _owns_the_shortcode_card(db, current_user, *shortcode.groups()):
+            query = query.filter(*_shortcode_clauses(*shortcode.groups()))
+        else:
+            # Either the query is not shortcode-shaped, or the card it would
+            # name is not one this collection holds. "Removal 2" looks like a
+            # set code and a number but is the tail of "Energy Removal 2", and
+            # treating it as a set lookup found nothing where both pickers
+            # found the card by name.
+            # Every word must match something, though not all the same thing.
+            # The trade picker searched one concatenated string, so "sprigatito
+            # scarlet" found Sprigatito from Scarlet & Violet; checking the
+            # whole phrase against each field separately loses that.
+            for word in term.split():
+                # The collector number is compared on its normalised forms
+                # rather than as a substring, which is what the binder picker
+                # did: "2" is not a way of asking for card 25. Digits inside a
+                # card's name still match, because both pickers searched names
+                # by substring.
+                word_clauses = [
+                    accent_insensitive_contains(db, Card.name, word),
+                    accent_insensitive_contains(db, Set.name, word),
+                    accent_insensitive_contains(db, Card.set_id, word),
+                ]
+                number_forms = {form.casefold() for form in card_number_variants(word)}
+                if number_forms:
+                    word_clauses.append(func.lower(Card.number).in_(sorted(number_forms)))
+                query = query.filter(
+                    or_(*[clause for clause in word_clauses if clause is not None])
+                )
+
+    items = (
+        # Most recently added first, which is the order both pickers showed
+        # before: they read the collection endpoint's default sort. It also
+        # makes the capped result the most useful subset while typing.
+        query.order_by(CollectionItem.added_at.desc(), CollectionItem.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return _annotate_collection_items(db, current_user, items, include_legality=False)
 
 
 @router.post("/", response_model=CollectionItemResponse)

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowRightLeft, Check, History, PenLine, Plus, Search, Trash2, Wallet } from 'lucide-react'
 import toast from 'react-hot-toast'
 import clsx from 'clsx'
@@ -7,7 +7,7 @@ import {
   createTrade,
   cloneCustomCard,
   getApiErrorMessage,
-  getCollection,
+  searchCollection,
   getCustomCards,
   getTrade,
   getTrades,
@@ -24,6 +24,7 @@ import { CollectionCardIdentity } from '../components/CollectionCardImage'
 import { getEffectiveCardPrice, priceFieldFromPrimary } from '../utils/prices'
 import { formatMoneyInputValue, parseMoneyInputValue } from '../utils/moneyInput'
 import { invalidateCardState, invalidateTcgdexFilterLanguages } from '../utils/queryInvalidation'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { buildTradeUpdatePayload, findNewTradeDraftItem, isCashTradeItem, snapshotTradeCard, tradeToDraft } from '../utils/tradeDraft'
 
 const CONDITIONS = ['Mint', 'NM', 'LP', 'MP', 'HP']
@@ -284,9 +285,16 @@ export default function Trades() {
     return () => observer.disconnect()
   }, [tab])
 
+  // Searched on the server and bounded to what this list shows. It used to
+  // download every row to display twelve.
+  const debouncedCollectionFilter = useDebouncedValue(collectionFilter)
   const { data: collectionItems = [] } = useQuery({
-    queryKey: ['collection', 'trades'],
-    queryFn: () => getCollection({ sort_by: 'added_at', order: 'desc' }).then(r => r.data),
+    queryKey: ['collection-search', 'trades', debouncedCollectionFilter],
+    queryFn: () => searchCollection({ q: debouncedCollectionFilter.trim(), limit: 12 }).then(r => r.data),
+    // React Query 5 removed keepPreviousData as an option; without this the
+    // picker returns undefined while a new search is pending and flashes its
+    // empty state on every keystroke.
+    placeholderData: keepPreviousData,
   })
 
   const { data: trades = [] } = useQuery({
@@ -305,17 +313,8 @@ export default function Trades() {
     queryFn: () => getCustomCards().then(r => r.data),
   })
 
-  const filteredCollection = useMemo(() => {
-    const term = collectionFilter.trim().toLowerCase()
-    return collectionItems
-      .filter(item => !term || [
-        item.card?.name,
-        item.card?.set_ref?.name,
-        item.card?.set_id,
-        item.card?.number,
-      ].filter(Boolean).join(' ').toLowerCase().includes(term))
-      .slice(0, 12)
-  }, [collectionFilter, collectionItems])
+  // The server already applied the search and the limit.
+  const filteredCollection = collectionItems
 
   const incomingResults = useMemo(() => {
     const term = incomingSearch.trim().toLowerCase()
