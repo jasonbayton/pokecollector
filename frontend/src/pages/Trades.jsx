@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowRightLeft, Check, History, PenLine, Plus, Search, Trash2, Wallet } from 'lucide-react'
 import toast from 'react-hot-toast'
 import clsx from 'clsx'
@@ -291,7 +291,10 @@ export default function Trades() {
   const { data: collectionItems = [] } = useQuery({
     queryKey: ['collection-search', 'trades', debouncedCollectionFilter],
     queryFn: () => searchCollection({ q: debouncedCollectionFilter.trim(), limit: 12 }).then(r => r.data),
-    keepPreviousData: true,
+    // React Query 5 removed keepPreviousData as an option; without this the
+    // picker returns undefined while a new search is pending and flashes its
+    // empty state on every keystroke.
+    placeholderData: keepPreviousData,
   })
 
   const { data: trades = [] } = useQuery({

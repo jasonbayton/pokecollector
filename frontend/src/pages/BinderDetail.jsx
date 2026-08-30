@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Plus, Trash2, Package, Star, Download, Upload, X, Heart, Minus, HelpCircle, Check } from 'lucide-react'
 import { getBinderCards, removeCardFromBinder, removeBinderEntry, addCardToBinder, addCollectionItemToBinder, searchCards, searchCollection, getCollectionFacets, updateBinderEntry, getBinderEntryEquivalentPrints, getBinderPrintOptimization, applyBinderPrintOptimization, switchBinderEntryCard, addBinderEntryToWishlist, addBinderCardsToWishlist, convertWishlistBinderToCollection, convertCollectionBinderToWishlist, importBinderCsv, exportBinderCsv, getApiErrorMessage } from '../api/client'
 import { useSettings } from '../contexts/SettingsContext'
@@ -295,7 +295,10 @@ export default function BinderDetail() {
       limit: 24,
     }).then(r => r.data),
     enabled: isWishlist === false,
-    keepPreviousData: true,
+    // React Query 5 removed keepPreviousData as an option; without this the
+    // picker returns undefined while a new search is pending and flashes its
+    // empty state on every keystroke.
+    placeholderData: keepPreviousData,
   })
 
   // The two filter dropdowns were the other reason this page loaded

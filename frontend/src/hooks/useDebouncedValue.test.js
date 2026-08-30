@@ -1,13 +1,45 @@
-import { describe, expect, it, vi } from 'vitest'
-import { useDebouncedValue } from './useDebouncedValue'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { scheduleDebounced, useDebouncedValue } from './useDebouncedValue'
 
-describe('useDebouncedValue', () => {
-  it('is a function taking a value and an optional delay', () => {
-    // The suite runs without jsdom, so hook behaviour cannot be rendered here.
-    // What can be pinned is the contract the callers rely on: a default delay
-    // exists, so a caller omitting it still debounces rather than passing
-    // undefined to setTimeout.
+describe('scheduleDebounced', () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it('does not publish before the delay elapses', () => {
+    const publish = vi.fn()
+    scheduleDebounced(publish, 'char')
+    vi.advanceTimersByTime(249)
+    expect(publish).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(publish).toHaveBeenCalledWith('char')
+  })
+
+  it('publishes only the last value when typing continues', () => {
+    // The point of the hook: a request per keystroke would be worse than the
+    // single download it replaced.
+    const publish = vi.fn()
+    let cancel = scheduleDebounced(publish, 'c')
+    vi.advanceTimersByTime(100)
+    cancel()
+    cancel = scheduleDebounced(publish, 'ch')
+    vi.advanceTimersByTime(100)
+    cancel()
+    scheduleDebounced(publish, 'cha')
+    vi.advanceTimersByTime(250)
+
+    expect(publish).toHaveBeenCalledTimes(1)
+    expect(publish).toHaveBeenCalledWith('cha')
+  })
+
+  it('cancelling stops the value arriving at all', () => {
+    const publish = vi.fn()
+    scheduleDebounced(publish, 'gone')()
+    vi.advanceTimersByTime(1000)
+    expect(publish).not.toHaveBeenCalled()
+  })
+
+  it('the hook wires the scheduler with a default delay', () => {
     expect(typeof useDebouncedValue).toBe('function')
-    expect(useDebouncedValue.length).toBe(1)
+    expect(String(useDebouncedValue)).toContain('scheduleDebounced')
   })
 })

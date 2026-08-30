@@ -150,8 +150,18 @@ def _annotate_scan_photos(db: Session, current_user: User, items: list[Collectio
     return items
 
 
-def _annotate_collection_items(db: Session, current_user: User, items: list[CollectionItem]) -> list[CollectionItem]:
-    _annotate_standard_legality(items, _collection_standard_legal_fingerprints(db))
+def _annotate_collection_items(
+    db: Session,
+    current_user: User,
+    items: list[CollectionItem],
+    *,
+    include_legality: bool = True,
+) -> list[CollectionItem]:
+    # The legality pass scans the whole catalogue for playable fingerprints, so
+    # a picker showing twenty-four rows should not pay for it. Nothing in
+    # either picker reads standard_legal.
+    if include_legality:
+        _annotate_standard_legality(items, _collection_standard_legal_fingerprints(db))
     _annotate_scan_photos(db, current_user, items)
     return _annotate_product_sources(db, current_user, items)
 
@@ -533,16 +543,17 @@ def get_collection_facets(
     are two DISTINCT queries returning a few dozen values, so the dropdowns
     stop being a reason to fetch everything.
     """
+    visible = visible_any_card_filter(db, current_user.id, "all")
     set_rows = (
-        # The TCGdex set id, not the composite Set.id: this value is fed
-        # straight back to the search endpoint, which filters Card.set_id.
-        db.query(Set.tcg_set_id, Set.name)
+        # The composite Set.id, which identifies a set in one language. The
+        # search endpoint filters on the same value.
+        db.query(Set.id, Set.name)
         .join(Card, Card.set_id == Set.tcg_set_id)
         .join(CollectionItem, CollectionItem.card_id == Card.id)
         .filter(
             CollectionItem.user_id == current_user.id,
             Card.lang == Set.lang,
-            visible_any_card_filter(db, current_user.id, "all"),
+            visible,
         )
         .distinct()
         .all()
@@ -555,7 +566,7 @@ def get_collection_facets(
             CollectionItem.variant.isnot(None),
             # Without this a hidden card, a digital one for instance, still
             # contributed its variant to the dropdown.
-            visible_any_card_filter(db, current_user.id, "all"),
+            visible,
         )
         .distinct()
         .all()
@@ -600,8 +611,18 @@ def search_collection(
         visible_any_card_filter(db, current_user.id, "all"),
     )
 
+    # Always joined: the set is needed to filter by it and to search its name,
+    # and one join keeps the two consistent.
+    query = query.outerjoin(
+        Set, and_(Set.tcg_set_id == Card.set_id, Set.lang == Card.lang)
+    )
+
     if set_id:
-        query = query.filter(Card.set_id == set_id)
+        # The composite Set.id, which is what the facets offer. Filtering
+        # Card.set_id instead matched nothing, and filtering the bare TCGdex id
+        # collapsed a set's languages together: an English and a German sv1 are
+        # different options and must stay so.
+        query = query.filter(Set.id == set_id)
     if variant:
         if variant not in ALLOWED_VARIANTS:
             raise HTTPException(status_code=422, detail="variant is not supported")
@@ -630,7 +651,9 @@ def search_collection(
             clauses.append(func.lower(Card.number) == form.casefold())
         # "SV1 25": a set code and a number together. The code may be written
         # as the abbreviation or the catalogue set id.
-        shortcode = re.fullmatch(r"([A-Za-z]+[0-9]*)\s+([0-9]+[A-Za-z]*)", term)
+        # Set ids carry dots - sv03.5 - and the old Trades search matched them
+        # because it concatenated the fields into one haystack.
+        shortcode = re.fullmatch(r"([A-Za-z]+[0-9.]*)\s+([0-9]+[A-Za-z]*)", term)
         if shortcode:
             code, number = shortcode.groups()
             number_forms = {form.casefold() for form in card_number_variants(number)}
@@ -644,10 +667,7 @@ def search_collection(
                     func.lower(Card.number).in_(sorted(number_forms)),
                 )
             )
-        query = query.outerjoin(
-            Set,
-            and_(Set.tcg_set_id == Card.set_id, Set.lang == Card.lang),
-        ).filter(or_(*clauses))
+        query = query.filter(or_(*clauses))
 
     items = (
         # Most recently added first, which is the order both pickers showed
@@ -657,7 +677,7 @@ def search_collection(
         .limit(limit)
         .all()
     )
-    return _annotate_collection_items(db, current_user, items)
+    return _annotate_collection_items(db, current_user, items, include_legality=False)
 
 
 @router.post("/", response_model=CollectionItemResponse)

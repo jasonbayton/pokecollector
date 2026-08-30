@@ -145,8 +145,27 @@ class CollectionFacetTests(CollectionSearchTests):
     def test_it_lists_the_sets_present_in_the_collection(self):
         self._card("sv1-25_en", "Sprigatito", "25")
         facets = self._facets()
-        # The TCGdex id, because that is what the search endpoint filters on.
-        self.assertEqual(facets["sets"], [{"id": "sv1", "name": "Scarlet & Violet"}])
+        # The composite id, which identifies a set in one language.
+        self.assertEqual(facets["sets"], [{"id": "sv1_en", "name": "Scarlet & Violet"}])
+
+    def test_a_set_in_two_languages_is_two_options(self):
+        # Collapsing to the bare TCGdex id made an English and a German copy of
+        # one set the same option, and choosing either returned both.
+        self.db.add(Set(id="sv1_de", tcg_set_id="sv1", name="Karmesin & Purpur",
+                        abbreviation="SVI", lang="de"))
+        self.db.commit()
+        self._card("sv1-25_en", "Sprigatito", "25")
+        german = Card(id="sv1-25_de", tcg_card_id="sv1-25", name="Felori",
+                      set_id="sv1", number="25", lang="de", is_custom=False)
+        self.db.add(german)
+        self.db.add(CollectionItem(card_id="sv1-25_de", user_id=self.user.id, quantity=1,
+                                   condition="NM", variant="Normal", lang="de"))
+        self.db.commit()
+
+        ids = [entry["id"] for entry in self._facets()["sets"]]
+        self.assertEqual(sorted(ids), ["sv1_de", "sv1_en"])
+        self.assertEqual([i.card_id for i in self._search(set_id="sv1_en")], ["sv1-25_en"])
+        self.assertEqual([i.card_id for i in self._search(set_id="sv1_de")], ["sv1-25_de"])
 
     def test_a_facet_id_actually_filters_the_search(self):
         # These two endpoints are used together: the dropdown is built from
