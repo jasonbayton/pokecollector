@@ -1,0 +1,8 @@
+# Include this exact-match location inside PokeCollector's server block.
+# The receiver listens only on loopback; Caddy remains the public TLS endpoint.
+location = /webhooks/github {
+    proxy_pass http://127.0.0.1:9001;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}

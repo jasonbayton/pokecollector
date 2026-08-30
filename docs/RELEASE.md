@@ -29,7 +29,8 @@ ssh jason@192.168.1.200 "lxc exec pokecollector -- cat /var/lib/pokecollector-de
 If the running fork release should be visible in the app itself, that wants a
 separate field rather than a hijacked `VERSION`.
 
-Within five minutes the container picks it up. To watch:
+GitHub delivers the tag push to the container immediately; the existing deploy
+service then builds, health-checks and rolls back exactly as before. To watch:
 
 ```bash
 ssh jason@192.168.1.200 "lxc exec pokecollector -- journalctl -u pokecollector-update -n 40"
@@ -71,9 +72,15 @@ Rather than guess an order, the script refuses and tells you to re-tag.
 
 ## What the container does
 
-`pokecollector-update.timer` runs every five minutes. Polling rather than a
-webhook because the host is LAN only and GitHub cannot reach it, so nothing new
-is exposed to the internet.
+`pokecollector-github-webhook` receives signed GitHub `push` events at
+`/webhooks/github`. It accepts only the `jasonbayton/pokecollector` repository
+and `refs/tags/bayton-v*` refs, validates GitHub's SHA-256 HMAC signature, and
+starts `pokecollector-update.service`. The receiver never takes a revision from
+the request: the deploy service still fetches the configured fork and applies
+the usual tag, worktree, health-gate and rollback checks.
+
+`pokecollector-update.timer` runs hourly as a recovery backstop only, so a
+missed GitHub delivery does not leave a release permanently pending.
 
 Each run:
 
@@ -144,16 +151,47 @@ otherwise be rediscovered the hard way.
 ## Installing the kit
 
 ```bash
-install -m 755 ops/pokecollector-deploy ops/pokecollector-drift /usr/local/bin/
+install -m 755 ops/pokecollector-deploy ops/pokecollector-drift \
+               ops/pokecollector-github-webhook /usr/local/bin/
 install -m 644 ops/pokecollector-update.service ops/pokecollector-update.timer \
-               ops/pokecollector-drift.service ops/pokecollector-drift.timer /etc/systemd/system/
+               ops/pokecollector-drift.service ops/pokecollector-drift.timer \
+               ops/pokecollector-github-webhook.service /etc/systemd/system/
 
 # The live container names its git remote "fork", not "origin".
 printf 'POKECOLLECTOR_REMOTE=fork\n' > /etc/pokecollector-deploy.env
 
 systemctl daemon-reload
-systemctl enable --now pokecollector-update.timer pokecollector-drift.timer
+systemctl enable --now pokecollector-update.timer pokecollector-drift.timer \
+                        pokecollector-github-webhook.service
 ```
+
+The webhook secret belongs only on the container, in a root-readable file such
+as `/etc/pokecollector-webhook.env` (mode `0600`):
+
+```bash
+POKECOLLECTOR_WEBHOOK_SECRET=<long random value>
+POKECOLLECTOR_WEBHOOK_REPOSITORY=jasonbayton/pokecollector
+```
+
+Install `ops/pokecollector-github-webhook.nginx` as
+`/etc/nginx/snippets/pokecollector-github-webhook.conf`, include that file in
+PokeCollector's server block, then pass `nginx -t` and reload. It proxies only
+the exact public route to the receiver, which itself listens on loopback:
+
+```nginx
+location = /webhooks/github {
+    proxy_pass http://127.0.0.1:9001;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+Create a GitHub repository webhook for
+`https://pokecollector.bayton.net/webhooks/github`, with content type
+`application/json`, the same secret, and **Pushes** as the only selected event.
+GitHub's initial ping should receive `204`; tag pushes receive `202` while the
+deploy runs in the background.
 
 Everything is overridable by environment variable (`POKECOLLECTOR_REPO`,
 `POKECOLLECTOR_HEALTH_URL`, `POKECOLLECTOR_TAG_GLOB` and so on) so the scripts
