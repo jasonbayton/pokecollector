@@ -11,7 +11,7 @@ from schemas import CollectionItemCreate, CollectionItemUpdate, CollectionItemRe
 from services import pokemon_api
 from services.card_fallbacks import apply_cross_language_fallbacks, build_missing_language_card
 from services.card_numbers import card_number_matches, card_number_variants
-from services.text_search import accent_insensitive_contains
+from services.text_search import accent_insensitive_contains, strip_diacritics
 from services.collection_photos import MAX_UPLOAD_BYTES, InvalidPhoto, normalize_photo
 from services.deleted_collection import (
     archive_collection_item,
@@ -574,7 +574,9 @@ def get_collection_facets(
     return {
         "sets": sorted(
             ({"id": row[0], "name": row[1]} for row in set_rows if row[0] and row[1]),
-            key=lambda entry: entry["name"],
+            # Accent-insensitive, because the browser sorted with localeCompare
+            # and Python's codepoint order files "Ecarlate et Violet" after Z.
+            key=lambda entry: (strip_diacritics(entry["name"]).casefold(), entry["name"]),
         ),
         "variants": sorted(row[0] for row in variant_rows if row[0]),
     }
@@ -634,34 +636,16 @@ def search_collection(
 
     term = (q or "").strip()
     if term:
-        # Every word must match something, though not all the same thing. The
-        # trade picker searched one concatenated string, so "sprigatito
-        # scarlet" found Sprigatito from Scarlet & Violet; checking the whole
-        # phrase against each field separately loses that.
-        clauses = []
-        for word in term.split():
-            # The collector number is compared on its normalised forms rather
-            # than as a substring, which is what the binder picker did: "2" is
-            # not a way of asking for card 25. Digits inside a card's name
-            # still match, because both pickers searched names by substring.
-            word_clauses = [
-                accent_insensitive_contains(db, Card.name, word),
-                accent_insensitive_contains(db, Set.name, word),
-                accent_insensitive_contains(db, Card.set_id, word),
-            ]
-            number_forms = {form.casefold() for form in card_number_variants(word)}
-            if number_forms:
-                word_clauses.append(func.lower(Card.number).in_(sorted(number_forms)))
-            clauses.append(or_(*[clause for clause in word_clauses if clause is not None]))
-        # "SV1 25": a set code and a number together. The code may be written
-        # as the abbreviation or the catalogue set id.
-        # Set ids carry dots - sv03.5 - and the old Trades search matched them
-        # because it concatenated the fields into one haystack.
+        # "SV1 25": a set code and a number together. A query of that shape
+        # asks for one specific card, so it replaces word matching rather than
+        # widening it - evaluating both meant "MEW 25" also returned any card
+        # named Mew that happened to be numbered 25, which neither picker did.
+        # Set ids carry dots, as in sv03.5.
         shortcode = re.fullmatch(r"([A-Za-z]+[0-9.]*)\s+([0-9]+[A-Za-z]*)", term)
         if shortcode:
             code, number = shortcode.groups()
             number_forms = {form.casefold() for form in card_number_variants(number)}
-            shortcode_clause = and_(
+            query = query.filter(
                 or_(
                     func.lower(Set.abbreviation) == code.casefold(),
                     func.lower(Set.tcg_set_id) == code.casefold(),
@@ -669,9 +653,28 @@ def search_collection(
                 ),
                 func.lower(Card.number).in_(sorted(number_forms)),
             )
-            query = query.filter(or_(and_(*clauses), shortcode_clause))
-            clauses = []
-        query = query.filter(and_(*clauses))
+        else:
+            # Every word must match something, though not all the same thing.
+            # The trade picker searched one concatenated string, so "sprigatito
+            # scarlet" found Sprigatito from Scarlet & Violet; checking the
+            # whole phrase against each field separately loses that.
+            for word in term.split():
+                # The collector number is compared on its normalised forms
+                # rather than as a substring, which is what the binder picker
+                # did: "2" is not a way of asking for card 25. Digits inside a
+                # card's name still match, because both pickers searched names
+                # by substring.
+                word_clauses = [
+                    accent_insensitive_contains(db, Card.name, word),
+                    accent_insensitive_contains(db, Set.name, word),
+                    accent_insensitive_contains(db, Card.set_id, word),
+                ]
+                number_forms = {form.casefold() for form in card_number_variants(word)}
+                if number_forms:
+                    word_clauses.append(func.lower(Card.number).in_(sorted(number_forms)))
+                query = query.filter(
+                    or_(*[clause for clause in word_clauses if clause is not None])
+                )
 
     items = (
         # Most recently added first, which is the order both pickers showed

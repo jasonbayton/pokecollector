@@ -107,6 +107,20 @@ class CollectionSearchTests(unittest.TestCase):
                 found = self._search(q=term)
                 self.assertEqual([item.card_id for item in found], ["sv1-25_en"])
 
+    def test_a_shortcode_does_not_drag_in_unrelated_cards_of_that_number(self):
+        # The bystander. "MEW 25" asks for card 25 of the MEW set. Evaluating
+        # the query as a shortcode AND as two loose words also returned any
+        # card named Mew that happened to be numbered 25, which neither picker
+        # did.
+        self.db.add(Set(id="mew_en", tcg_set_id="mew", name="151",
+                        abbreviation="MEW", lang="en"))
+        self.db.commit()
+        wanted = self._card("mew-25_en", "Bulbasaur", "25", set_id="mew")
+        self._card("sv1-25_en", "Mew", "25")
+
+        found = [item.card_id for item in self._search(q="MEW 25")]
+        self.assertEqual(found, [wanted.id])
+
     def test_a_padded_number_matches_the_shortcode(self):
         self._card("sv1-007_en", "Charmander", "007")
         self.assertEqual(len(self._search(q="SVI 7")), 1)
