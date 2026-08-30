@@ -534,7 +534,9 @@ def get_collection_facets(
     stop being a reason to fetch everything.
     """
     set_rows = (
-        db.query(Set.id, Set.name)
+        # The TCGdex set id, not the composite Set.id: this value is fed
+        # straight back to the search endpoint, which filters Card.set_id.
+        db.query(Set.tcg_set_id, Set.name)
         .join(Card, Card.set_id == Set.tcg_set_id)
         .join(CollectionItem, CollectionItem.card_id == Card.id)
         .filter(
@@ -547,9 +549,13 @@ def get_collection_facets(
     )
     variant_rows = (
         db.query(CollectionItem.variant)
+        .join(Card, Card.id == CollectionItem.card_id)
         .filter(
             CollectionItem.user_id == current_user.id,
             CollectionItem.variant.isnot(None),
+            # Without this a hidden card, a digital one for instance, still
+            # contributed its variant to the dropdown.
+            visible_any_card_filter(db, current_user.id, "all"),
         )
         .distinct()
         .all()
@@ -610,6 +616,11 @@ def search_collection(
         clauses = [
             accent_insensitive_contains(db, Card.name, term),
             accent_insensitive_contains(db, Set.name, term),
+            # Both pickers matched the raw set id and treated the collector
+            # number as a substring, so "2" found card 25. Exact normalised
+            # forms alone would have quietly narrowed that.
+            accent_insensitive_contains(db, Card.set_id, term),
+            accent_insensitive_contains(db, Card.number, term),
         ]
         # A number also matches the collector number, on the normalised forms
         # the rest of the app uses, so "7" finds a card printed "007". Names
@@ -639,7 +650,10 @@ def search_collection(
         ).filter(or_(*clauses))
 
     items = (
-        query.order_by(Card.name.asc(), Card.number.asc(), CollectionItem.id.asc())
+        # Most recently added first, which is the order both pickers showed
+        # before: they read the collection endpoint's default sort. It also
+        # makes the capped result the most useful subset while typing.
+        query.order_by(CollectionItem.added_at.desc(), CollectionItem.id.desc())
         .limit(limit)
         .all()
     )

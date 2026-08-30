@@ -145,7 +145,16 @@ class CollectionFacetTests(CollectionSearchTests):
     def test_it_lists_the_sets_present_in_the_collection(self):
         self._card("sv1-25_en", "Sprigatito", "25")
         facets = self._facets()
-        self.assertEqual(facets["sets"], [{"id": "sv1_en", "name": "Scarlet & Violet"}])
+        # The TCGdex id, because that is what the search endpoint filters on.
+        self.assertEqual(facets["sets"], [{"id": "sv1", "name": "Scarlet & Violet"}])
+
+    def test_a_facet_id_actually_filters_the_search(self):
+        # These two endpoints are used together: the dropdown is built from
+        # one and its value is passed to the other. Returning the composite
+        # Set.id here made every set filter match nothing.
+        self._card("sv1-25_en", "Sprigatito", "25")
+        set_id = self._facets()["sets"][0]["id"]
+        self.assertEqual(len(self._search(set_id=set_id)), 1)
 
     def test_it_lists_each_set_once_however_many_cards_are_owned(self):
         self._card("sv1-25_en", "Sprigatito", "25")

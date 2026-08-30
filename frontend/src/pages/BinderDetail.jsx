@@ -6,6 +6,7 @@ import { getBinderCards, removeCardFromBinder, removeBinderEntry, addCardToBinde
 import { useSettings } from '../contexts/SettingsContext'
 import toast from 'react-hot-toast'
 import { hasCatalogueImage, resolveCardImageUrl } from '../utils/imageUrl'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { cardNumberMatches } from '../utils/cardNumbers'
 import { normalizeSearchText, textIncludes } from '../utils/textSearch'
 import { tcgdexLanguageLabel } from '../utils/tcgdexLanguages'
@@ -283,10 +284,11 @@ export default function BinderDetail() {
 
   // Searched on the server and bounded to what the picker shows. This used to
   // fetch every collection row to display twenty-four of them.
+  const debouncedSearchQuery = useDebouncedValue(searchQuery)
   const { data: collectionData } = useQuery({
-    queryKey: ['collection-search', 'binder', searchQuery, filterSet, filterVariant, filterCondition],
+    queryKey: ['collection-search', 'binder', debouncedSearchQuery, filterSet, filterVariant, filterCondition],
     queryFn: () => searchCollection({
-      q: searchQuery,
+      q: debouncedSearchQuery,
       set_id: filterSet || undefined,
       variant: filterVariant || undefined,
       condition: filterCondition || undefined,

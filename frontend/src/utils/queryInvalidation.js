@@ -8,6 +8,12 @@ export function invalidateTcgdexFilterLanguages(queryClient) {
 /** Refresh every cached card-tile view affected by a collection/wishlist mutation. */
 export function invalidateCardState(queryClient, { setId } = {}) {
   queryClient.invalidateQueries({ queryKey: ['collection'] })
+  // The bounded picker lookups are the same data under different keys. Without
+  // these, a trade or binder picker goes on offering a card the mutation just
+  // removed, and the set and variant dropdowns keep listing sets no longer
+  // owned.
+  queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === 'collection-search' })
+  queryClient.invalidateQueries({ queryKey: ['collection-facets'] })
   queryClient.invalidateQueries({ queryKey: ['wishlist'] })
   queryClient.invalidateQueries({ queryKey: ['dashboard'] })
   queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === 'card-search' })

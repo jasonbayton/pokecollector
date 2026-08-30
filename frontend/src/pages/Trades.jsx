@@ -24,6 +24,7 @@ import { CollectionCardIdentity } from '../components/CollectionCardImage'
 import { getEffectiveCardPrice, priceFieldFromPrimary } from '../utils/prices'
 import { formatMoneyInputValue, parseMoneyInputValue } from '../utils/moneyInput'
 import { invalidateCardState, invalidateTcgdexFilterLanguages } from '../utils/queryInvalidation'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { buildTradeUpdatePayload, findNewTradeDraftItem, isCashTradeItem, snapshotTradeCard, tradeToDraft } from '../utils/tradeDraft'
 
 const CONDITIONS = ['Mint', 'NM', 'LP', 'MP', 'HP']
@@ -286,9 +287,10 @@ export default function Trades() {
 
   // Searched on the server and bounded to what this list shows. It used to
   // download every row to display twelve.
+  const debouncedCollectionFilter = useDebouncedValue(collectionFilter)
   const { data: collectionItems = [] } = useQuery({
-    queryKey: ['collection-search', 'trades', collectionFilter],
-    queryFn: () => searchCollection({ q: collectionFilter.trim(), limit: 12 }).then(r => r.data),
+    queryKey: ['collection-search', 'trades', debouncedCollectionFilter],
+    queryFn: () => searchCollection({ q: debouncedCollectionFilter.trim(), limit: 12 }).then(r => r.data),
     keepPreviousData: true,
   })
 
