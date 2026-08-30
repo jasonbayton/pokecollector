@@ -453,6 +453,10 @@ def _load_user_stats(db: Session, user_ids: list[int] | None = None, price_field
         BinderSlot, BinderSlot.binder_id == Binder.id
     ).filter(
         Binder.user_id.in_(active_user_ids),
+        # A wishlist binder lays out cards the user does NOT own, so filling
+        # one is not a collecting milestone. Without this, four filled
+        # wishlist pages earned both binder achievements with nothing owned.
+        Binder.binder_type == "collection",
         Binder.grid_rows.isnot(None),
         Binder.grid_columns.isnot(None),
     ).group_by(

@@ -6,7 +6,7 @@ try:
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
 
-    from api.social import ACHIEVEMENTS, _load_user_stats
+    from api.social import ACHIEVEMENTS, FULL_BINDER_MIN_PAGES, _load_user_stats
     from database import Base
     from models import Binder, BinderCard, BinderSlot, Card, CollectionItem, User
 
@@ -134,6 +134,28 @@ class CraftAchievementTests(unittest.TestCase):
         stats = _load_user_stats(self.db, [self.user.id])[self.user.id]
         self.assertEqual(stats["full_binder_flag"], 0)
 
+    def test_a_filled_wishlist_binder_earns_no_binder_milestone(self):
+        # A wishlist binder lays out cards the user does not own. Counting it
+        # granted both binder milestones to someone owning nothing at all.
+        wishlist_binder = Binder(
+            name="Wanted",
+            user_id=self.user.id,
+            binder_type="wishlist",
+            grid_rows=3,
+            grid_columns=3,
+        )
+        self.db.add(wishlist_binder)
+        self.db.commit()
+        for page in range(1, 5):
+            for pocket in range(1, 10):
+                self._add_slot(wishlist_binder, "holo", page=page, pocket=pocket)
+        self.db.commit()
+
+        stats = _load_user_stats(self.db, [self.user.id])[self.user.id]
+
+        self.assertEqual(stats["complete_binder_page_flag"], 0)
+        self.assertEqual(stats["full_binder_flag"], 0)
+
     def test_achievement_catalogue_has_all_craft_milestones_and_valid_badges(self):
         expected_ids = {
             "holo_hunter_10",
@@ -161,6 +183,16 @@ class CraftAchievementTests(unittest.TestCase):
         badge_ids = [achievement["badge_id"] for achievement in ACHIEVEMENTS]
         self.assertEqual(len(set(badge_ids)), len(badge_ids))
         self.assertTrue(all(1 <= badge_id <= 77 for badge_id in badge_ids))
+
+        # The binder milestone's copy names its threshold, because a binder
+        # does not record how many pages it has and "complete" would claim
+        # something the data cannot establish. Changing the constant without
+        # the copy would leave the app promising the wrong thing.
+        self.assertEqual(
+            FULL_BINDER_MIN_PAGES,
+            4,
+            "FULL_BINDER_MIN_PAGES changed: update fullBinder and fullBinderDesc in en.js to match",
+        )
 
         english = Path(__file__).parents[2] / "frontend" / "src" / "i18n" / "en.js"
         translation_source = english.read_text()
