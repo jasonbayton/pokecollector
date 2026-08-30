@@ -445,6 +445,46 @@ def record_ground_truth(
     return updated
 
 
+def record_variant_decision(
+    user_id: int,
+    job_id: int,
+    item_id: int,
+    *,
+    recognized_finish,
+    recognized_variant: str | None,
+    filed_variant: str | None,
+) -> int:
+    """Record the scanner's finish reading beside the variant filing outcome."""
+    updated = 0
+    pattern = f"job{_safe(job_id)}-item{_safe(item_id)}-*.json"
+    paths: set[Path] = set()
+    for root in _cleanup_roots():
+        user_dir = _user_dir(user_id, root)
+        if user_dir is not None and user_dir.is_dir():
+            paths.update(user_dir.glob(f"*/{pattern}"))
+    for path in sorted(paths):
+        temp: Path | None = None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            data["variant"] = {
+                "recognized_finish": recognized_finish,
+                "recognized_variant": recognized_variant,
+                "filed_variant": filed_variant,
+            }
+            temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+            _write_private(
+                temp,
+                json.dumps(data, indent=2, ensure_ascii=False, default=str),
+            )
+            temp.replace(path)
+            updated += 1
+        except Exception:
+            if temp:
+                temp.unlink(missing_ok=True)
+            logger.exception("Failed to record scan finish at %s", path)
+    return updated
+
+
 def _delete_user_dir(root: Path, user_id: int) -> dict[str, int]:
     user_dir = _user_dir(user_id, root)
     if user_dir is None or not user_dir.exists():

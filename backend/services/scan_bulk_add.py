@@ -10,9 +10,67 @@ from sqlalchemy.orm import Session
 
 from models import Card, CollectionItem, ScanJob, ScanJobItem, User
 from services.scan_storage import delete_scan_image
+from services.collection_options import ALLOWED_VARIANTS
+from services.scan_trace import record_variant_decision
 
 
 DEFAULT_CONDITION = "Mint"
+
+_FINISH_VARIANTS = {
+    "normal": "Normal",
+    "non foil": "Normal",
+    "non-foil": "Normal",
+    "nonfoil": "Normal",
+    "matte": "Normal",
+    "artwork foil": "Holo",
+    "artwork_foil": "Holo",
+    "foil artwork": "Holo",
+    "holo": "Holo",
+    "holographic": "Holo",
+    "holofoil": "Holo",
+    "face foil": "Reverse Holo",
+    "face_foil": "Reverse Holo",
+    "reverse holo": "Reverse Holo",
+    "reverse-holo": "Reverse Holo",
+    "reverse holofoil": "Reverse Holo",
+    "first edition": "First Edition",
+    "first-edition": "First Edition",
+    "first_edition": "First Edition",
+}
+
+
+def normalize_recognized_finish(value) -> str | None:
+    """Map the model's physical finish description to a collection variant."""
+    if not isinstance(value, str):
+        return None
+    finish = " ".join(value.strip().casefold().replace("_", " ").split())
+    if not finish:
+        return None
+    if finish in _FINISH_VARIANTS:
+        return _FINISH_VARIANTS[finish]
+    if "first" in finish and "edition" in finish:
+        return "First Edition"
+    if "reverse" in finish or (
+        ("border" in finish or "face" in finish)
+        and "foil" in finish
+        and ("matte" in finish or "artwork" in finish)
+    ):
+        return "Reverse Holo"
+    if "artwork" in finish and ("foil" in finish or "holo" in finish):
+        return "Holo"
+    if "non" in finish and ("foil" in finish or "holo" in finish):
+        return "Normal"
+    return None
+
+
+def card_offers_variant(card: Card, variant: str) -> bool:
+    """Read the catalogue's declared printing flags without inferring one."""
+    return bool(getattr(card, {
+        "Normal": "variants_normal",
+        "Reverse Holo": "variants_reverse",
+        "Holo": "variants_holo",
+        "First Edition": "variants_first_edition",
+    }.get(variant, ""), False))
 
 
 def _positive_price(card: Card, fields: tuple[str, ...]) -> bool:
@@ -55,6 +113,17 @@ def default_variant(card: Card) -> str:
         if exists:
             return variant
     return "Normal"
+
+
+def variant_for_recognized_finish(card: Card, finish) -> str:
+    """Use a supported scanned finish, otherwise retain the established default."""
+    default = default_variant(card)
+    recognized = normalize_recognized_finish(finish)
+    # First Edition is a stamp, not a finish. It may be retained in diagnostics
+    # when volunteered, but it cannot override the automatic variant choice.
+    if recognized in (None, "First Edition") or not card_offers_variant(card, recognized):
+        return default
+    return recognized if recognized in ALLOWED_VARIANTS else default
 
 
 def _suggested_match(item: ScanJobItem) -> dict | None:
@@ -106,9 +175,10 @@ def _add_collection_copy(
     *,
     card: Card,
     current_user: User,
+    recognized_finish=None,
 ) -> None:
     """Apply the manual add defaults without committing the surrounding job."""
-    variant = default_variant(card)
+    variant = variant_for_recognized_finish(card, recognized_finish)
     existing = (
         db.query(CollectionItem)
         .filter(
@@ -152,6 +222,7 @@ def add_all_confident_scan_items(
     again before mutating collection or scan state.
     """
     image_paths: list[str | None] = []
+    variant_decisions: list[tuple[int, int, object, str | None, str | None]] = []
     try:
         job = (
             db.query(ScanJob)
@@ -198,7 +269,28 @@ def add_all_confident_scan_items(
                     detail="Prepared catalogue card is no longer available.",
                 )
 
-            _add_collection_copy(db, card=card, current_user=current_user)
+            # A read finish is used, including when it differs from the
+            # default. The default is not a competing observation: it is what
+            # is assumed when nothing has been read, so treating a real
+            # reading as a disagreement with it would halt on exactly the
+            # cards this exists to get right. A reverse holo pulled from a
+            # pack is the ordinary case, not an anomaly needing a person.
+            #
+            # variant_for_recognized_finish still refuses a printing the card
+            # does not offer, which is the reading that must never be trusted.
+            recognized_finish = (item.recognized or {}).get("finish")
+            recognized_variant = normalize_recognized_finish(recognized_finish)
+            variant = variant_for_recognized_finish(card, recognized_finish)
+
+            _add_collection_copy(
+                db,
+                card=card,
+                current_user=current_user,
+                recognized_finish=recognized_finish,
+            )
+            variant_decisions.append(
+                (current_user.id, item.id, recognized_finish, recognized_variant, variant)
+            )
             image_paths.append(item.image_path)
             item.resolved = True
             item.image_path = None
@@ -214,4 +306,13 @@ def add_all_confident_scan_items(
     # leaves the photo for manual review, while a committed resolution removes it.
     for image_path in image_paths:
         delete_scan_image(image_path)
+    for user_id, item_id, finish, recognized_variant, filed_variant in variant_decisions:
+        record_variant_decision(
+            user_id,
+            job_id,
+            item_id,
+            recognized_finish=finish,
+            recognized_variant=recognized_variant,
+            filed_variant=filed_variant,
+        )
     return added

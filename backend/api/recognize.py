@@ -500,6 +500,9 @@ IMPORTANT ACCURACY RULES:
   details. If any character is unclear, return null instead of guessing.
 - Only return set_code when printed alphanumeric characters are visible near the card
   number. Do not infer a code from the artwork or from recognizing the set.
+- finish describes visible foil only: use artwork_foil when foil is limited to the artwork
+  panel, face_foil when the border and rest of the card face are foiled but the artwork is
+  matte, non_foil when no foil is visible, or null when the finish is unclear. Do not guess.
 
 Extract:
 1. Card name exactly as printed, in the card's language
@@ -512,6 +515,7 @@ Extract:
 8. HP value, or null
 9. Two-letter ISO language code
 10. Artist/illustrator credit, or null
+11. Visible finish, or null
 
 Respond ONLY with this exact JSON:
 {
@@ -524,7 +528,8 @@ Respond ONLY with this exact JSON:
   "card_type": "Pokemon/Trainer/Energy",
   "hp": null,
   "language": "en",
-  "artist": null
+  "artist": null,
+  "finish": null
 }
 Replace a null only when that exact value is clearly visible."""
 
@@ -1444,11 +1449,14 @@ For each card return the same information as an individual scan:
 - hp: HP value or null
 - language: two-letter ISO language code
 - artist: printed illustrator credit, or null
+- finish: artwork_foil when foil is limited to the artwork panel, face_foil when the
+  border and rest of the card face are foiled but the artwork is matte, non_foil when no
+  foil is visible, or null when unclear
 
 Only report small identity text when every character is visible. Never infer set_code from
-the artwork or from recognizing the set. If a detail is unclear, use null rather than
-guessing. Respond ONLY with a JSON array containing one object per card, without markdown
-or explanation.
+the artwork or from recognizing the set. Never guess a finish. If a detail is unclear, use
+null rather than guessing. Respond ONLY with a JSON array containing one object per card,
+without markdown or explanation.
 """
 
 

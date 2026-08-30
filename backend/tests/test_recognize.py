@@ -48,6 +48,13 @@ class RecognizeConfigTests(unittest.TestCase):
             self.assertEqual(get_gemini_model(), "gemini-3.5-flash")
             self.assertIn("/gemini-3.5-flash:generateContent", build_gemini_generate_url())
 
+    def test_single_and_composite_prompts_describe_the_same_physical_finishes(self):
+        for prompt in (RECOGNIZE_PROMPT, COMPOSITE_PROMPT):
+            self.assertIn("artwork_foil", prompt)
+            self.assertIn("face_foil", prompt)
+            self.assertIn("non_foil", prompt)
+            self.assertIn("null when", prompt)
+
 
 @unittest.skipUnless(API_TEST_DEPS_AVAILABLE, "FastAPI/httpx are not installed in this lightweight test environment")
 class RecognizeCardNumberTests(unittest.TestCase):
