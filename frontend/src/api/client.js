@@ -119,12 +119,27 @@ export const recognizeCard = (imageFile) => {
 }
 
 // Persistent background card-scan queue.
+// A scan upload carries the camera's original files, up to 50 of them at
+// 15 MB each, so it is the one request that legitimately runs for minutes on
+// a domestic upstream. The client's 30 second default aborted it while the
+// SERVER carried on and created the job, so the browser reported a failure
+// for an upload that had in fact succeeded. Retrying then produced a second
+// job holding the same photographs, and the abandoned first one sat in the
+// queue asking for decisions on cards that were already filed.
+export const scanUploadTimeoutMs = (files = []) => {
+  const bytes = files.reduce((total, file) => total + (file?.size || 0), 0)
+  // Roughly 100 kB/s of upstream, which is pessimistic on purpose: finishing
+  // late costs nothing, and giving up early costs a duplicate job.
+  return Math.min(20 * 60_000, Math.max(2 * 60_000, Math.ceil(bytes / 100) ))
+}
+
 export const enqueueScanJob = (files = [], individualPositions = []) => {
   const formData = new FormData()
   files.forEach(file => formData.append('files', file))
   formData.append('individual_positions', JSON.stringify(individualPositions))
   return api.post('/cards/recognize/jobs', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: scanUploadTimeoutMs(files),
   }).then(r => r.data)
 }
 export const getScanJobs = () => api.get('/cards/recognize/jobs').then(r => r.data)
