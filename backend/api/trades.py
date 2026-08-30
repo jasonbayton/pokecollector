@@ -133,7 +133,7 @@ def _merge_or_create_collection_item(
     variant: str,
     lang: str,
     purchase_price,
-    stated=True,
+    stated,
 ) -> CollectionItem:
     existing = db.query(CollectionItem).filter(
         CollectionItem.card_id == card.id,
@@ -336,7 +336,7 @@ def _merge_locked_collection_item(
     variant: str,
     lang: str,
     purchase_price,
-    stated=True,
+    stated,
 ) -> CollectionItem:
     matches = _matching_collection_items(
         collection_items,
@@ -1164,6 +1164,8 @@ def update_trade(
                             quantity=new_quantity,
                             condition=new_condition or "Mint",
                             variant=new_variant or "Normal",
+                            # Defaulted here means the edit did not name them.
+                            stated=new_condition is not None and new_variant is not None,
                             lang=new_lang or "en",
                             purchase_price=purchase_price,
                         )
@@ -1194,6 +1196,7 @@ def update_trade(
                         quantity=new_quantity - old_quantity,
                         condition=trade_item.condition or "Mint",
                         variant=trade_item.variant or "Normal",
+                        stated=trade_item.attributes_confirmed,
                         lang=trade_item.lang or "en",
                         purchase_price=purchase_price,
                     )
@@ -1224,6 +1227,7 @@ def update_trade(
                 variant=prepared["variant"],
                 lang=prepared["lang"],
                 purchase_price=prepared["purchase_price"],
+                stated=prepared["attributes_stated"],
             )
             value_per_card = prepared["value_per_card"]
             db.add(TradeItem(

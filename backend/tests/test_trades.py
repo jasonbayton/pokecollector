@@ -607,6 +607,53 @@ class TradeApiTests(unittest.TestCase):
         self.assertEqual(sum(item.quantity for item in collection_items), 2)
         self.assertEqual({item.purchase_price for item in collection_items}, {3, 14})
 
+    def test_editing_a_trade_to_add_a_card_without_stating_its_attributes(self):
+        # Review found update_trade computing whether the caller stated both
+        # halves and then not passing it, so the helper's default quietly said
+        # yes. The parameter is now required; this pins the behaviour.
+        created = create_trade(
+            TradeCreate(
+                trade_date=datetime.date(2026, 7, 15),
+                incoming=[TradeIncomingItemCreate(
+                    card_id=self.incoming_card.id, quantity=1,
+                    condition="NM", variant="Normal", lang="en",
+                )],
+            ),
+            current_user=self.user,
+            db=self.db,
+        )
+        historical = [item for item in created.items if item.direction == "incoming"][0]
+
+        update_trade(
+            created.id,
+            TradeUpdate(
+                trade_date=created.trade_date,
+                incoming=[
+                    TradeIncomingItemUpdate(
+                        trade_item_id=historical.id, quantity=1,
+                        condition="NM", variant="Normal", lang="en",
+                    ),
+                    # Neither condition nor variant named.
+                    TradeIncomingItemUpdate(card_id=self.incoming_card.id, quantity=1, lang="en"),
+                ],
+            ),
+            current_user=self.user,
+            db=self.db,
+        )
+
+        rows = (
+            self.db.query(CollectionItem)
+            .filter(
+                CollectionItem.user_id == self.user.id,
+                CollectionItem.card_id == self.incoming_card.id,
+            )
+            .all()
+        )
+        self.assertTrue(
+            any(row.attributes_confirmed is not True for row in rows),
+            "a copy added without naming condition or variant must not be recorded as settled",
+        )
+
     def test_reversing_an_outgoing_trade_restores_the_rows_review_state(self):
         # A row that wanted checking, traded away and then taken back off the
         # trade, must come back wanting checking. Recreating it as settled hid
