@@ -463,6 +463,7 @@ async def default_composite_processor(
 ) -> list[dict | None]:
     """Recognize a small grid and flag unclear positions for individual work."""
     from api.recognize import (
+        _has_usable_code_number,
         TCGDEX_REQUEST_BURST,
         CompositeRecognitionError,
         match_composite_card_info,
@@ -523,7 +524,13 @@ async def default_composite_processor(
             for position in range(len(images)):
                 card_info = recognized_by_position.get(position)
                 has_name = bool(str((card_info or {}).get("name") or "").strip())
-                if not has_name:
+                # The matcher's own rule, not a looser restatement of it. A
+                # merely non-empty pair such as a set code with spaces passes
+                # a "not blank" test, is then rejected by the matcher, and
+                # that exception fails the WHOLE composite claim rather than
+                # dropping one position to individual fallback.
+                has_code_number = _has_usable_code_number(card_info or {})
+                if not (has_name or has_code_number):
                     traces[position].record_decision("individual_fallback")
                     continue
                 pending.append((position, card_info))

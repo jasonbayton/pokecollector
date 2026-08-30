@@ -815,6 +815,35 @@ class CompositeVisionCallTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fake.search_calls, 3, "the unnamed position was matched anyway")
         self.assertIsNone(results[1])
 
+    async def test_code_and_number_without_a_name_reaches_the_composite_matcher(self):
+        rows = (
+            '[{"index": 1, "name": "", "set_code": "SVI", "number_local": "25"},'
+            ' {"index": 2, "name": "Pikachu"}]'
+        )
+        generate = AsyncMock(return_value=(rows, None))
+        matched = []
+
+        async def matcher(_db, card_info, **_kwargs):
+            matched.append(card_info)
+            return {
+                "recognized": card_info,
+                "matches": [{"id": "sv1-025_en"}],
+                "_identity_confident": True,
+            }
+
+        with patch("api.recognize.get_gemini_key", return_value="test-key"), \
+                patch("services.scan_providers.ScanProvider.generate_text", new=generate), \
+                patch("api.recognize.match_composite_card_info", new=matcher):
+            results = await scan_queue.default_composite_processor(
+                self.db,
+                1,
+                [_jpeg("red"), _jpeg("blue")],
+                ["image/jpeg", "image/jpeg"],
+            )
+
+        self.assertEqual(matched[0], {"index": 1, "name": "", "set_code": "SVI", "number_local": "25", "number": "25", "number_total": None})
+        self.assertEqual(results[0]["matches"][0]["id"], "sv1-025_en")
+
 
 @unittest.skipUnless(DEPS_AVAILABLE, "SQLAlchemy is not installed")
 class CompositeRequestGateTests(unittest.IsolatedAsyncioTestCase):
