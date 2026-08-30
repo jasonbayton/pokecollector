@@ -248,9 +248,16 @@ class ScanJobsApiTests(unittest.TestCase):
             "card-1_en", 1, "Mint", "Normal",
         ))
 
-    def test_resolve_labels_diagnostics_only_with_a_returned_candidate(self):
+    def test_resolve_labels_a_returned_candidate_as_a_candidate_correction(self):
         created = self._enqueue()
         item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
+        self.db.add(Card(
+            id="card-1_en",
+            tcg_card_id="card-1",
+            name="Candidate card",
+            lang="en",
+            variants_normal=True,
+        ))
         item.status = "done"
         item.matches = [{"id": "card-1_en", "tcg_card_id": "card-1"}]
         self.db.commit()
@@ -262,9 +269,46 @@ class ScanJobsApiTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200, response.text)
-        label.assert_called_once_with(self.user.id, created["id"], item.id, "card-1")
+        label.assert_called_once_with(
+            self.user.id,
+            created["id"],
+            item.id,
+            "card-1",
+            source="candidate",
+        )
 
-    def test_resolve_rejects_ground_truth_outside_the_returned_candidates(self):
+    def test_resolve_accepts_a_catalogue_card_that_was_not_a_candidate(self):
+        created = self._enqueue()
+        item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
+        manual_card = Card(
+            id="different-card_de",
+            tcg_card_id="different-card",
+            name="Manually identified card",
+            lang="de",
+            variants_normal=True,
+        )
+        self.db.add(manual_card)
+        item.status = "failed"
+        item.matches = []
+        self.db.commit()
+
+        with patch("services.scan_trace.record_ground_truth", return_value=1) as label:
+            response = self.client.post(
+                f"/api/cards/recognize/jobs/{created['id']}/items/{item.id}/resolve",
+                json={"card_id": "different-card", "lang": "de"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["resolved"])
+        label.assert_called_once_with(
+            self.user.id,
+            created["id"],
+            item.id,
+            "different-card",
+            source="manual",
+        )
+
+    def test_resolve_rejects_a_non_catalogue_manual_card_server_side(self):
         created = self._enqueue()
         item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
         item.status = "done"
@@ -273,10 +317,10 @@ class ScanJobsApiTests(unittest.TestCase):
 
         response = self.client.post(
             f"/api/cards/recognize/jobs/{created['id']}/items/{item.id}/resolve",
-            json={"card_id": "different-card"},
+            json={"card_id": "rubbish-card", "lang": "de"},
         )
 
-        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.status_code, 404)
         self.assertFalse(self.db.get(ScanJobItem, item.id).resolved)
 
     def test_failed_photo_is_retained_and_retry_resets_it(self):

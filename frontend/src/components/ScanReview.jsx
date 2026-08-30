@@ -5,6 +5,7 @@ import { CardDisplay } from './card-system'
 import Modal from './ui/Modal'
 import { tcgdexLanguageLabel } from '../utils/tcgdexLanguages'
 import { formatRetryCountdown } from '../utils/retryCountdown'
+import ScanManualPicker from './ScanManualPicker'
 
 export function ScanZoomModal({ photoUrl, card, onClose, t }) {
   const candidateImage = card?.image_hd
@@ -150,6 +151,7 @@ function CandidateGrid({ item, matches, photoUrl, onSelect, t }) {
 export function ScanItemPanel({ jobId, item, onAdd, onRetry, onRetake, onDismiss, retryNow, isBusy = false, t }) {
   const photoUrl = useScanItemPhoto(jobId, item)
   const [photoExpanded, setPhotoExpanded] = useState(false)
+  const [manualPickerOpen, setManualPickerOpen] = useState(false)
   // isBusy covers the gap between submitting a re-take or a retry and the
   // refetch that reports the item as pending again. In that window the server
   // has already reset the scan, so the candidates on screen belong to a photo
@@ -163,6 +165,17 @@ export function ScanItemPanel({ jobId, item, onAdd, onRetry, onRetake, onDismiss
     <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
       {photoExpanded && (
         <ScanZoomModal photoUrl={photoUrl} onClose={() => setPhotoExpanded(false)} t={t} />
+      )}
+      {manualPickerOpen && (
+        <ScanManualPicker
+          defaultLang={item.recognized?.language || 'en'}
+          onSelect={match => {
+            setManualPickerOpen(false)
+            onAdd(item, match)
+          }}
+          onClose={() => setManualPickerOpen(false)}
+          t={t}
+        />
       )}
       <div className="flex gap-4">
         <button type="button" onClick={() => {
@@ -218,6 +231,9 @@ export function ScanItemPanel({ jobId, item, onAdd, onRetry, onRetake, onDismiss
                 className="btn-secondary justify-center">
                 <RefreshCw size={14} /> {t('scanner.retryIndividually')}
               </button>
+              <button type="button" onClick={() => setManualPickerOpen(true)} className="btn-secondary justify-center">
+                {t('scanner.manualPick')}
+              </button>
             </div>
           )}
 
@@ -236,6 +252,9 @@ export function ScanItemPanel({ jobId, item, onAdd, onRetry, onRetake, onDismiss
             {t('scanner.bestMatches')} ({item.matches.length})
           </p>
           <CandidateGrid item={item} matches={item.matches} photoUrl={photoUrl} onSelect={match => onAdd(item, match)} t={t} />
+          <button type="button" onClick={() => setManualPickerOpen(true)} className="btn-secondary mt-3 justify-center">
+            {t('scanner.manualPick')}
+          </button>
         </div>
       )}
     </article>

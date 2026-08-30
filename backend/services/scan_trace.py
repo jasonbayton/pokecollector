@@ -203,6 +203,7 @@ class ScanTrace:
             "candidates": [],
             "decision": {"mechanism": None, "selected": None},
             "ground_truth": None,
+            "ground_truth_source": None,
             "correct": None,
         }
         self._image: bytes | None = None
@@ -399,6 +400,8 @@ def record_ground_truth(
     job_id: int,
     item_id: int,
     card_id: str,
+    *,
+    source: str = "candidate",
 ) -> int:
     """Label all attempts for one reviewed item with the user's confirmed card."""
     if not card_id:
@@ -415,6 +418,7 @@ def record_ground_truth(
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             data["ground_truth"] = card_id
+            data["ground_truth_source"] = source
             selected = (data.get("decision") or {}).get("selected")
             # A trace that deliberately abstained did not make a top-1 choice.
             # Keep it labelled for retrieval analysis without counting it as an

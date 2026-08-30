@@ -71,7 +71,7 @@ export default function ScanAddModal({ match, defaultLang, onClose, onAdded }) {
       invalidateCardState(queryClient)
       invalidateTcgdexFilterLanguages(queryClient)
       toast.success(`${match.name} ${t('scanner.addedToCollection')}!`)
-      onAdded && onAdded()
+      onAdded && onAdded({ cardId: match.tcg_card_id, lang })
       onClose()
     } catch (err) {
       const msg = err?.response?.data?.detail || t('card.addFailed')

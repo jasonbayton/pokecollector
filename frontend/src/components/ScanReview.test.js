@@ -193,6 +193,18 @@ describe('picking a candidate from a scan item', () => {
   })
 })
 
+describe('manually identifying a scan item', () => {
+  it.each([
+    { status: 'failed', matches: [] },
+    { status: 'done', matches: [] },
+    { status: 'done', matches: [starmie] },
+  ])('offers the catalogue picker for $status scans', (item) => {
+    renderPanel({ item: { ...reviewItem, ...item } })
+
+    expect(buttonLabelled('scanner.manualPick')).toBeDefined()
+  })
+})
+
 describe('retaking a scan photo', () => {
   it('offers Retake photo for a confident match that could still be wrong', () => {
     const onRetake = vi.fn()

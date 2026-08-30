@@ -1,6 +1,8 @@
 import json
 import os
 import stat
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -187,7 +189,10 @@ class ScanTraceTests(unittest.TestCase):
             trace.record_decision("test" if selected else "abstained", selected)
             trace.save()
 
-        self.assertEqual(record_ground_truth(self.user.id, 7, 9, "right-card"), 3)
+        self.assertEqual(
+            record_ground_truth(self.user.id, 7, 9, "right-card", source="manual"),
+            3,
+        )
         payload_paths = list(
             Path(self.temp_dir.name).glob(
                 f"user-{self.user.id}/*/job7-item9-*.json"
@@ -202,9 +207,39 @@ class ScanTraceTests(unittest.TestCase):
             sorted((payload["correct"] for payload in payloads), key=str),
             [False, None, True],
         )
+        self.assertEqual(
+            {payload["ground_truth_source"] for payload in payloads},
+            {"manual"},
+        )
         self.assertTrue(
             all(stat.S_IMODE(path.stat().st_mode) == 0o600 for path in payload_paths)
         )
+
+    def test_trace_analysis_reports_manual_corrections_as_never_retrieved(self):
+        self._enable(self.user)
+        trace = create_scan_trace(
+            self.db,
+            self.user.id,
+            mode="single",
+            job_id=7,
+            item_id=9,
+        )
+        trace.record_candidates([{"tcg_card_id": "wrong-card"}])
+        trace.record_decision("test", "wrong-card")
+        trace.save()
+        record_ground_truth(self.user.id, 7, 9, "manual-card", source="manual")
+
+        script = Path(__file__).parents[1] / "scripts" / "analyse_scan_traces.py"
+        result = subprocess.run(
+            [sys.executable, str(script), self.temp_dir.name],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("never retrieved: 1", result.stdout)
+        self.assertIn("manual=1", result.stdout)
 
     def test_delete_removes_only_the_requesting_users_trace_tree(self):
         self._enable(self.user)

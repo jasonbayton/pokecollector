@@ -41,6 +41,7 @@ router = APIRouter()
 
 class ResolveScanItemRequest(BaseModel):
     card_id: str | None = None
+    lang: str | None = None
 
 
 def _get_own_job(db: Session, job_id: int, current_user: User) -> ScanJob:
@@ -225,16 +226,33 @@ def resolve_scan_job_item(
         raise HTTPException(status_code=409, detail="This scan is still being processed.")
     card_id = str((data.card_id if data else "") or "").strip() or None
     if card_id:
+        from api.collection import ensure_card_exists
+        from services import pokemon_api
         allowed_ids = {
             str(match.get("tcg_card_id") or "")
             for match in (item.matches or [])
             if isinstance(match, dict)
         }
-        if card_id not in allowed_ids:
-            raise HTTPException(status_code=422, detail="Confirmed card is not a scan candidate.")
+        tcg_card_id, _ = pokemon_api.strip_lang_suffix(card_id)
+        selected_lang = str((data.lang if data else "") or "en").strip() or "en"
+        # Do not trust the picker: confirming a card must still prove that the
+        # exact catalogue printing exists in a supported language. This can
+        # fetch and commit, so it deliberately runs before scan resolution.
+        ensure_card_exists(
+            db,
+            f"{tcg_card_id}_{selected_lang}",
+            lang=selected_lang,
+            user_id=current_user.id,
+        )
         from services.scan_trace import record_ground_truth
 
-        record_ground_truth(current_user.id, job_id, item_id, card_id)
+        record_ground_truth(
+            current_user.id,
+            job_id,
+            item_id,
+            tcg_card_id,
+            source="candidate" if tcg_card_id in allowed_ids else "manual",
+        )
     return _item_payload(resolve_scan_item(db, item))
 
 
