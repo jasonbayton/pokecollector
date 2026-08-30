@@ -1177,6 +1177,26 @@ const en = {
     showingCards: 'Showing {count} of {total} cards',
   },
 
+  rapidEntry: {
+    open: 'Rapid entry',
+    title: 'Rapid set entry',
+    subtitle: 'Add a sorted pile by collector number, then commit it once.',
+    language: 'Language',
+    variantAutomatic: 'Match each card',
+    collectorNumber: 'Collector number',
+    collectorNumberPlaceholder: 'e.g. 044 or 74a',
+    numberNotFound: 'That collector number is not in this checklist.',
+    add: 'Add',
+    addOne: 'Add one copy',
+    removeOne: 'Remove one copy',
+    rowOptions: 'Edit this row',
+    commit: 'Commit {quantity} cards',
+    committing: 'Committing…',
+    committed: 'Rapid entry committed.',
+    commitFailed: 'Could not commit rapid entry.',
+    summary: '{quantity} cards committed - {added} new rows and {updated} updated rows.',
+  },
+
   // Card modal
   serverCollection: {
     title: 'Server collection',

@@ -175,6 +175,25 @@ class BulkCollectionAddResponse(BaseModel):
     errors: List[str] = []
 
 
+class RapidSetEntryItem(BaseModel):
+    card_id: str
+    quantity: int = Field(default=1, ge=1, le=MAX_CARD_QUANTITY)
+    condition: str = "Mint"
+    variant: str = "Normal"
+    lang: str = "en"
+
+
+class RapidSetEntryRequest(BaseModel):
+    set_id: str
+    items: List[RapidSetEntryItem] = Field(min_length=1, max_length=1000)
+
+
+class RapidSetEntryResponse(BaseModel):
+    added: int
+    updated: int
+    quantity: int
+
+
 class CollectionProductSourceResponse(BaseModel):
     product_card_id: int
     product_id: int

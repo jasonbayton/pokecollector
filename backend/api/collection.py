@@ -7,7 +7,7 @@ from typing import List, Optional
 from api.auth import get_current_user
 from database import get_db
 from models import BinderCard, CollectionItem, CollectionCardPhoto, Card, DeletedCollectionItem, ProductCard, ProductPurchase, Set, User
-from schemas import CollectionItemCreate, CollectionItemUpdate, CollectionItemResponse, BulkCollectionAddRequest, BulkCollectionAddResponse
+from schemas import CollectionItemCreate, CollectionItemUpdate, CollectionItemResponse, BulkCollectionAddRequest, BulkCollectionAddResponse, RapidSetEntryRequest, RapidSetEntryResponse
 from services import pokemon_api
 from services.card_fallbacks import apply_cross_language_fallbacks, build_missing_language_card
 from services.card_numbers import card_number_matches, card_number_variants
@@ -25,6 +25,8 @@ from services.digital_sets import digital_sets_enabled
 from services.standard_legality import is_standard_legal_card, is_standard_regulation_mark
 from services.tcgdex_languages import SUPPORTED_TCGDEX_LANGUAGES, has_lang_suffix, is_supported_tcgdex_language, normalize_tcgdex_language
 from services.collection_csv import collection_import_key, is_valid_collection_purchase_price, merge_collection_import_item, normalize_collection_variant
+from services.collection_options import ALLOWED_CONDITIONS, ALLOWED_VARIANTS
+from services.rapid_set_entry import commit_rapid_set_entry
 import datetime
 import csv
 import io
@@ -36,8 +38,6 @@ logger = logging.getLogger(__name__)
 CSV_IMPORT_COLUMNS = ["set_code", "number", "quantity", "condition", "variant", "lang", "purchase_price"]
 CSV_IMPORT_MAX_BYTES = 256 * 1024
 CSV_IMPORT_MAX_ROWS = 1000
-ALLOWED_CONDITIONS = {"Mint", "NM", "LP", "MP", "HP"}
-ALLOWED_VARIANTS = {"Normal", "Holo", "Reverse Holo", "First Edition"}
 ALLOWED_LANGS = set(SUPPORTED_TCGDEX_LANGUAGES)
 
 
@@ -863,6 +863,21 @@ def bulk_add_to_collection(
             errors.append(f"{item.card_id}: {str(exc)}")
 
     return BulkCollectionAddResponse(added=added, updated=updated, failed=failed, errors=errors)
+
+
+@router.post("/rapid-set-entry", response_model=RapidSetEntryResponse)
+def rapid_set_entry(
+    request: RapidSetEntryRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """File one already-resolved set session atomically, without upstream reads."""
+    return commit_rapid_set_entry(
+        db,
+        set_id=request.set_id,
+        items=request.items,
+        current_user=current_user,
+    )
 
 
 @router.post("/import-csv", response_model=BulkCollectionAddResponse)
