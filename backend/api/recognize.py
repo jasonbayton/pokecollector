@@ -8,6 +8,7 @@ import math
 import os
 import json
 import re
+import unicodedata
 import warnings
 from email.utils import parsedate_to_datetime
 from functools import lru_cache
@@ -552,15 +553,42 @@ def _identity_signal(target, candidate, matcher) -> int:
 
 
 def _confirmation_name(value) -> str | None:
-    """Normalise a name only for the post-retrieval confirmation check."""
-    text = _simplify_name(str(value or "")).casefold()
-    text = re.sub(r"[^a-z0-9]+", "", text)
+    """Normalise a name only for the post-retrieval confirmation check.
+
+    Keeps alphanumerics of ANY script. Restricting this to ASCII a-z0-9
+    silently reduced every Japanese, Chinese and Korean name to nothing, so
+    two different cards both normalised to empty and were read as agreeing -
+    which let a code-and-number lookup confidently file a card whose name
+    contradicted the photograph. Compatibility-normalise first so full-width
+    and half-width forms of the same name compare equal.
+    """
+    text = unicodedata.normalize("NFKC", _simplify_name(str(value or ""))).casefold()
+    text = "".join(ch for ch in text if ch.isalnum())
     return text or None
 
 
 def _code_number_name_agrees(card_info: dict, candidate: dict) -> bool:
-    """A readable name may confirm a direct printing lookup, never retrieve it."""
+    """A readable name may confirm a direct printing lookup, never retrieve it.
+
+    Compares against the recognised name in the CANDIDATE's own language where
+    that is known, because a Japanese candidate legitimately does not match an
+    English name_en and treating that as a contradiction would reject correct
+    results. Where the language is unknown, either reading may confirm.
+    """
     candidate_name = _confirmation_name(candidate.get("name"))
+    if candidate_name is None:
+        # Nothing to confirm against: unknown, not disagreement.
+        return True
+
+    candidate_lang = str(candidate.get("lang") or candidate.get("_lang") or "").strip().lower()
+    recognized_lang = str(card_info.get("language") or "").strip().lower()
+    if candidate_lang and recognized_lang:
+        field = "name" if candidate_lang == recognized_lang else "name_en"
+        expected = _confirmation_name(card_info.get(field))
+        if expected is None and field == "name_en":
+            expected = _confirmation_name(card_info.get("name"))
+        return expected is None or candidate_name == expected
+
     recognized_names = {
         _confirmation_name(card_info.get(field))
         for field in ("name", "name_en")
@@ -1175,11 +1203,16 @@ async def _search_code_number_catalogue(
             sets = response.json() if response.status_code == 200 else []
             if not isinstance(sets, list):
                 sets = []
+            # /sets returns Set Brief objects, which carry only id, name and
+            # cardCount. There is no abbreviation to match on, and fetching
+            # /sets/{id} for all ~218 of them to find one is not a lookup, it
+            # is a crawl. So an uncached set resolves only when the printed
+            # code IS its TCGdex id; a printed abbreviation that differs, as
+            # OBF does from sv03, falls back to the name search. Locally
+            # synced sets already resolve by abbreviation, which is the
+            # ordinary case.
             for set_data in sets:
-                abbreviation = (set_data.get("abbreviation") or {}).get("official")
-                if str(set_data.get("id") or "").casefold() == set_code.casefold() or (
-                    str(abbreviation or "").casefold() == set_code.casefold()
-                ):
+                if str(set_data.get("id") or "").casefold() == set_code.casefold():
                     set_id = set_data.get("id")
                     if set_id:
                         resolved_ids.append(str(set_id))
@@ -1205,6 +1238,15 @@ async def _search_code_number_catalogue(
             if not isinstance(cards, list):
                 continue
             for card in cards:
+                # TCGdex filters by containment, not equality, and the eq:
+                # prefix returns nothing on this endpoint. A query for set
+                # sv03 also answers with sv03.5, so the set has to be matched
+                # exactly here. The collector number is already compared on
+                # its normalised form below, which is what stops localId=25
+                # also accepting 125.
+                card_set = card.get("set") if isinstance(card.get("set"), dict) else {}
+                if str(card_set.get("id") or "").casefold() != str(set_id).casefold():
+                    continue
                 local_id = str(card.get("localId") or "")
                 if pattern and not pattern.fullmatch(local_id):
                     continue

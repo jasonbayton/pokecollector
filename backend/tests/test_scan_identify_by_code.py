@@ -9,6 +9,7 @@ try:
     from sqlalchemy.orm import sessionmaker
 
     from api.recognize import (
+        _code_number_name_agrees,
         COMPOSITE_PROMPT,
         RECOGNIZE_PROMPT,
         _search_and_rank_candidates,
@@ -124,3 +125,38 @@ class ScanIdentifyByCodeTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(DEPS_AVAILABLE, "Scanner dependencies are not installed")
+class CodeNumberConfirmationTests(unittest.TestCase):
+    """The name check that decides whether a code lookup may be trusted."""
+
+    def test_two_different_japanese_names_do_not_agree(self):
+        # Reducing a name to ASCII a-z0-9 left every Japanese, Chinese and
+        # Korean name empty, so two different cards both normalised to nothing
+        # and read as agreeing. A code-and-number lookup then filed a card
+        # whose name contradicted the photograph, confidently and
+        # automatically.
+        info = {"set_code": "SVI", "number_local": "25", "name": "リザードン", "language": "ja"}
+        self.assertFalse(_code_number_name_agrees(info, {"name": "ピカチュウ", "lang": "ja"}))
+
+    def test_the_same_japanese_name_still_agrees(self):
+        # The bystander: rejecting everything non-Latin would satisfy the test
+        # above while breaking every Japanese scan.
+        info = {"set_code": "SVI", "number_local": "25", "name": "リザードン", "language": "ja"}
+        self.assertTrue(_code_number_name_agrees(info, {"name": "リザードン", "lang": "ja"}))
+
+    def test_an_english_candidate_is_confirmed_by_the_english_name(self):
+        # A Japanese scan of a card retrieved in English must compare against
+        # name_en, not the printed Japanese name, or every cross-language hit
+        # would look like a contradiction.
+        info = {"name": "リザードン", "name_en": "Charizard", "language": "ja"}
+        self.assertTrue(_code_number_name_agrees(info, {"name": "Charizard", "lang": "en"}))
+
+    def test_full_width_and_half_width_forms_are_the_same_name(self):
+        info = {"name": "Ｃｈａｒｉｚａｒｄ", "language": "en"}
+        self.assertTrue(_code_number_name_agrees(info, {"name": "Charizard", "lang": "en"}))
+
+    def test_a_candidate_with_no_name_is_unknown_rather_than_disagreement(self):
+        info = {"name": "Charizard", "language": "en"}
+        self.assertTrue(_code_number_name_agrees(info, {"name": "", "lang": "en"}))
