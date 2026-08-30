@@ -15,6 +15,7 @@ import api from '../api/client'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../hooks/useTheme'
 import { useSettings } from '../contexts/SettingsContext'
+import { scannerHighResolutionEnabled } from '../utils/scannerSettings'
 import { useConfirmDialog } from '../contexts/ConfirmDialogContext'
 import Modal from '../components/ui/Modal'
 import AvatarPicker from '../components/AvatarPicker'
@@ -976,6 +977,7 @@ export default function Settings() {
   const digitalSetsEnabled = settings.tcgdex_digital_sets_enabled === 'true'
   const crossLanguagePriceFallback = settings.cross_language_price_fallback !== 'false'
   const crossLanguageImageFallback = settings.cross_language_image_fallback !== 'false'
+  const scannerHighResolution = scannerHighResolutionEnabled(settings)
   const scanDiagnosticsEnabled = settings.scan_diagnostics_enabled === 'true'
   const scanDiagnosticsAvailable = settings.scan_diagnostics_available === 'true'
   const scanDiagnosticsDeletionAvailable = settings.scan_diagnostics_deletion_available === 'true'
@@ -1494,6 +1496,18 @@ export default function Settings() {
                   disabled={visualSaving}
                 />
               </SettingsRow>
+              {user?.role === 'admin' && (
+                <SettingsRow
+                  label={t('settings.scannerHighResolution')}
+                  description={t('settings.scannerHighResolutionDesc')}
+                >
+                  <Toggle
+                    value={scannerHighResolution}
+                    label={t('settings.scannerHighResolution')}
+                    onChange={(value) => handleAdminBooleanSettingToggle('scanner_high_resolution', value)}
+                  />
+                </SettingsRow>
+              )}
               <SettingsRow
                 label={t('settings.scanDiagnostics')}
                 description={scanDiagnosticsAvailable

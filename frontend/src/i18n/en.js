@@ -1005,6 +1005,8 @@ const en = {
     openaiApiKeyDesc: 'Leave empty when this server points at a local model that needs no key.',
     visualVerification: 'Check my photo against card images',
     visualVerificationDesc: 'When the printed name and number are not enough to tell two cards apart, the scanner asks the model a second time, showing it your photo beside the closest matches so it can pick one. Leave it on for Gemini and OpenAI. Turn it off and the scanner decides on printed details and image similarity alone: quicker and cheaper, but more scans will come back unsure. Small self-hosted models often pick wrongly, so it starts off for them.',
+    scannerHighResolution: 'High-resolution image samples',
+    scannerHighResolutionDesc: 'Sends larger card images to the scanner, which can help it read small set codes and collector numbers. Requests become several times bigger, so scanning is slower to upload and costs more provider tokens, and stored photos use more disk. Affects new uploads and requests only.',
     telegramBotToken: 'Telegram Bot Token',
     telegramBotTokenDesc: 'Bot Token from @BotFather',
     telegramChatId: 'Telegram Chat ID',

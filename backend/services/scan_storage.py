@@ -30,8 +30,13 @@ MAX_FILES_PER_JOB = 50
 MAX_FILE_BYTES = 15 * 1024 * 1024
 MAX_JOB_BYTES = 200 * 1024 * 1024
 MAX_IMAGE_PIXELS = 50_000_000
-MAX_IMAGE_EDGE = 2048
-JPEG_QUALITY = 90
+LOW_RESOLUTION_MAX_IMAGE_EDGE = 2048
+HIGH_RESOLUTION_MAX_IMAGE_EDGE = 4096
+LOW_RESOLUTION_JPEG_QUALITY = 90
+HIGH_RESOLUTION_JPEG_QUALITY = 92
+# Kept as aliases for callers and tests that need the shipped default limits.
+MAX_IMAGE_EDGE = LOW_RESOLUTION_MAX_IMAGE_EDGE
+JPEG_QUALITY = LOW_RESOLUTION_JPEG_QUALITY
 SCAN_RETENTION_DAYS = 14
 ALLOWED_IMAGE_FORMATS = frozenset({"JPEG", "PNG", "WEBP", "HEIF", "HEIC"})
 
@@ -100,7 +105,7 @@ async def read_limited_upload(upload, *, remaining_job_bytes: int) -> bytes:
     return b"".join(chunks)
 
 
-def sanitize_image_bytes(raw: bytes) -> SanitizedScanImage:
+def sanitize_image_bytes(raw: bytes, *, high_resolution: bool = False) -> SanitizedScanImage:
     """Decode, verify, orient, resize, and metadata-strip a scan photo."""
     if not raw:
         raise ScanUploadError("An uploaded scan photo is empty.")
@@ -130,12 +135,20 @@ def sanitize_image_bytes(raw: bytes) -> SanitizedScanImage:
                     oriented = rgb
                 else:
                     oriented = oriented.convert("RGB")
-                oriented.thumbnail((MAX_IMAGE_EDGE, MAX_IMAGE_EDGE), Image.Resampling.LANCZOS)
+                max_edge = (
+                    HIGH_RESOLUTION_MAX_IMAGE_EDGE
+                    if high_resolution else LOW_RESOLUTION_MAX_IMAGE_EDGE
+                )
+                jpeg_quality = (
+                    HIGH_RESOLUTION_JPEG_QUALITY
+                    if high_resolution else LOW_RESOLUTION_JPEG_QUALITY
+                )
+                oriented.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
                 output = io.BytesIO()
                 oriented.save(
                     output,
                     format="JPEG",
-                    quality=JPEG_QUALITY,
+                    quality=jpeg_quality,
                     optimize=True,
                     progressive=True,
                 )
@@ -261,6 +274,9 @@ async def create_scan_job(
         {"user_id": user_id},
     )
 
+    from services.scan_providers import high_resolution_samples_enabled
+
+    high_resolution = high_resolution_samples_enabled(db)
     raw_total = 0
     try:
         for position, upload in enumerate(uploads):
@@ -269,7 +285,7 @@ async def create_scan_job(
                 remaining_job_bytes=MAX_JOB_BYTES - raw_total,
             )
             raw_total += len(raw)
-            sanitized = sanitize_image_bytes(raw)
+            sanitized = sanitize_image_bytes(raw, high_resolution=high_resolution)
             relative_path, byte_size = store_sanitized_image(job.id, sanitized)
             db.add(
                 ScanJobItem(

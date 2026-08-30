@@ -10,7 +10,7 @@ try:
     from sqlalchemy.orm import sessionmaker
 
     from database import Base
-    from models import User, UserSetting
+    from models import Setting, User, UserSetting
     from services import scan_providers
     from services.scan_providers import (
         DEFAULT_OPENAI_BASE_URL,
@@ -28,6 +28,7 @@ try:
         resolve_model,
         resolve_provider_name,
         text_part,
+        high_resolution_samples_enabled,
         visual_verification_default,
         visual_verification_enabled,
     )
@@ -269,9 +270,23 @@ class RequestShapingTests(unittest.TestCase):
         self.assertEqual(content[0], {"type": "text", "text": "Describe"})
         self.assertEqual(content[1]["type"], "image_url")
         self.assertEqual(content[1]["image_url"]["url"], "data:image/jpeg;base64,QUJD")
+        self.assertNotIn("detail", content[1]["image_url"])
         self.assertEqual(text, '{"name": "Quaxly"}')
         self.assertEqual(extract_openai_text(payload), '{"name": "Quaxly"}')
         self.assertEqual(usage, {"total_tokens": 12})
+
+    def test_openai_high_resolution_request_sets_high_detail(self):
+        with patch.dict(os.environ, {"OPENAI_BASE_URL": LOCAL_URL}):
+            client, _, _ = self._run(
+                ScanProvider(OPENAI, high_resolution=True),
+                "",
+                [image_part("image/jpeg", "QUJD")],
+                [_FakeResponse(200, {"choices": [{"message": {"content": "ok"}}]})],
+            )
+
+        image_url = client.calls[0]["json"]["messages"][0]["content"][0]["image_url"]
+        self.assertEqual(image_url["detail"], "high")
+
 
     def test_no_authorization_header_when_there_is_no_key(self):
         # A local server has nothing to authenticate, and an empty bearer token
@@ -317,6 +332,18 @@ class RequestShapingTests(unittest.TestCase):
         # so the adapter must not quietly trim it.
         self.assertEqual(text, "  hello  ")
         self.assertEqual(usage, {"totalTokenCount": 3})
+
+
+@unittest.skipUnless(DEPS, "FastAPI/SQLAlchemy are not installed in this environment")
+class HighResolutionSamplesSettingTests(_Fixture, unittest.TestCase):
+
+    def test_installation_setting_defaults_off_and_honours_an_admin_value(self):
+        self.assertFalse(high_resolution_samples_enabled(self.db))
+
+        self.db.add(Setting(key="scanner_high_resolution", value="true"))
+        self.db.commit()
+
+        self.assertTrue(high_resolution_samples_enabled(self.db))
 
 
 @unittest.skipUnless(DEPS, "FastAPI/SQLAlchemy are not installed in this environment")

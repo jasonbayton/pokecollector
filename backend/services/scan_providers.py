@@ -30,7 +30,8 @@ import httpx
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from models import UserSetting
+from models import Setting, UserSetting
+from services.digital_sets import setting_truthy
 # Fork-local: upstream has no installation-wide key sharing. Kept in its own
 # module so the rest of this file stays identical to the branch offered upstream.
 from services.scanner_key_sharing import installation_provider, shared_env_key
@@ -44,6 +45,7 @@ PROVIDERS = (GEMINI, OPENAI)
 SCANNER_PROVIDER_SETTING = "scanner_provider"
 VISUAL_VERIFICATION_SETTING = "scanner_visual_verification"
 SCANNER_MODEL_SETTING = "scanner_model"
+SCANNER_HIGH_RESOLUTION_SETTING = "scanner_high_resolution"
 
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 # Measured against gpt-4o-mini on real card scans: same name and number
@@ -162,6 +164,12 @@ def visual_verification_enabled(db: Session, user_id: int | None, provider: str)
     return visual_verification_default(provider)
 
 
+def high_resolution_samples_enabled(db: Session) -> bool:
+    """Whether new scanner uploads and requests use the installation-wide high limits."""
+    row = db.query(Setting).filter(Setting.key == SCANNER_HIGH_RESOLUTION_SETTING).first()
+    return setting_truthy(row.value if row else "false")
+
+
 class ProviderRateLimitError(HTTPException):
     """A 429 carrying the retry metadata scan_queue reads off the exception.
 
@@ -235,7 +243,7 @@ def openai_retry_after_seconds(resp: httpx.Response) -> float | None:
     return min(value, MAX_RETRY_AFTER_SECONDS)
 
 
-def _openai_content(parts: list[dict]) -> list[dict]:
+def _openai_content(parts: list[dict], *, high_resolution: bool = False) -> list[dict]:
     """Turn neutral parts into OpenAI content blocks.
 
     Neutral part shapes, shared with the Gemini serialiser:
@@ -249,9 +257,12 @@ def _openai_content(parts: list[dict]) -> list[dict]:
         elif "image" in part:
             image = part["image"]
             mime = image.get("mime_type") or "image/jpeg"
+            image_url = {"url": f"data:{mime};base64,{image['data']}"}
+            if high_resolution:
+                image_url["detail"] = "high"
             content.append({
                 "type": "image_url",
-                "image_url": {"url": f"data:{mime};base64,{image['data']}"},
+                "image_url": image_url,
             })
     return content
 
@@ -405,11 +416,12 @@ def extract_openai_text(payload: dict) -> str:
 class ScanProvider:
     """One provider's calling convention, so call sites stay provider-agnostic."""
 
-    def __init__(self, name: str, chosen_model: str = ""):
+    def __init__(self, name: str, chosen_model: str = "", high_resolution: bool = False):
         self.name = name
         # Resolved once, because the request payload needs it and generate_text
         # has no database session of its own.
         self._chosen_model = (chosen_model or "").strip()
+        self.high_resolution = high_resolution
 
     @property
     def is_gemini(self) -> bool:
@@ -500,7 +512,9 @@ class ScanProvider:
             api_key,
             {
                 "model": self.model(),
-                "messages": [{"role": "user", "content": _openai_content(parts)}],
+                "messages": [{"role": "user", "content": _openai_content(
+                    parts, high_resolution=self.high_resolution
+                )}],
             },
             max_attempts=max_attempts,
         )
@@ -518,4 +532,8 @@ class ScanProvider:
 
 def get_provider(db: Session, user_id: int | None) -> ScanProvider:
     name = resolve_provider_name(db, user_id)
-    return ScanProvider(name, resolve_model(db, user_id, name))
+    return ScanProvider(
+        name,
+        resolve_model(db, user_id, name),
+        high_resolution_samples_enabled(db),
+    )

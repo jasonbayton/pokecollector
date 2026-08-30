@@ -505,7 +505,7 @@ async def default_composite_processor(
             try:
                 recognized_by_position = await recognize_composite_card_info(
                     api_key,
-                    build_composite(images),
+                    build_composite(images, high_resolution=provider.high_resolution),
                     len(images),
                     traces=traces,
                     provider=provider,
@@ -797,7 +797,12 @@ def replace_scan_item_photo(db: Session, item: ScanJobItem, raw_image: bytes) ->
     file its old candidate and resolve it, so the preconditions are taken again
     here under a row lock before anything is written.
     """
-    sanitized = sanitize_image_bytes(raw_image)
+    from services.scan_providers import high_resolution_samples_enabled
+
+    sanitized = sanitize_image_bytes(
+        raw_image,
+        high_resolution=high_resolution_samples_enabled(db),
+    )
     new_path, byte_size = store_sanitized_image(item.job.id, sanitized)
     now = datetime.datetime.utcnow()
 

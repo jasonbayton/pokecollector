@@ -9,12 +9,16 @@ from PIL import Image, ImageDraw, ImageFont
 
 GRID_COLUMNS = 2
 GRID_SIZE = 4
-CELL_SIZE = (640, 896)
+LOW_RESOLUTION_CELL_SIZE = (640, 896)
+# Double each card edge to preserve the 63:88 card ratio while keeping a four-card
+# canvas below 10 megapixels, which bounds extra storage and vision-token cost.
+HIGH_RESOLUTION_CELL_SIZE = (1280, 1792)
+CELL_SIZE = LOW_RESOLUTION_CELL_SIZE
 GUTTER = 20
 LABEL_BOX = 64
 
 
-def build_composite(images: list[bytes]) -> bytes:
+def build_composite(images: list[bytes], *, high_resolution: bool = False) -> bytes:
     """Lay out two to four card photos as a labelled JPEG.
 
     Two photos form a 1x2 row. Three and four photos use a 2x2 canvas, leaving
@@ -25,7 +29,9 @@ def build_composite(images: list[bytes]) -> bytes:
         raise ValueError("A composite requires between two and four images.")
 
     rows = 1 if len(images) == 2 else 2
-    cell_width, cell_height = CELL_SIZE
+    cell_width, cell_height = (
+        HIGH_RESOLUTION_CELL_SIZE if high_resolution else LOW_RESOLUTION_CELL_SIZE
+    )
     canvas = Image.new(
         "RGB",
         (

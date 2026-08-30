@@ -43,6 +43,7 @@ DEFAULT_SETTINGS = {
     "cross_language_price_fallback": "true",
     "cross_language_image_fallback": "true",
     "debug_mode": "false",
+    "scanner_high_resolution": "false",
 }
 
 

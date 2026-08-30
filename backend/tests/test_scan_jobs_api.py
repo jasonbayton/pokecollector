@@ -415,14 +415,17 @@ class ScanJobsApiTests(unittest.TestCase):
 
         real_sanitize = scan_queue_module.sanitize_image_bytes
 
-        def resolve_it_first(raw):
+        def resolve_it_first(raw, **kwargs):
             # Stand-in for the concurrent review action, run at the point the
-            # endpoint has already passed its own guard.
+            # endpoint has already passed its own guard. Keyword arguments are
+            # forwarded rather than pinned, so the stub intercepts the call
+            # without also asserting the signature of the thing it stands in
+            # for.
             self.db.query(ScanJobItem).filter(ScanJobItem.id == item.id).update(
                 {"resolved": True}
             )
             self.db.commit()
-            return real_sanitize(raw)
+            return real_sanitize(raw, **kwargs)
 
         with patch.object(scan_queue_module, "sanitize_image_bytes", side_effect=resolve_it_first), \
                 patch("api.scan_jobs.drain_scan_queue", new=AsyncMock(return_value=0)):

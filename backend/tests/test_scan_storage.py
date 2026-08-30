@@ -55,6 +55,17 @@ class ScanSanitizationTests(unittest.TestCase):
             self.assertFalse(result.getexif())
         self.assertEqual(sanitized.content_type, "image/jpeg")
 
+    def test_high_resolution_setting_changes_only_the_upload_edge_cap(self):
+        raw = _image_bytes(size=(6000, 4000))
+
+        low_resolution = sanitize_image_bytes(raw, high_resolution=False)
+        high_resolution = sanitize_image_bytes(raw, high_resolution=True)
+
+        with Image.open(io.BytesIO(low_resolution.data)) as result:
+            self.assertEqual(max(result.size), 2048)
+        with Image.open(io.BytesIO(high_resolution.data)) as result:
+            self.assertEqual(max(result.size), 4096)
+
     def test_accepts_png_and_webp_but_always_outputs_safe_jpeg(self):
         for image_format in ("PNG", "WEBP"):
             with self.subTest(image_format=image_format):
