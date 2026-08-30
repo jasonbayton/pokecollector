@@ -1087,6 +1087,18 @@ async def _search_one_catalogue(
     return candidates, attempted, unreachable
 
 
+def _brief_set_id(card: dict) -> str:
+    """The set a card brief belongs to, taken from its id.
+
+    TCGdex card briefs carry only id, localId, name and image. There is no set
+    object to read, and the API filters by containment, so a query for sv03
+    also answers with sv03.5 and the two have to be told apart somehow. The id
+    prefix is the only thing that does it: sv03-025 against sv03.5-025.
+    """
+    card_id = str(card.get("id") or "")
+    return card_id.rsplit("-", 1)[0] if "-" in card_id else ""
+
+
 def _partial_collector_number_pattern(value) -> re.Pattern | None:
     """Return a literal one-character-wildcard pattern for an uncertain number.
 
@@ -1244,8 +1256,12 @@ async def _search_code_number_catalogue(
                 # exactly here. The collector number is already compared on
                 # its normalised form below, which is what stops localId=25
                 # also accepting 125.
-                card_set = card.get("set") if isinstance(card.get("set"), dict) else {}
-                if str(card_set.get("id") or "").casefold() != str(set_id).casefold():
+                # A card brief carries only id, localId, name and image - no
+                # set object - so the set comes from the id's own prefix:
+                # sv03-025 is sv03, and sv03.5-025 is sv03.5. Reading a set
+                # object that is not there discarded every remote result,
+                # including the one being asked for.
+                if _brief_set_id(card).casefold() != str(set_id).casefold():
                     continue
                 local_id = str(card.get("localId") or "")
                 if pattern and not pattern.fullmatch(local_id):

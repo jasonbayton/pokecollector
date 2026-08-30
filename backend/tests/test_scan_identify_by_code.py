@@ -160,3 +160,28 @@ class CodeNumberConfirmationTests(unittest.TestCase):
     def test_a_candidate_with_no_name_is_unknown_rather_than_disagreement(self):
         info = {"name": "Charizard", "language": "en"}
         self.assertTrue(_code_number_name_agrees(info, {"name": "", "lang": "en"}))
+
+
+@unittest.skipUnless(DEPS_AVAILABLE, "Scanner dependencies are not installed")
+class RemoteSetFilterTests(unittest.TestCase):
+    """The remote lookup has to work on the shape TCGdex actually returns."""
+
+    @staticmethod
+    def _brief(card_id):
+        # A real card brief: id, localId, name, image. No set object.
+        return {"id": card_id, "localId": card_id.rsplit("-", 1)[1], "name": "x", "image": "i"}
+
+    def test_the_set_comes_from_the_card_id_because_a_brief_has_no_set(self):
+        # TCGdex filters by containment, so a query for sv03 also answers with
+        # sv03.5. Reading card["set"]["id"] to tell them apart discarded EVERY
+        # remote result, because that key does not exist on a brief.
+        from api.recognize import _brief_set_id
+
+        self.assertEqual(_brief_set_id(self._brief("sv03-025")), "sv03")
+        self.assertEqual(_brief_set_id(self._brief("sv03.5-025")), "sv03.5")
+
+    def test_an_id_with_no_separator_yields_no_set_rather_than_itself(self):
+        from api.recognize import _brief_set_id
+
+        self.assertEqual(_brief_set_id({"id": "oddity"}), "")
+        self.assertEqual(_brief_set_id({}), "")
