@@ -294,7 +294,10 @@ export default function BinderDetail() {
       condition: filterCondition || undefined,
       limit: 24,
     }).then(r => r.data),
-    enabled: isWishlist === false,
+    // Not until the binder itself has loaded: isWishlist defaults to false,
+    // so a wishlist binder otherwise fires both collection requests before
+    // switching to its own branch.
+    enabled: isWishlist === false && Boolean(data),
     // React Query 5 removed keepPreviousData as an option; without this the
     // picker returns undefined while a new search is pending and flashes its
     // empty state on every keystroke.
@@ -306,7 +309,10 @@ export default function BinderDetail() {
   const { data: collectionFacets } = useQuery({
     queryKey: ['collection-facets'],
     queryFn: () => getCollectionFacets().then(r => r.data),
-    enabled: isWishlist === false,
+    // Not until the binder itself has loaded: isWishlist defaults to false,
+    // so a wishlist binder otherwise fires both collection requests before
+    // switching to its own branch.
+    enabled: isWishlist === false && Boolean(data),
   })
 
   const { data: searchResults, isLoading: searching } = useQuery({

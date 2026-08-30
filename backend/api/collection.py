@@ -634,21 +634,25 @@ def search_collection(
 
     term = (q or "").strip()
     if term:
-        clauses = [
-            accent_insensitive_contains(db, Card.name, term),
-            accent_insensitive_contains(db, Set.name, term),
-            # Both pickers matched the raw set id and treated the collector
-            # number as a substring, so "2" found card 25. Exact normalised
-            # forms alone would have quietly narrowed that.
-            accent_insensitive_contains(db, Card.set_id, term),
-            accent_insensitive_contains(db, Card.number, term),
-        ]
-        # A number also matches the collector number, on the normalised forms
-        # the rest of the app uses, so "7" finds a card printed "007". Names
-        # containing the digits still match too, as they did in the pickers
-        # this replaces.
-        for form in card_number_variants(term) if term else []:
-            clauses.append(func.lower(Card.number) == form.casefold())
+        # Every word must match something, though not all the same thing. The
+        # trade picker searched one concatenated string, so "sprigatito
+        # scarlet" found Sprigatito from Scarlet & Violet; checking the whole
+        # phrase against each field separately loses that.
+        clauses = []
+        for word in term.split():
+            # The collector number is compared on its normalised forms rather
+            # than as a substring, which is what the binder picker did: "2" is
+            # not a way of asking for card 25. Digits inside a card's name
+            # still match, because both pickers searched names by substring.
+            word_clauses = [
+                accent_insensitive_contains(db, Card.name, word),
+                accent_insensitive_contains(db, Set.name, word),
+                accent_insensitive_contains(db, Card.set_id, word),
+            ]
+            number_forms = {form.casefold() for form in card_number_variants(word)}
+            if number_forms:
+                word_clauses.append(func.lower(Card.number).in_(sorted(number_forms)))
+            clauses.append(or_(*[clause for clause in word_clauses if clause is not None]))
         # "SV1 25": a set code and a number together. The code may be written
         # as the abbreviation or the catalogue set id.
         # Set ids carry dots - sv03.5 - and the old Trades search matched them
@@ -657,17 +661,17 @@ def search_collection(
         if shortcode:
             code, number = shortcode.groups()
             number_forms = {form.casefold() for form in card_number_variants(number)}
-            clauses.append(
-                and_(
-                    or_(
-                        func.lower(Set.abbreviation) == code.casefold(),
-                        func.lower(Set.tcg_set_id) == code.casefold(),
-                        func.lower(Card.set_id) == code.casefold(),
-                    ),
-                    func.lower(Card.number).in_(sorted(number_forms)),
-                )
+            shortcode_clause = and_(
+                or_(
+                    func.lower(Set.abbreviation) == code.casefold(),
+                    func.lower(Set.tcg_set_id) == code.casefold(),
+                    func.lower(Card.set_id) == code.casefold(),
+                ),
+                func.lower(Card.number).in_(sorted(number_forms)),
             )
-        query = query.filter(or_(*clauses))
+            query = query.filter(or_(and_(*clauses), shortcode_clause))
+            clauses = []
+        query = query.filter(and_(*clauses))
 
     items = (
         # Most recently added first, which is the order both pickers showed

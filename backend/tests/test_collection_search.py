@@ -71,15 +71,33 @@ class CollectionSearchTests(unittest.TestCase):
         found = self._search(q="30")
         self.assertEqual([item.card_id for item in found], ["sv1-30_en"])
 
-    def test_a_bare_number_matches_both_the_number_and_names_containing_it(self):
-        # Parity with the pickers this replaces, which tested the name with a
-        # plain substring match as well as the collector number. Narrowing that
-        # here would change what searching does, which is a decision of its own
-        # and not part of moving the work to the server.
+    def test_a_number_matches_that_collector_number_and_names_containing_it(self):
+        # Parity: both pickers searched names by substring, so digits inside a
+        # name still match. The number itself is compared on its normalised
+        # forms, which is what the binder picker did.
         self._card("sv1-25_en", "Sprigatito", "25")
         self._card("sv1-99_en", "Route 25 Trainer", "99")
         found = {item.card_id for item in self._search(q="25")}
         self.assertEqual(found, {"sv1-25_en", "sv1-99_en"})
+
+    def test_a_partial_number_is_not_a_way_of_asking_for_a_longer_one(self):
+        # "2" must not return card 25. The binder picker compared numbers after
+        # normalisation, not as substrings.
+        self._card("sv1-25_en", "Sprigatito", "25")
+        self.assertEqual(self._search(q="2"), [])
+
+    def test_words_may_match_different_fields(self):
+        # The trade picker searched one concatenated string, so a card name and
+        # its set name together found the card. Checking the whole phrase
+        # against each field separately loses that.
+        self._card("sv1-25_en", "Sprigatito", "25")
+        self._card("sv1-30_en", "Fuecoco", "30")
+        found = [item.card_id for item in self._search(q="sprigatito scarlet")]
+        self.assertEqual(found, ["sv1-25_en"])
+
+    def test_every_word_has_to_match_something(self):
+        self._card("sv1-25_en", "Sprigatito", "25")
+        self.assertEqual(self._search(q="sprigatito fuecoco"), [])
 
     def test_it_understands_the_set_code_and_number_shortcode(self):
         self._card("sv1-25_en", "Sprigatito", "25")
