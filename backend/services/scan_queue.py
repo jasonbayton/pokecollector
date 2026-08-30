@@ -876,6 +876,14 @@ def job_progress(db: Session, job: ScanJob) -> dict:
         key=lambda item: item.next_attempt_at,
         default=None,
     )
+    product_name = None
+    if job.product_id is not None:
+        from models import ProductPurchase
+        product = db.query(ProductPurchase).filter(
+            ProductPurchase.id == job.product_id,
+            ProductPurchase.user_id == job.user_id,
+        ).first()
+        product_name = product.product_name if product is not None else None
     return {
         "id": job.id,
         "status": job.status,
@@ -899,4 +907,8 @@ def job_progress(db: Session, job: ScanJob) -> dict:
         "finished_at": job.finished_at.isoformat() if job.finished_at else None,
         "expires_at": job.expires_at.isoformat() if job.expires_at else None,
         "error_message": job.error_message,
+        "product_id": job.product_id,
+        "product_name": product_name,
+        "default_condition": job.default_condition,
+        "default_lang": job.default_lang,
     }

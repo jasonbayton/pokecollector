@@ -229,6 +229,9 @@ async def create_scan_job(
     uploads: list,
     *,
     batch_modes: list[bool] | None = None,
+    product_id: int | None = None,
+    default_condition: str = "Mint",
+    default_lang: str = "en",
 ) -> ScanJob:
     """Validate and persist a job without retaining any original upload bytes."""
     if not uploads:
@@ -243,6 +246,9 @@ async def create_scan_job(
     now = datetime.datetime.utcnow()
     job = ScanJob(
         user_id=user_id,
+        product_id=product_id,
+        default_condition=default_condition,
+        default_lang=default_lang,
         status="pending",
         created_at=now,
         updated_at=now,

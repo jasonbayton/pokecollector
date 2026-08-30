@@ -543,6 +543,13 @@ def _run_migrations(conn):
         # start at zero, which is correct: nothing has failed this way yet, and
         # an upgraded install must not inherit a spent budget.
         "ALTER TABLE scan_job_items ADD COLUMN IF NOT EXISTS catalogue_failures INTEGER NOT NULL DEFAULT 0",
+        # v63: An optional product-opening session keeps its chosen defaults on
+        # the durable scan job. Product deletion intentionally leaves unfinished
+        # review work intact and turns it back into an ordinary scan job.
+        "ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS product_id INTEGER REFERENCES product_purchases(id) ON DELETE SET NULL",
+        "ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS default_condition VARCHAR NOT NULL DEFAULT 'Mint'",
+        "ALTER TABLE scan_jobs ADD COLUMN IF NOT EXISTS default_lang VARCHAR NOT NULL DEFAULT 'en'",
+        "CREATE INDEX IF NOT EXISTS ix_scan_jobs_product_id ON scan_jobs(product_id)",
         "CREATE INDEX IF NOT EXISTS ix_scan_jobs_user_id ON scan_jobs(user_id)",
         "CREATE INDEX IF NOT EXISTS ix_scan_jobs_status ON scan_jobs(status)",
         "CREATE INDEX IF NOT EXISTS ix_scan_jobs_expires_at ON scan_jobs(expires_at)",
