@@ -657,6 +657,20 @@ def _metadata_decision(card_info: dict, candidates: list[dict]) -> tuple[bool, s
         if _identity_signal(card_info.get("number_local"), card.get("number"), _numbers_match) == 0
     )
     if "number" in signals and number_matches == 1:
+        # A collector number that isolates one card is strong evidence - but
+        # only if it was read correctly, and it is the smallest text on the
+        # card (see #20). A misread digit retrieves a DIFFERENT real card that
+        # then matches its own number perfectly, so the number agrees with
+        # itself and nothing contradicts it.
+        #
+        # When the card was retrieved BY that number and nothing else
+        # corroborates it, there is exactly one observation behind the answer.
+        # Refuse to decide automatically and let review, or visual
+        # verification, look at the artwork. A readable name, language, set or
+        # printed total is corroboration; the number alone is not.
+        corroborated = bool(signals - {"number"})
+        if top.get("_retrieved_by_code_number") and not corroborated:
+            return False, None
         return True, "number_unique"
     if "number" in signals and signals.intersection(
         {"language", "total", "set", "regulation"}
