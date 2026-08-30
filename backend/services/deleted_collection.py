@@ -9,6 +9,7 @@ product and trade ledgers.
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
+from services.collection_attributes import merged_confirmation
 from models import Card, CollectionItem, DeletedCollectionItem, User
 
 # Restore is refused rather than guessed at when the world has moved on. These
@@ -82,12 +83,16 @@ def restore_entry(db: Session, entry: DeletedCollectionItem) -> tuple[Collection
     )
 
     if match:
-        values = {"quantity": CollectionItem.quantity + int(entry.quantity)}
-        # Restoring copies that were never assessed taints the row they join,
-        # exactly as adding them the first time did. Restoring assessed ones
-        # cannot clear a taint the row already carries.
-        if entry.attributes_confirmed is False:
-            values["attributes_confirmed"] = False
+        values = {
+            "quantity": CollectionItem.quantity + int(entry.quantity),
+            # Restoring copies joins them to the row, so the same combining
+            # rule applies as anywhere else. Propagating only False was wrong:
+            # an unknown snapshot restored into a settled row left it claiming
+            # every copy had been stated.
+            "attributes_confirmed": merged_confirmation(
+                match.attributes_confirmed, entry.attributes_confirmed
+            ),
+        }
         db.execute(
             update(CollectionItem)
             .where(CollectionItem.id == match.id)

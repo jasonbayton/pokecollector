@@ -38,6 +38,8 @@ ALLOWED_VARIANTS = {"Normal", "Holo", "Reverse Holo", "First Edition"}
 ALLOWED_LANGS = set(SUPPORTED_TCGDEX_LANGUAGES)
 
 
+from services.collection_attributes import merged_confirmation
+
 DEFAULT_CONDITION = "Mint"
 
 
@@ -306,11 +308,9 @@ def _add_collection_item(db: Session, current_user: User, item: CollectionItemCr
 
     if existing:
         existing.quantity += item.quantity or 1
-        if not stated:
-            # The row now holds a copy nobody assessed, whatever it held
-            # before. A stated copy arriving says nothing about the rest, so
-            # it never clears the flag.
-            existing.attributes_confirmed = False
+        existing.attributes_confirmed = merged_confirmation(
+            existing.attributes_confirmed, stated
+        )
         if commit:
             db.commit()
         return "updated"
@@ -584,8 +584,9 @@ def add_to_collection(
 
     if existing:
         existing.quantity += item.quantity or 1
-        if not stated:
-            existing.attributes_confirmed = False
+        existing.attributes_confirmed = merged_confirmation(
+            existing.attributes_confirmed, stated
+        )
         db.commit()
         db.refresh(existing)
         return _annotate_collection_item(db, current_user, existing)
@@ -658,8 +659,9 @@ def bulk_add_to_collection(
 
             if existing:
                 existing.quantity += item.quantity or 1
-                if not stated:
-                    existing.attributes_confirmed = False
+                existing.attributes_confirmed = merged_confirmation(
+                    existing.attributes_confirmed, stated
+                )
                 db.commit()
                 updated += 1
             else:

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from api.auth import get_current_user
 from api.collection import ensure_card_exists
+from services.collection_attributes import merged_confirmation
 from database import get_db
 from models import Card, CollectionItem, ProductCard, ProductLedgerEntry, ProductPurchase, Trade, TradeItem, User
 from schemas import TradeCreate, TradeResponse, TradeUpdate, TradeValuationRequest
@@ -93,6 +94,10 @@ def _resolve_incoming_card(db: Session, card_id: str, lang: str, user_id: int) -
 def _prepare_incoming_card(db: Session, incoming, price_field: str, user_id: int) -> dict:
     if not positive_quantity(incoming.quantity, TRADE_QUANTITY_MAX):
         raise HTTPException(status_code=422, detail="quantity must be between 1 and 999")
+    # Omitting either half is not choosing it. The trade form sends both, but
+    # an API caller need not, and a variant nobody chose is the half that
+    # reaches valuation.
+    stated = incoming.condition is not None and incoming.variant is not None
     condition = incoming.condition or "Mint"
     if condition not in ALLOWED_CONDITIONS:
         raise HTTPException(status_code=422, detail="condition is not supported")
@@ -109,6 +114,7 @@ def _prepare_incoming_card(db: Session, incoming, price_field: str, user_id: int
     if not hasattr(incoming, "purchase_price"):
         purchase_price = value_per_card
     return {
+        "attributes_stated": stated,
         "card": card,
         "condition": condition,
         "variant": variant,
@@ -127,6 +133,7 @@ def _merge_or_create_collection_item(
     variant: str,
     lang: str,
     purchase_price,
+    stated=True,
 ) -> CollectionItem:
     existing = db.query(CollectionItem).filter(
         CollectionItem.card_id == card.id,
@@ -139,6 +146,9 @@ def _merge_or_create_collection_item(
 
     if existing:
         existing.quantity += quantity
+        existing.attributes_confirmed = merged_confirmation(
+            existing.attributes_confirmed, stated
+        )
         return existing
 
     item = CollectionItem(
@@ -150,7 +160,7 @@ def _merge_or_create_collection_item(
         purchase_price=purchase_price,
         lang=lang,
         added_at=datetime.datetime.utcnow(),
-        attributes_confirmed=True,
+        attributes_confirmed=stated,
     )
     db.add(item)
     db.flush()
@@ -326,6 +336,7 @@ def _merge_locked_collection_item(
     variant: str,
     lang: str,
     purchase_price,
+    stated=True,
 ) -> CollectionItem:
     matches = _matching_collection_items(
         collection_items,
@@ -337,6 +348,9 @@ def _merge_locked_collection_item(
     )
     if matches:
         matches[0].quantity = int(matches[0].quantity or 0) + quantity
+        matches[0].attributes_confirmed = merged_confirmation(
+            matches[0].attributes_confirmed, stated
+        )
         return matches[0]
 
     item = CollectionItem(
@@ -346,7 +360,7 @@ def _merge_locked_collection_item(
         condition=condition,
         variant=variant,
         purchase_price=purchase_price,
-        attributes_confirmed=True,
+        attributes_confirmed=stated,
         lang=lang,
         added_at=datetime.datetime.utcnow(),
     )
@@ -728,6 +742,7 @@ def create_trade(
                 value_total=value_total,
                 variant=collection_item.variant,
                 condition=collection_item.condition,
+                attributes_confirmed=collection_item.attributes_confirmed,
                 lang=collection_item.lang,
                 notes=outgoing.notes,
                 created_at=datetime.datetime.utcnow(),
@@ -789,6 +804,7 @@ def create_trade(
                 variant,
                 item_lang,
                 purchase_price,
+                stated=prepared["attributes_stated"],
             )
 
             db.add(TradeItem(
@@ -1014,6 +1030,8 @@ def update_trade(
                         variant=trade_item.variant or "Normal",
                         lang=trade_item.lang or trade_item.card.lang or "en",
                         purchase_price=purchase_price,
+                        # Put back what left, not a claim that it was assessed.
+                        stated=trade_item.attributes_confirmed,
                     )
                     for product_card in restored_product_cards:
                         product_card.collection_item_id = restored_item.id
@@ -1073,6 +1091,7 @@ def update_trade(
                 value_total=round(value_per_card * requested.quantity, 2),
                 variant=collection_item.variant,
                 condition=collection_item.condition,
+                attributes_confirmed=collection_item.attributes_confirmed,
                 lang=collection_item.lang,
                 notes=requested.notes,
                 purchase_price=collection_item.purchase_price,

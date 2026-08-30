@@ -6,6 +6,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from typing import Optional, List
 from api.auth import get_current_user
 from database import get_db
+from services.collection_attributes import merged_confirmation
 from models import Binder, BinderCard, Card, Set, DeletedCollectionItem, PriceHistory, CustomCardMatch, CollectionItem, WishlistItem, User, ImageCache, ProductCard, ProductLedgerEntry, TradeItem
 from schemas import CardBase, CardWithSet, PriceHistoryResponse, CardCustomCreate, CustomCardUpdate, CardCustomImageUpdate
 from services import binder_slots, pokemon_api
@@ -920,6 +921,11 @@ def migrate_custom_card(
             existing_item = existing_by_variant.get(item.variant)
             if existing_item:
                 existing_item.quantity = (existing_item.quantity or 0) + (item.quantity or 0)
+                # Copies are moving into this row, so its confirmation state
+                # combines with theirs like any other merge.
+                existing_item.attributes_confirmed = merged_confirmation(
+                    existing_item.attributes_confirmed, item.attributes_confirmed
+                )
                 if existing_item.purchase_price is None:
                     existing_item.purchase_price = item.purchase_price
                 db.delete(item)

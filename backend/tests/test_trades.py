@@ -607,6 +607,49 @@ class TradeApiTests(unittest.TestCase):
         self.assertEqual(sum(item.quantity for item in collection_items), 2)
         self.assertEqual({item.purchase_price for item in collection_items}, {3, 14})
 
+    def test_reversing_an_outgoing_trade_restores_the_rows_review_state(self):
+        # A row that wanted checking, traded away and then taken back off the
+        # trade, must come back wanting checking. Recreating it as settled hid
+        # a possibly misvalued variant, which is the defect this flag exists
+        # to surface.
+        outgoing = self.add_collection_item(quantity=2)
+        outgoing.attributes_confirmed = False
+        self.db.commit()
+
+        created = create_trade(
+            TradeCreate(
+                trade_date=datetime.date(2026, 7, 15),
+                outgoing=[TradeOutgoingItemCreate(collection_item_id=outgoing.id, quantity=2, value_per_card=5)],
+            ),
+            current_user=self.user,
+            db=self.db,
+        )
+        trade_item = [item for item in created.items if item.direction == "outgoing"][0]
+
+        update_trade(
+            created.id,
+            TradeUpdate(
+                trade_date=created.trade_date,
+                outgoing=[TradeOutgoingItemUpdate(trade_item_id=trade_item.id, quantity=1)],
+            ),
+            current_user=self.user,
+            db=self.db,
+        )
+
+        restored = (
+            self.db.query(CollectionItem)
+            .filter(
+                CollectionItem.user_id == self.user.id,
+                CollectionItem.card_id == outgoing.card_id,
+            )
+            .all()
+        )
+        self.assertTrue(restored, "the copy should have come back")
+        self.assertTrue(
+            any(row.attributes_confirmed is False for row in restored),
+            "the restored copy must still want checking, not claim to be settled",
+        )
+
     def test_update_trade_reduces_product_linked_outgoing_and_restores_inventory(self):
         outgoing = self.add_collection_item(quantity=2)
         product = ProductPurchase(

@@ -67,11 +67,18 @@ class CollectionConditionDefaultTests(unittest.TestCase):
         self.assertEqual(parsed.condition or DEFAULT_CONDITION, "Mint")
         self.assertNotEqual(parsed.condition, "NM")
 
-    def test_trade_incoming_create_schema_defaults_to_mint(self):
-        self.assert_class_string_default("TradeIncomingItemCreate", "condition", "Mint")
+    def test_an_unstated_trade_condition_is_still_prepared_as_mint(self):
+        # As with the collection schema, the default moved out so that an
+        # omitted value stays distinguishable from a chosen one. Unspecified
+        # still means Mint, and the row it creates says nobody chose.
+        from schemas import TradeIncomingItemCreate, TradeIncomingItemUpdate
 
-    def test_trade_incoming_update_schema_defaults_to_mint(self):
-        self.assert_class_string_default("TradeIncomingItemUpdate", "condition", "Mint")
+        for model in (TradeIncomingItemCreate, TradeIncomingItemUpdate):
+            with self.subTest(model=model.__name__):
+                built = model(card_id="base1-4_en")
+                self.assertIsNone(built.condition)
+                self.assertIsNone(built.variant)
+                self.assertEqual(built.condition or "Mint", "Mint")
 
     def test_trade_create_service_defaults_new_inventory_to_mint(self):
         prepare = find_function(parse_source("backend/api/trades.py"), "_prepare_incoming_card")

@@ -189,8 +189,8 @@ class CollectionItem(Base):
     # holo fields, so a reverse holo filed as Normal is valued wrongly.
     #
     # NULL means unknown, which is the honest reading of every row written
-    # before this existed. False means the row was filed automatically. True
-    # means somebody chose.
+    # before this existed. False means at least one copy in the row has not
+    # been stated, whatever put it there. True means every copy has.
     attributes_confirmed = Column(Boolean, nullable=True)
 
     card = relationship("Card", back_populates="collection_items")
@@ -516,6 +516,10 @@ class TradeItem(Base):
     card_number = Column(String, nullable=True)
     variant = Column(String, nullable=True)
     condition = Column(String, nullable=True)
+    # Snapshotted with the rest, so reversing a trade puts the row back as it
+    # was. Without it a row that wanted checking came back claiming every copy
+    # in it had been stated.
+    attributes_confirmed = Column(Boolean, nullable=True)
     lang = Column(String, nullable=True)
     notes = Column(Text)
     created_at = Column(DateTime, default=func.now())

@@ -8,6 +8,7 @@ from collections.abc import Iterable
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from services.collection_attributes import merged_confirmation
 from models import Card, CollectionItem, ScanJob, ScanJobItem, User
 from services.scan_storage import delete_scan_image
 
@@ -125,7 +126,9 @@ def _add_collection_copy(
     if existing:
         existing.quantity += 1
         # Whatever the row was, it now contains a copy nobody assessed.
-        existing.attributes_confirmed = False
+        existing.attributes_confirmed = merged_confirmation(
+            existing.attributes_confirmed, False
+        )
         return
     db.add(CollectionItem(
         card_id=card.id,

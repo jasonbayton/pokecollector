@@ -120,6 +120,7 @@ def _run_migrations(conn):
         # automatically when nobody knows that.
         "ALTER TABLE collection ADD COLUMN IF NOT EXISTS attributes_confirmed BOOLEAN",
         "ALTER TABLE deleted_collection_items ADD COLUMN IF NOT EXISTS attributes_confirmed BOOLEAN",
+        "ALTER TABLE trade_items ADD COLUMN IF NOT EXISTS attributes_confirmed BOOLEAN",
         # v32: Add ebay_app_id to settings table
         "ALTER TABLE settings ADD COLUMN IF NOT EXISTS ebay_app_id VARCHAR",
         # v41: Add Pokemon avatar selection to users
