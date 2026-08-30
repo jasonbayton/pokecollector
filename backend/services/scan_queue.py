@@ -468,7 +468,7 @@ async def default_composite_processor(
         match_composite_card_info,
         recognize_composite_card_info,
     )
-    from services.scan_providers import get_provider
+    from services.scan_providers import get_provider, high_resolution_samples_enabled
     from services.card_composite import build_composite
     from services.scan_trace import create_scan_trace
 
@@ -505,7 +505,7 @@ async def default_composite_processor(
             try:
                 recognized_by_position = await recognize_composite_card_info(
                     api_key,
-                    build_composite(images, high_resolution=provider.high_resolution),
+                    build_composite(images, high_resolution=high_resolution_samples_enabled(db)),
                     len(images),
                     traces=traces,
                     provider=provider,

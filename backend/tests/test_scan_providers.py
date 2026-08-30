@@ -275,17 +275,23 @@ class RequestShapingTests(unittest.TestCase):
         self.assertEqual(extract_openai_text(payload), '{"name": "Quaxly"}')
         self.assertEqual(usage, {"total_tokens": 12})
 
-    def test_openai_high_resolution_request_sets_high_detail(self):
+    def test_no_detail_key_is_ever_sent(self):
+        # detail: "high" is the opposite of what its name suggests here. An
+        # omitted key means auto, which for the GPT-5.6 family is original and
+        # preserves what we send, while "high" is capped at 2048 px and 2,500
+        # patches. Asking for it would shrink the larger image the
+        # high-resolution setting exists to send, so the mode would deliver
+        # FEWER effective pixels than the low one.
         with patch.dict(os.environ, {"OPENAI_BASE_URL": LOCAL_URL}):
             client, _, _ = self._run(
-                ScanProvider(OPENAI, high_resolution=True),
+                ScanProvider(OPENAI),
                 "",
                 [image_part("image/jpeg", "QUJD")],
                 [_FakeResponse(200, {"choices": [{"message": {"content": "ok"}}]})],
             )
 
         image_url = client.calls[0]["json"]["messages"][0]["content"][0]["image_url"]
-        self.assertEqual(image_url["detail"], "high")
+        self.assertNotIn("detail", image_url)
 
 
     def test_no_authorization_header_when_there_is_no_key(self):

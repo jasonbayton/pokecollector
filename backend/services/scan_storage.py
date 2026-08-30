@@ -277,16 +277,27 @@ async def create_scan_job(
     from services.scan_providers import high_resolution_samples_enabled
 
     high_resolution = high_resolution_samples_enabled(db)
-    raw_total = 0
+    # Budget what is STORED, not what was uploaded. Sanitising re-encodes, and
+    # the result can be far larger than its input: a compact 4096 px PNG of
+    # noise arrives at about 1 MB and leaves as about 14 MB of JPEG. Charging
+    # the upload let fifty such files pass a 200 MB job limit while writing
+    # nearly 700 MB to disk.
+    stored_total = 0
     try:
         for position, upload in enumerate(uploads):
             raw = await read_limited_upload(
                 upload,
-                remaining_job_bytes=MAX_JOB_BYTES - raw_total,
+                remaining_job_bytes=MAX_JOB_BYTES - stored_total,
             )
-            raw_total += len(raw)
             sanitized = sanitize_image_bytes(raw, high_resolution=high_resolution)
             relative_path, byte_size = store_sanitized_image(job.id, sanitized)
+            stored_total += byte_size
+            if stored_total > MAX_JOB_BYTES:
+                delete_scan_image(relative_path)
+                raise ScanJobBytesExceeded(
+                    "These photos are too large to scan in one job. "
+                    "Please split them across more than one scan."
+                )
             db.add(
                 ScanJobItem(
                     job_id=job.id,

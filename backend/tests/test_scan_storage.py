@@ -2,6 +2,7 @@ import datetime
 import io
 import os
 import tempfile
+import random
 import unittest
 from unittest.mock import patch
 
@@ -147,6 +148,62 @@ class ScanJobStorageTests(unittest.IsolatedAsyncioTestCase):
                     [_upload(small), _upload(small)],
                 )
         self.assertEqual(list(scan_storage.scan_upload_root().iterdir()), [])
+
+    async def test_the_job_budget_counts_stored_bytes_not_uploaded_ones(self):
+        # Sanitising re-encodes, and the result can be far larger than its
+        # input. Charging the upload let a job pass its limit on arrival and
+        # then write many times that to disk. The budget is a disk budget.
+        small = _image_bytes(size=(8, 8))
+        big_when_stored = len(small) * 20
+
+        def inflate(raw, *, high_resolution=False):
+            sanitized = real_sanitize(raw, high_resolution=high_resolution)
+            return sanitized.__class__(
+                data=b"\xff\xd8" + b"\x00" * big_when_stored,
+                content_type=sanitized.content_type,
+            )
+
+        real_sanitize = scan_storage.sanitize_image_bytes
+        with patch.object(scan_storage, "MAX_JOB_BYTES", big_when_stored + 8), \
+                patch.object(scan_storage, "sanitize_image_bytes", inflate):
+            with self.assertRaises(ScanUploadError):
+                await create_scan_job(
+                    self.db, self.user.id, [_upload(small), _upload(small)],
+                )
+
+        # Nothing is left behind, including the oversized file that tipped it.
+        self.assertEqual(list(scan_storage.scan_upload_root().iterdir()), [])
+
+
+@unittest.skipUnless(DEPS_AVAILABLE, "Scan storage dependencies are not installed")
+class StoredBytesBudgetTests(unittest.TestCase):
+    """The job budget has to count what lands on disk, not what arrived."""
+
+    def test_re_encoding_can_exceed_its_input_by_an_order_of_magnitude(self):
+        # The premise of the budget defect, asserted rather than assumed: a
+        # compact PNG of noise re-encodes to a far larger JPEG, so charging the
+        # upload would let a job write many times the bytes it was allowed.
+        import io
+        from PIL import Image
+        from services.scan_storage import sanitize_image_bytes
+
+        rng = random.Random(11)
+        image = Image.new("RGB", (4096, 4096))
+        image.putdata([
+            (rng.randint(0, 255), rng.randint(0, 255), rng.randint(0, 255))
+            for _ in range(64 * 64)
+        ] * (4096 * 4096 // (64 * 64)))
+        source = io.BytesIO()
+        image.save(source, format="PNG", optimize=True)
+        raw = source.getvalue()
+
+        stored = sanitize_image_bytes(raw, high_resolution=True)
+
+        self.assertGreater(
+            len(stored.data),
+            len(raw),
+            "this fixture no longer demonstrates re-encoding growth",
+        )
 
 
 if __name__ == "__main__":

@@ -243,12 +243,20 @@ def openai_retry_after_seconds(resp: httpx.Response) -> float | None:
     return min(value, MAX_RETRY_AFTER_SECONDS)
 
 
-def _openai_content(parts: list[dict], *, high_resolution: bool = False) -> list[dict]:
+def _openai_content(parts: list[dict]) -> list[dict]:
     """Turn neutral parts into OpenAI content blocks.
 
     Neutral part shapes, shared with the Gemini serialiser:
         {"text": "..."}
         {"image": {"mime_type": "image/jpeg", "data": "<base64>"}}
+
+    Deliberately sends NO ``detail`` key, at either resolution setting.
+    OpenAI documents an omitted key as ``auto``, which for the GPT-5.6 family
+    means ``original`` and preserves what we send. ``detail: "high"`` is the
+    opposite of what its name suggests here: it is capped at 2048 px and 2,500
+    patches, so asking for it would shrink the larger image the setting exists
+    to send, and the high-resolution mode would quietly deliver FEWER
+    effective pixels than the low one.
     """
     content = []
     for part in parts:
@@ -257,12 +265,9 @@ def _openai_content(parts: list[dict], *, high_resolution: bool = False) -> list
         elif "image" in part:
             image = part["image"]
             mime = image.get("mime_type") or "image/jpeg"
-            image_url = {"url": f"data:{mime};base64,{image['data']}"}
-            if high_resolution:
-                image_url["detail"] = "high"
             content.append({
                 "type": "image_url",
-                "image_url": image_url,
+                "image_url": {"url": f"data:{mime};base64,{image['data']}"},
             })
     return content
 
@@ -416,12 +421,11 @@ def extract_openai_text(payload: dict) -> str:
 class ScanProvider:
     """One provider's calling convention, so call sites stay provider-agnostic."""
 
-    def __init__(self, name: str, chosen_model: str = "", high_resolution: bool = False):
+    def __init__(self, name: str, chosen_model: str = ""):
         self.name = name
         # Resolved once, because the request payload needs it and generate_text
         # has no database session of its own.
         self._chosen_model = (chosen_model or "").strip()
-        self.high_resolution = high_resolution
 
     @property
     def is_gemini(self) -> bool:
@@ -513,7 +517,7 @@ class ScanProvider:
             {
                 "model": self.model(),
                 "messages": [{"role": "user", "content": _openai_content(
-                    parts, high_resolution=self.high_resolution
+                    parts
                 )}],
             },
             max_attempts=max_attempts,
@@ -532,8 +536,6 @@ class ScanProvider:
 
 def get_provider(db: Session, user_id: int | None) -> ScanProvider:
     name = resolve_provider_name(db, user_id)
-    return ScanProvider(
-        name,
-        resolve_model(db, user_id, name),
-        high_resolution_samples_enabled(db),
-    )
+    # The resolution setting deliberately does not reach the provider: it
+    # changes the SIZE of the image we send, not how we ask for it to be read.
+    return ScanProvider(name, resolve_model(db, user_id, name))
