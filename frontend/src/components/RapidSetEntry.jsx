@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, Minus, Plus, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { rapidSetEntry } from '../api/client'
@@ -6,7 +6,7 @@ import { cardNumberMatches } from '../utils/cardNumbers'
 import { CARD_VARIANTS } from '../utils/cardVariants'
 import { COLLECTION_CONDITIONS } from '../utils/collectionOptions'
 import { invalidateCardState } from '../utils/queryInvalidation'
-import { addCopy, applyRowChange, variantChoices } from '../utils/rapidEntryRows'
+import { addCopy, applyRowChange, cachedLanguagesForCard, cachedLanguagesInSet, variantChoices } from '../utils/rapidEntryRows'
 import TcgdexLanguageSelect from './TcgdexLanguageSelect'
 import QuantityInput from './ui/QuantityInput'
 
@@ -23,13 +23,28 @@ export default function RapidSetEntry({ set, cards, queryClient, t, onClose }) {
     () => cardsByNumber.find(card => cardNumberMatches(card.number, number)),
     [cardsByNumber, number],
   )
+  const cachedLanguages = useMemo(
+    () => (match ? cachedLanguagesForCard(match, cards) : cachedLanguagesInSet(cards)),
+    [cards, match],
+  )
+
+  useEffect(() => {
+    if (!cachedLanguages.length || cachedLanguages.some(language => language.code === defaults.lang)) return
+    setDefaults(value => ({ ...value, lang: cachedLanguages[0].code }))
+  }, [cachedLanguages, defaults.lang])
 
   const addNumber = () => {
     if (!match) return
     // Rows carry a stable id of their own. Editing a row's condition then
     // changes only that row, where keying on the card would have merged it
     // into whichever other row now shared its identity.
-    setRows(current => addCopy(current, match, defaults, (nextRowId.current += 1)))
+    // The effect above keeps this true for normal interaction. Keep the same
+    // guard here so a rapid Enter key cannot add a row with an invalid language
+    // between a new number match and React applying the state adjustment.
+    const lang = cachedLanguages.some(language => language.code === defaults.lang)
+      ? defaults.lang
+      : cachedLanguages[0]?.code || match.lang
+    setRows(current => addCopy(current, match, { ...defaults, lang }, (nextRowId.current += 1)))
     setNumber('')
     inputRef.current?.focus()
   }
@@ -91,7 +106,7 @@ export default function RapidSetEntry({ set, cards, queryClient, t, onClose }) {
           </select>
         </label>
         <label className="text-xs text-text-muted">{t('rapidEntry.language')}
-          <TcgdexLanguageSelect value={defaults.lang} onChange={lang => setDefaults(value => ({ ...value, lang }))} className="select mt-1 w-full" />
+          <TcgdexLanguageSelect value={defaults.lang} onChange={lang => setDefaults(value => ({ ...value, lang }))} languages={cachedLanguages} className="select mt-1 w-full" />
         </label>
       </div>
 
@@ -129,7 +144,7 @@ export default function RapidSetEntry({ set, cards, queryClient, t, onClose }) {
               <label className="text-xs text-text-muted">{t('common.quantity')}<QuantityInput value={row.quantity} onChange={quantity => updateRow(row.id, { quantity })} className="input mt-1 w-full" /></label>
               <label className="text-xs text-text-muted">{t('card.condition')}<select value={row.condition} onChange={event => updateRow(row.id, { condition: event.target.value })} className="select mt-1 w-full">{COLLECTION_CONDITIONS.map(condition => <option key={condition}>{condition}</option>)}</select></label>
               <label className="text-xs text-text-muted">{t('card.variant')}<select value={row.variant} onChange={event => updateRow(row.id, { variant: event.target.value })} className="select mt-1 w-full">{variantChoices(row.card, CARD_VARIANTS).map(variant => <option key={variant}>{variant}</option>)}</select></label>
-              <label className="text-xs text-text-muted">{t('rapidEntry.language')}<TcgdexLanguageSelect value={row.lang} onChange={lang => updateRow(row.id, { lang })} className="select mt-1 w-full" /></label>
+              <label className="text-xs text-text-muted">{t('rapidEntry.language')}<TcgdexLanguageSelect value={row.lang} onChange={lang => updateRow(row.id, { lang })} languages={cachedLanguagesForCard(row.card, cards)} className="select mt-1 w-full" /></label>
             </div>}
           </div>
         ))}

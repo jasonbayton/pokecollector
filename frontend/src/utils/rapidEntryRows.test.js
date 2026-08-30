@@ -1,8 +1,21 @@
 import { describe, expect, it } from 'vitest'
 
-import { addCopy, applyRowChange, resolveVariant, rowIdentity, variantChoices } from './rapidEntryRows'
+import { addCopy, applyRowChange, cachedLanguagesForCard, cachedLanguagesInSet, resolveVariant, rowIdentity, variantChoices } from './rapidEntryRows'
 
 const card = { id: 'sv1-25_en', number: '25', lang: 'en', variants_normal: true, variants_reverse: true }
+
+describe('cachedLanguagesForCard', () => {
+  it('offers only locally cached printings with the same collector number', () => {
+    const cards = [
+      card,
+      { id: 'sv1-25_de', number: '025', lang: 'de' },
+      { id: 'sv1-26_fr', number: '26', lang: 'fr' },
+    ]
+
+    expect(cachedLanguagesForCard(card, cards).map(language => language.code)).toEqual(['en', 'de'])
+    expect(cachedLanguagesInSet(cards).map(language => language.code)).toEqual(['en', 'fr', 'de'])
+  })
+})
 const holoOnly = { id: 'sv1-99_en', number: '99', lang: 'en', variants_holo: true }
 const mint = { condition: 'Mint', variant: '', lang: 'en' }
 const total = rows => rows.reduce((sum, row) => sum + row.quantity, 0)

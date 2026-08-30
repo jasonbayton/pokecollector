@@ -36,7 +36,10 @@ def read_fork_release() -> str:
 
     try:
         described = subprocess.run(
-            ["git", "describe", "--tags", "--dirty"],
+            # Only an exact fork release tag identifies a deployed fork build.
+            # Without the match, `git describe` may report a nearby upstream tag
+            # (or append a commit distance), which would make the backup key lie.
+            ["git", "describe", "--tags", "--exact-match", "--match", "bayton-v*"],
             cwd=Path(__file__).resolve().parent.parent,
             capture_output=True, text=True, timeout=5, check=False,
         )
