@@ -1,7 +1,7 @@
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from api.auth import get_current_user
@@ -456,7 +456,13 @@ def _load_user_stats(db: Session, user_ids: list[int] | None = None, price_field
         # A wishlist binder lays out cards the user does NOT own, so filling
         # one is not a collecting milestone. Without this, four filled
         # wishlist pages earned both binder achievements with nothing owned.
-        Binder.binder_type == "collection",
+        #
+        # NULL is a legacy collection binder, not an unknown kind: the rest of
+        # the codebase reads it that way, in binder_allocations and when
+        # updating a binder's type. Testing only for "collection" would have
+        # quietly denied the milestone to every binder made before the column
+        # existed.
+        or_(Binder.binder_type == "collection", Binder.binder_type.is_(None)),
         Binder.grid_rows.isnot(None),
         Binder.grid_columns.isnot(None),
     ).group_by(

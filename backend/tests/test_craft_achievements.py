@@ -166,6 +166,39 @@ class CraftAchievementTests(unittest.TestCase):
         self.assertEqual(stats["artist_diversity"], 1)
         self.assertEqual(stats["holo_cards"], 10)
 
+    def test_a_legacy_binder_with_no_type_still_earns_its_milestone(self):
+        # NULL is a collection binder made before the column existed, which is
+        # how binder_allocations and the binder update path both read it.
+        # Testing only for "collection" silently denied every legacy binder.
+        legacy = Binder(
+            name="Legacy",
+            user_id=self.user.id,
+            binder_type=None,
+            grid_rows=3,
+            grid_columns=3,
+        )
+        self.db.add(legacy)
+        self.db.commit()
+        # binder_type has a column default of "collection", so passing None to
+        # the constructor stores "collection" and a test written that way
+        # proves nothing. Force the NULL after the insert.
+        self.db.query(Binder).filter(Binder.id == legacy.id).update(
+            {Binder.binder_type: None}, synchronize_session=False
+        )
+        self.db.commit()
+        self.assertIsNone(
+            self.db.query(Binder.binder_type).filter(Binder.id == legacy.id).scalar()
+        )
+        for page in range(1, 5):
+            for pocket in range(1, 10):
+                self._add_slot(legacy, "holo", page=page, pocket=pocket)
+        self.db.commit()
+
+        stats = _load_user_stats(self.db, [self.user.id])[self.user.id]
+
+        self.assertEqual(stats["complete_binder_page_flag"], 1)
+        self.assertEqual(stats["full_binder_flag"], 1)
+
     def test_a_filled_wishlist_binder_earns_no_binder_milestone(self):
         # A wishlist binder lays out cards the user does not own. Counting it
         # granted both binder milestones to someone owning nothing at all.
