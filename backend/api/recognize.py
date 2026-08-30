@@ -496,21 +496,26 @@ RECOGNIZE_PROMPT = """Look at this Pokemon Trading Card Game card image.
 
 IMPORTANT ACCURACY RULES:
 - Only report text or symbols that are actually visible in this image.
-- number_local, number_total, set_code, regulation_mark, and artist are small printed
-  details. If any character is unclear, return null instead of guessing.
+- First read the printed set code and local collector number. Together these identify
+  the printing. Use the name, artwork and all other details only to confirm that result.
+- A complete number_local has every character visible. If one or more characters are
+  unreadable but the position is clear, preserve each unreadable character as `?`, for
+  example `2?5`. Use null only when the number is absent or no useful pattern is visible.
+- number_total, set_code, regulation_mark, and artist are small printed details. Return
+  null if any of their characters are unclear instead of guessing.
 - Only return set_code when printed alphanumeric characters are visible near the card
   number. Do not infer a code from the artwork or from recognizing the set.
 
 Extract:
-1. Card name exactly as printed, in the card's language
-2. English card name (same value when already English)
-3. Local collector number, or null
-4. Printed set total/denominator, or null
-5. Printed set code/abbreviation, or null
-6. Regulation mark, or null
+1. Printed set code/abbreviation, or null
+2. Local collector number, a partial pattern using `?`, or null
+3. Printed set total/denominator, or null
+4. Two-letter ISO language code
+5. Card name exactly as printed, in the card's language, for confirmation
+6. English card name, for confirmation (same value when already English)
 7. Card type: Pokemon, Trainer, or Energy
 8. HP value, or null
-9. Two-letter ISO language code
+9. Regulation mark, or null
 10. Artist/illustrator credit, or null
 
 Respond ONLY with this exact JSON:
@@ -544,6 +549,24 @@ def _identity_signal(target, candidate, matcher) -> int:
     if target in (None, "") or candidate in (None, ""):
         return 1
     return 0 if matcher(target, candidate) else 2
+
+
+def _confirmation_name(value) -> str | None:
+    """Normalise a name only for the post-retrieval confirmation check."""
+    text = _simplify_name(str(value or "")).casefold()
+    text = re.sub(r"[^a-z0-9]+", "", text)
+    return text or None
+
+
+def _code_number_name_agrees(card_info: dict, candidate: dict) -> bool:
+    """A readable name may confirm a direct printing lookup, never retrieve it."""
+    candidate_name = _confirmation_name(candidate.get("name"))
+    recognized_names = {
+        _confirmation_name(card_info.get(field))
+        for field in ("name", "name_en")
+    }
+    recognized_names.discard(None)
+    return not recognized_names or candidate_name in recognized_names
 
 
 def _candidate_rank_key(card_info: dict, candidate: dict) -> tuple[int, ...]:
@@ -1036,6 +1059,185 @@ async def _search_one_catalogue(
     return candidates, attempted, unreachable
 
 
+def _partial_collector_number_pattern(value) -> re.Pattern | None:
+    """Return a literal one-character-wildcard pattern for an uncertain number.
+
+    Scanner extraction records an unreadable character as ``?``. This remains a
+    retrieval-only hint: it is deliberately not accepted by the equality
+    normaliser used by ranking and automatic decisions.
+    """
+    local = str(value or "").split("/", 1)[0].strip()
+    if "?" not in local or not re.fullmatch(r"[A-Za-z0-9?]+", local):
+        return None
+    return re.compile("^" + re.escape(local).replace(r"\?", r"[A-Za-z0-9]") + "$", re.IGNORECASE)
+
+
+def _has_usable_code_number(card_info: dict) -> bool:
+    set_code = str(card_info.get("set_code") or "").strip()
+    number = card_info.get("number_local")
+    return bool(
+        re.fullmatch(r"[A-Za-z0-9.]+", set_code)
+        and (normalize_scanner_card_number(number) or _partial_collector_number_pattern(number))
+    )
+
+
+def _code_number_candidate(card: Card, set_row: Set | None, *, code: str) -> dict:
+    language = card.lang or "en"
+    return {
+        "id": card.id,
+        "tcg_card_id": card.tcg_card_id,
+        "name": card.name,
+        "set": set_row.name if set_row else None,
+        "set_abbreviation": (set_row.abbreviation if set_row else code),
+        "number": card.number,
+        "image": card.images_small or card.custom_image_url,
+        "rarity": card.rarity,
+        "lang": language,
+        "_lang": language,
+        "_number_extra": False,
+        "_from_local_catalogue": True,
+        "_retrieved_by_code_number": True,
+    }
+
+
+def _local_code_number_candidates(db: Session, card_info: dict) -> tuple[list[dict], list[str]]:
+    """Find a printing locally by set abbreviation, TCGdex id, or card set id."""
+    set_code = str(card_info.get("set_code") or "").strip()
+    if not _has_usable_code_number(card_info):
+        return [], []
+    lowered_code = set_code.casefold()
+    set_rows = db.query(Set).filter(
+        or_(
+            func.lower(Set.abbreviation) == lowered_code,
+            func.lower(Set.tcg_set_id) == lowered_code,
+            func.lower(Set.id) == lowered_code,
+        )
+    ).all()
+    set_ids = {row.tcg_set_id or row.id for row in set_rows}
+    set_ids.update(
+        row[0]
+        for row in db.query(Card.set_id).filter(func.lower(Card.set_id) == lowered_code).all()
+        if row[0]
+    )
+    if not set_ids:
+        return [], []
+
+    pattern = _partial_collector_number_pattern(card_info.get("number_local"))
+    target = normalize_scanner_card_number(card_info.get("number_local"))
+    language = normalize_tcgdex_language(card_info.get("language", "en"))
+    rows = db.query(Card).filter(
+        Card.set_id.in_(sorted(set_ids)),
+        Card.tcg_card_id.isnot(None),
+        Card.is_custom.isnot(True),
+    ).all()
+    matching_rows = [
+        row for row in rows
+        if (pattern and pattern.fullmatch(str(row.number or "")))
+        or (target and normalize_scanner_card_number(row.number) == target)
+    ]
+    preferred_rows = [row for row in matching_rows if row.lang == language]
+    if not preferred_rows and language != "en":
+        preferred_rows = [row for row in matching_rows if row.lang == "en"]
+    if preferred_rows:
+        matching_rows = preferred_rows
+    local_sets = {(row.tcg_set_id or row.id, row.lang): row for row in set_rows}
+    return [
+        _code_number_candidate(
+            row, local_sets.get((row.set_id, row.lang)), code=set_code
+        )
+        for row in matching_rows
+    ], sorted(set_ids)
+
+
+async def _search_code_number_catalogue(
+    base_url,
+    set_ids: list[str],
+    card_info: dict,
+    trace: ScanTrace | None,
+    request_gate,
+    catalogue_name: str,
+) -> tuple[list[dict], int, int]:
+    """Retrieve a code-number printing from TCGdex, resolving an uncached code."""
+    set_code = str(card_info.get("set_code") or "").strip()
+    number = card_info.get("number_local")
+    language = normalize_tcgdex_language(card_info.get("language", "en"))
+    attempted = 0
+    unreachable = 0
+    resolved_ids = list(set_ids)
+    try:
+        if not resolved_ids:
+            attempted += 1
+            async with _request_gate(request_gate):
+                async with httpx.AsyncClient(timeout=15) as client:
+                    response = await client.get(f"{base_url(language)}/sets")
+            if response.status_code >= 500 or response.status_code in {408, 429}:
+                unreachable += 1
+            sets = response.json() if response.status_code == 200 else []
+            if not isinstance(sets, list):
+                sets = []
+            for set_data in sets:
+                abbreviation = (set_data.get("abbreviation") or {}).get("official")
+                if str(set_data.get("id") or "").casefold() == set_code.casefold() or (
+                    str(abbreviation or "").casefold() == set_code.casefold()
+                ):
+                    set_id = set_data.get("id")
+                    if set_id:
+                        resolved_ids.append(str(set_id))
+        candidates = []
+        pattern = _partial_collector_number_pattern(number)
+        for set_id in resolved_ids:
+            attempted += 1
+            params = {"set": set_id}
+            if pattern is None:
+                params["localId"] = str(number)
+            async with _request_gate(request_gate):
+                async with httpx.AsyncClient(timeout=15) as client:
+                    response = await client.get(f"{base_url(language)}/cards", params=params)
+            if response.status_code >= 500 or response.status_code in {408, 429}:
+                unreachable += 1
+            cards = response.json() if response.status_code == 200 else []
+            if trace:
+                trace.record_tcgdex(
+                    language=language, query=f"{set_code} {number}",
+                    status=response.status_code,
+                    count=len(cards) if isinstance(cards, list) else None,
+                )
+            if not isinstance(cards, list):
+                continue
+            for card in cards:
+                local_id = str(card.get("localId") or "")
+                if pattern and not pattern.fullmatch(local_id):
+                    continue
+                if not pattern and normalize_scanner_card_number(local_id) != normalize_scanner_card_number(number):
+                    continue
+                card_id = card.get("id")
+                if not card_id:
+                    continue
+                candidates.append({
+                    "id": f"{card_id}_{language}",
+                    "tcg_card_id": card_id,
+                    "name": card.get("name"),
+                    "set": card.get("set", {}).get("name") if isinstance(card.get("set"), dict) else None,
+                    "set_abbreviation": set_code,
+                    "number": card.get("localId"),
+                    "image": f"{card.get('image')}/low.webp" if card.get("image") else None,
+                    "rarity": card.get("rarity"),
+                    "lang": language,
+                    "_lang": language,
+                    "_number_extra": False,
+                    "_catalogue": catalogue_name,
+                    "_retrieved_by_code_number": True,
+                })
+        return candidates, attempted, unreachable
+    except Exception as exc:
+        if trace:
+            trace.record_tcgdex(
+                language=language, query=f"{set_code} {number}", status=None,
+                count=None, error=type(exc).__name__,
+            )
+        return [], attempted or 1, unreachable + 1
+
+
 async def _search_and_rank_candidates(
     db: Session,
     card_info: dict,
@@ -1045,38 +1247,58 @@ async def _search_and_rank_candidates(
 ) -> tuple[list[dict], int]:
     card_name = str(card_info.get("name") or "").strip()
     card_name_en = str(card_info.get("name_en") or card_name).strip() or card_name
-    if not card_name:
-        raise HTTPException(status_code=422, detail="The card name could not be read from this photo.")
+    has_code_number = _has_usable_code_number(card_info)
+    if not card_name and not has_code_number:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Neither the card name nor a readable set code and collector number "
+                "could be read from this photo."
+            ),
+        )
 
     simple_name = _simplify_name(card_name)
     simple_name_en = _simplify_name(card_name_en)
     language = normalize_tcgdex_language(card_info.get("language", "en"))
     if not is_supported_tcgdex_language(language):
         language = "en"
-    search_pairs = [(language, simple_name)]
-    if simple_name != card_name:
-        search_pairs.append((language, card_name))
-    if language != "en":
-        search_pairs.append(("en", simple_name_en))
-        if simple_name_en != card_name_en:
-            search_pairs.append(("en", card_name_en))
+    search_pairs = []
+    if card_name:
+        search_pairs = [(language, simple_name)]
+        if simple_name != card_name:
+            search_pairs.append((language, card_name))
+        if language != "en":
+            search_pairs.append(("en", simple_name_en))
+            if simple_name_en != card_name_en:
+                search_pairs.append(("en", card_name_en))
 
-    candidates = []
+    candidates, set_ids = _local_code_number_candidates(db, card_info)
     attempted = 0
     unreachable = 0
-    for catalogue_name, base_url in _catalogue_bases():
-        found, base_attempted, base_unreachable = await _search_one_catalogue(
-            base_url, search_pairs, card_info, trace, request_gate, catalogue_name
-        )
-        candidates.extend(found)
-        attempted += base_attempted
-        unreachable += base_unreachable
-        # Move on to the standby only when this catalogue could not be reached
-        # at all. If it answered, its answer stands, including an answer of
-        # "no such card": a second opinion sought only because the first was
-        # not to our liking is not a fallback, it is a coin toss.
-        if not (base_attempted and base_unreachable == base_attempted):
-            break
+    if not candidates and has_code_number:
+        for catalogue_name, base_url in _catalogue_bases():
+            found, base_attempted, base_unreachable = await _search_code_number_catalogue(
+                base_url, set_ids, card_info, trace, request_gate, catalogue_name
+            )
+            candidates.extend(found)
+            attempted += base_attempted
+            unreachable += base_unreachable
+            if not (base_attempted and base_unreachable == base_attempted):
+                break
+    if not candidates and search_pairs:
+        for catalogue_name, base_url in _catalogue_bases():
+            found, base_attempted, base_unreachable = await _search_one_catalogue(
+                base_url, search_pairs, card_info, trace, request_gate, catalogue_name
+            )
+            candidates.extend(found)
+            attempted += base_attempted
+            unreachable += base_unreachable
+            # Move on to the standby only when this catalogue could not be reached
+            # at all. If it answered, its answer stands, including an answer of
+            # "no such card": a second opinion sought only because the first was
+            # not to our liking is not a fallback, it is a coin toss.
+            if not (base_attempted and base_unreachable == base_attempted):
+                break
 
     if not candidates and attempted and unreachable == attempted:
         # The catalogue is unreachable, but this installation already holds a
@@ -1179,6 +1401,17 @@ async def match_card_info(
         db, card_info, trace, request_gate=request_gate
     )
     confident, decision = _metadata_decision(card_info, candidates)
+    if (
+        confident
+        and candidates
+        and candidates[0].get("_retrieved_by_code_number")
+        and not _code_number_name_agrees(card_info, candidates[0])
+    ):
+        # A code and complete number retrieve the printing, but a different
+        # readable name means the extraction contradicts it. Keep the result
+        # visible for review and do not silently file either interpretation.
+        confident = False
+        decision = "code_number_name_disagrees"
 
     top_candidates = retain_ranked_candidates(candidates)
     can_compare = sum(1 for card in top_candidates if card.get("image")) >= 2
@@ -1288,7 +1521,11 @@ async def match_card_info(
             logger.warning("Visual matching failed (non-blocking): %s", exc)
 
     public_matches = [
-        {key: value for key, value in card.items() if key != "_number_extra"}
+        {
+            key: value
+            for key, value in card.items()
+            if key not in {"_number_extra", "_retrieved_by_code_number"}
+        }
         for card in retain_ranked_candidates(candidates)
     ]
     # candidates[0] is the matcher's pick: the ranked winner, or whichever
@@ -1434,21 +1671,23 @@ relying on response order.
 
 For each card return the same information as an individual scan:
 - index: the printed corner number
-- name: exact card name in the card's language
-- name_en: English card name
-- number_local: printed local collector number, or null
-- number_total: printed set total/denominator, or null
 - set_code: printed alphanumeric set code near the number, or null
+- number_local: printed local collector number, a partial pattern using `?`, or null
+- number_total: printed set total/denominator, or null
+- name: exact card name in the card's language, for confirmation
+- name_en: English card name, for confirmation
 - regulation_mark: boxed regulation letter, or null
 - card_type: Pokemon, Trainer, or Energy
 - hp: HP value or null
 - language: two-letter ISO language code
 - artist: printed illustrator credit, or null
 
-Only report small identity text when every character is visible. Never infer set_code from
-the artwork or from recognizing the set. If a detail is unclear, use null rather than
-guessing. Respond ONLY with a JSON array containing one object per card, without markdown
-or explanation.
+Read the set code and collector number first. Together they identify the printing; use the
+name, artwork and other details only as confirmation. Never infer set_code from the artwork
+or from recognizing the set. For number_local only, write each unreadable but positioned
+character as `?`, such as `2?5`; use null when it is absent or no useful pattern is visible.
+For all other small identity text, use null rather than guessing if any character is unclear.
+Respond ONLY with a JSON array containing one object per card, without markdown or explanation.
 """
 
 

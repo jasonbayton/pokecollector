@@ -523,7 +523,11 @@ async def default_composite_processor(
             for position in range(len(images)):
                 card_info = recognized_by_position.get(position)
                 has_name = bool(str((card_info or {}).get("name") or "").strip())
-                if not has_name:
+                has_code_number = bool(
+                    str((card_info or {}).get("set_code") or "").strip()
+                    and str((card_info or {}).get("number_local") or "").strip()
+                )
+                if not (has_name or has_code_number):
                     traces[position].record_decision("individual_fallback")
                     continue
                 pending.append((position, card_info))
