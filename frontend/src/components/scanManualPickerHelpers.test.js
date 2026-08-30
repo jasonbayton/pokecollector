@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { manualSearchParams, tcgCardIdFrom, toManualScanMatch } from './scanManualPickerHelpers'
+import { manualSearchParams, tcgCardIdFrom, toManualScanMatch, toManualScanRows } from './scanManualPickerHelpers'
 
 // The shape GET /api/cards/search actually returns, per _card_to_dict in
 // backend/api/cards.py: set_ref and images_small, no tcg_card_id, no
@@ -22,7 +22,7 @@ describe('toManualScanMatch', () => {
     expect(toManualScanMatch(catalogueCard).tcg_card_id).toBe('base1-64')
   })
 
-  it('supplies the set code both the picker and the confirm modal display', () => {
+  it('supplies the set code the confirm modal displays', () => {
     expect(toManualScanMatch(catalogueCard).set_abbreviation).toBe('BS')
   })
 
@@ -65,5 +65,21 @@ describe('tcgCardIdFrom', () => {
 describe('manualSearchParams', () => {
   it('sends the trimmed query and language the catalogue search expects', () => {
     expect(manualSearchParams('  SVI 25 ', 'de')).toEqual({ name: 'SVI 25', lang: 'de', page: 1, page_size: 20 })
+  })
+})
+
+describe('toManualScanRows', () => {
+  it('maps the rows the picker lists, so each shows its set code', () => {
+    // Mapping only on selection left the list showing a bare collector
+    // number, which cannot separate two printings sharing a name.
+    const rows = toManualScanRows({ data: { data: [catalogueCard] } })
+    expect(rows).toHaveLength(1)
+    expect(rows[0].set_abbreviation).toBe('BS')
+    expect(rows[0].tcg_card_id).toBe('base1-64')
+  })
+
+  it('survives a response with no results', () => {
+    expect(toManualScanRows({})).toEqual([])
+    expect(toManualScanRows(undefined)).toEqual([])
   })
 })

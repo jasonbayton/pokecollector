@@ -225,6 +225,7 @@ def resolve_scan_job_item(
     if item.status not in {"done", "failed"}:
         raise HTTPException(status_code=409, detail="This scan is still being processed.")
     card_id = str((data.card_id if data else "") or "").strip() or None
+    manual_correction = False
     if card_id:
         from api.collection import ensure_card_exists
         from services import pokemon_api
@@ -246,14 +247,18 @@ def resolve_scan_job_item(
         )
         from services.scan_trace import record_ground_truth
 
+        manual_correction = tcg_card_id not in allowed_ids
         record_ground_truth(
             current_user.id,
             job_id,
             item_id,
             tcg_card_id,
-            source="candidate" if tcg_card_id in allowed_ids else "manual",
+            source="manual" if manual_correction else "candidate",
         )
-    return _item_payload(resolve_scan_item(db, item))
+    # A card the recogniser never offered keeps its photo: that image is the
+    # only record of what could not be read, and the evidence for whether a
+    # later change to retrieval would have found it.
+    return _item_payload(resolve_scan_item(db, item, keep_image=manual_correction))
 
 
 @router.post("/recognize/jobs/{job_id}/add-all-confident")

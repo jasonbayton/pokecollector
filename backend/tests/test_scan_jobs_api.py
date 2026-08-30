@@ -308,6 +308,64 @@ class ScanJobsApiTests(unittest.TestCase):
             source="manual",
         )
 
+    def test_a_manual_correction_keeps_its_photo_and_a_candidate_pick_does_not(self):
+        # The photo is the only record of what the recogniser could not read,
+        # and the evidence for whether a later change to retrieval would have
+        # found the card. Resolution deletes photos so a reviewed batch does
+        # not fill the disk; a manually identified card is the exception.
+        created = self._enqueue()
+        item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
+        stored = resolve_scan_path(item.image_path)
+        self.db.add(Card(
+            id="different-card_de",
+            tcg_card_id="different-card",
+            name="Manually identified card",
+            lang="de",
+            variants_normal=True,
+        ))
+        item.status = "failed"
+        item.matches = []
+        self.db.commit()
+
+        response = self.client.post(
+            f"/api/cards/recognize/jobs/{created['id']}/items/{item.id}/resolve",
+            json={"card_id": "different-card", "lang": "de"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        persisted = self.db.get(ScanJobItem, item.id)
+        self.assertTrue(persisted.resolved)
+        self.assertIsNotNone(persisted.image_path)
+        self.assertTrue(stored.exists())
+
+    def test_a_candidate_pick_still_releases_its_photo(self):
+        # The bystander: retaining evidence must not stop an ordinary review
+        # from freeing its storage.
+        created = self._enqueue()
+        item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
+        stored = resolve_scan_path(item.image_path)
+        self.db.add(Card(
+            id="card-1_en",
+            tcg_card_id="card-1",
+            name="Candidate card",
+            lang="en",
+            variants_normal=True,
+        ))
+        item.status = "done"
+        item.matches = [{"id": "card-1_en", "tcg_card_id": "card-1"}]
+        self.db.commit()
+
+        response = self.client.post(
+            f"/api/cards/recognize/jobs/{created['id']}/items/{item.id}/resolve",
+            json={"card_id": "card-1"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        persisted = self.db.get(ScanJobItem, item.id)
+        self.assertTrue(persisted.resolved)
+        self.assertIsNone(persisted.image_path)
+        self.assertFalse(stored.exists())
+
     def test_resolve_rejects_a_non_catalogue_manual_card_server_side(self):
         created = self._enqueue()
         item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()

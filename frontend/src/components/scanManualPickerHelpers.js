@@ -48,3 +48,15 @@ export function toManualScanMatch(card) {
     lang: card.lang || card.set_ref?.lang || null,
   }
 }
+
+/**
+ * The rows the picker displays, mapped on arrival rather than on selection.
+ *
+ * The list has to show the set code: it is the only thing separating two
+ * printings that share a name and a number. Rendering the raw catalogue row
+ * showed a bare number, because the catalogue supplies set_ref.abbreviation
+ * and the row template reads set_abbreviation.
+ */
+export function toManualScanRows(response) {
+  return (response?.data?.data || []).map(toManualScanMatch)
+}

@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Search } from 'lucide-react'
 import { searchCards } from '../api/client'
 import Modal from './ui/Modal'
 import TcgdexLanguageSelect from './TcgdexLanguageSelect'
-import { manualSearchParams, toManualScanMatch } from './scanManualPickerHelpers'
+import { manualSearchParams, toManualScanRows } from './scanManualPickerHelpers'
 
 export default function ScanManualPicker({ defaultLang = 'en', onSelect, onClose, t }) {
   const [query, setQuery] = useState('')
@@ -12,22 +12,29 @@ export default function ScanManualPicker({ defaultLang = 'en', onSelect, onClose
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(false)
   const [searched, setSearched] = useState(false)
+  const requestToken = useRef(0)
 
   const search = async event => {
     event.preventDefault()
     if (!query.trim()) return
+    const token = (requestToken.current += 1)
     setLoading(true)
     setError(false)
     try {
       const response = await searchCards(manualSearchParams(query, lang))
-      setResults(response.data?.data || [])
+      // Stale guard: a slower earlier search, or one in a language the user
+      // has since changed away from, must not repopulate the list behind a
+      // newer one and offer the wrong printings.
+      if (token !== requestToken.current) return
+      setResults(toManualScanRows(response))
       setSearched(true)
     } catch {
+      if (token !== requestToken.current) return
       setError(true)
       setResults([])
       setSearched(true)
     } finally {
-      setLoading(false)
+      if (token === requestToken.current) setLoading(false)
     }
   }
 
@@ -50,7 +57,14 @@ export default function ScanManualPicker({ defaultLang = 'en', onSelect, onClose
           <label className="mb-1.5 block text-xs font-medium text-text-muted">{t('scanner.manualPickLanguage')}</label>
           <TcgdexLanguageSelect
             value={lang}
-            onChange={next => { setLang(next); setResults([]); setSearched(false) }}
+            onChange={next => {
+              // Abandon anything in flight: its answer is for the old language.
+              requestToken.current += 1
+              setLang(next)
+              setResults([])
+              setSearched(false)
+              setLoading(false)
+            }}
             className="select w-full"
           />
         </div>
@@ -61,7 +75,7 @@ export default function ScanManualPicker({ defaultLang = 'en', onSelect, onClose
         {loading && <p className="text-sm text-text-muted">{t('common.loading')}</p>}
         <div className="max-h-72 space-y-2 overflow-y-auto">
           {results.map(card => (
-            <button key={card.id} type="button" onClick={() => onSelect(toManualScanMatch(card))}
+            <button key={card.id} type="button" onClick={() => onSelect(card)}
               className="w-full rounded-xl border border-border bg-bg-card p-3 text-left hover:border-brand-red/60">
               <p className="font-semibold text-text-primary">{card.name}</p>
               <p className="text-xs text-text-muted">{`${(card.set_abbreviation || '').toUpperCase()} ${card.number || ''}`.trim()}</p>
