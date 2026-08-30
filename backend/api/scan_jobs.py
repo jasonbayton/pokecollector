@@ -285,10 +285,27 @@ def resolve_scan_job_item(
             tcg_card_id,
             source="manual" if manual_correction else "candidate",
         )
-    # A card the recogniser never offered keeps its photo: that image is the
-    # only record of what could not be read, and the evidence for whether a
-    # later change to retrieval would have found it.
-    return _item_payload(resolve_scan_item(db, item, keep_image=manual_correction))
+        # Three outcomes, not two, and only one of them is worth no photo.
+        #
+        #   never offered      -> retrieval failed; the photo is the only
+        #                         record of what could not be read
+        #   offered, not first -> ranking missed; the photo is the evidence
+        #                         for why the right card ranked below a wrong
+        #                         one
+        #   the top suggestion -> nothing was corrected; the candidate list
+        #                         and trace already describe it
+        #
+        # Keeping only the first threw away half the correction evidence.
+        # Keeping all three would retain a photo for every scan ever
+        # confirmed, which on a household instance is the bulk of them.
+        suggested_id, _ = pokemon_api.strip_lang_suffix(
+            str(item.suggested_match_id or "")
+        )
+        corrected_the_suggestion = tcg_card_id != suggested_id
+        keep_image = manual_correction or corrected_the_suggestion
+    else:
+        keep_image = False
+    return _item_payload(resolve_scan_item(db, item, keep_image=keep_image))
 
 
 @router.post("/recognize/jobs/{job_id}/add-all-confident")

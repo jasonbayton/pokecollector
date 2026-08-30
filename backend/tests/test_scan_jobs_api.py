@@ -338,9 +338,40 @@ class ScanJobsApiTests(unittest.TestCase):
         self.assertIsNotNone(persisted.image_path)
         self.assertTrue(stored.exists())
 
-    def test_a_candidate_pick_still_releases_its_photo(self):
-        # The bystander: retaining evidence must not stop an ordinary review
-        # from freeing its storage.
+    def test_choosing_a_candidate_over_the_suggestion_keeps_its_photo(self):
+        # Picking a candidate that was not the top suggestion is a correction
+        # too: it says the ranking missed. Keeping only manual entries threw
+        # away half the evidence for why the right card ranked below a wrong
+        # one.
+        created = self._enqueue()
+        item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
+        stored = resolve_scan_path(item.image_path)
+        self.db.add(Card(
+            id="card-2_en", tcg_card_id="card-2", name="Second candidate",
+            lang="en", variants_normal=True,
+        ))
+        item.status = "done"
+        item.suggested_match_id = "card-1_en"
+        item.matches = [
+            {"id": "card-1_en", "tcg_card_id": "card-1"},
+            {"id": "card-2_en", "tcg_card_id": "card-2"},
+        ]
+        self.db.commit()
+
+        response = self.client.post(
+            f"/api/cards/recognize/jobs/{created['id']}/items/{item.id}/resolve",
+            json={"card_id": "card-2"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        persisted = self.db.get(ScanJobItem, item.id)
+        self.assertTrue(persisted.resolved)
+        self.assertIsNotNone(persisted.image_path)
+        self.assertTrue(stored.exists())
+
+    def test_confirming_the_suggestion_still_releases_its_photo(self):
+        # The bystander, and the only outcome that corrected nothing. Keeping
+        # this one too would retain a photo for almost every scan ever taken.
         created = self._enqueue()
         item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
         stored = resolve_scan_path(item.image_path)
@@ -352,6 +383,7 @@ class ScanJobsApiTests(unittest.TestCase):
             variants_normal=True,
         ))
         item.status = "done"
+        item.suggested_match_id = "card-1_en"
         item.matches = [{"id": "card-1_en", "tcg_card_id": "card-1"}]
         self.db.commit()
 
