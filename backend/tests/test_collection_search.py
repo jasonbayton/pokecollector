@@ -1,0 +1,138 @@
+"""A bounded search for the pickers that used to download everything.
+
+The trade and binder pickers loaded the whole collection and filtered it in the
+browser to show at most twelve or twenty-four rows. This endpoint does the same
+matching server-side and returns only what will be shown, so the cost stops
+growing with the collection - and so the next screen that wants "cards I own"
+has something to call other than "give me all of them".
+"""
+
+import unittest
+
+try:
+    from fastapi import HTTPException
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from api.collection import search_collection
+    from database import Base
+    from models import Card, CollectionItem, Set, User
+
+    DEPS_AVAILABLE = True
+except ModuleNotFoundError:  # pragma: no cover
+    DEPS_AVAILABLE = False
+
+
+@unittest.skipUnless(DEPS_AVAILABLE, "backend dependencies unavailable")
+class CollectionSearchTests(unittest.TestCase):
+    def setUp(self):
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine)
+        self.db = sessionmaker(bind=engine)()
+        self.user = User(username="collector", hashed_password="x")
+        self.db.add(self.user)
+        self.db.add(Set(id="sv1_en", tcg_set_id="sv1", name="Scarlet & Violet",
+                        abbreviation="SVI", lang="en"))
+        self.db.commit()
+
+    def tearDown(self):
+        self.db.close()
+
+    def _card(self, card_id, name, number, set_id="sv1_en"):
+        card = Card(id=card_id, tcg_card_id=card_id.rsplit("_", 1)[0], name=name,
+                    set_id=set_id, number=number, lang="en", is_custom=False)
+        self.db.add(card)
+        self.db.add(CollectionItem(card_id=card_id, user_id=self.user.id, quantity=1,
+                                   condition="NM", variant="Normal", lang="en"))
+        self.db.commit()
+        return card
+
+    def _search(self, **kwargs):
+        return search_collection(current_user=self.user, db=self.db, **kwargs)
+
+    def test_it_finds_a_card_by_name(self):
+        self._card("sv1-25_en", "Sprigatito", "25")
+        self._card("sv1-30_en", "Fuecoco", "30")
+        found = self._search(q="sprig")
+        self.assertEqual([item.card_id for item in found], ["sv1-25_en"])
+
+    def test_it_finds_a_card_by_set_name(self):
+        self._card("sv1-25_en", "Sprigatito", "25")
+        self.assertEqual(len(self._search(q="Scarlet")), 1)
+
+    def test_it_finds_a_card_by_collector_number(self):
+        self._card("sv1-25_en", "Sprigatito", "25")
+        self._card("sv1-30_en", "Fuecoco", "30")
+        found = self._search(q="30")
+        self.assertEqual([item.card_id for item in found], ["sv1-30_en"])
+
+    def test_a_bare_number_matches_both_the_number_and_names_containing_it(self):
+        # Parity with the pickers this replaces, which tested the name with a
+        # plain substring match as well as the collector number. Narrowing that
+        # here would change what searching does, which is a decision of its own
+        # and not part of moving the work to the server.
+        self._card("sv1-25_en", "Sprigatito", "25")
+        self._card("sv1-99_en", "Route 25 Trainer", "99")
+        found = {item.card_id for item in self._search(q="25")}
+        self.assertEqual(found, {"sv1-25_en", "sv1-99_en"})
+
+    def test_it_understands_the_set_code_and_number_shortcode(self):
+        self._card("sv1-25_en", "Sprigatito", "25")
+        self._card("sv1-30_en", "Fuecoco", "30")
+        for term in ("SVI 25", "svi 25", "sv1 25"):
+            with self.subTest(term=term):
+                found = self._search(q=term)
+                self.assertEqual([item.card_id for item in found], ["sv1-25_en"])
+
+    def test_a_padded_number_matches_the_shortcode(self):
+        self._card("sv1-007_en", "Charmander", "007")
+        self.assertEqual(len(self._search(q="SVI 7")), 1)
+
+    def test_it_returns_no_more_than_the_limit(self):
+        for index in range(30):
+            self._card(f"sv1-{index}_en", f"Card {index}", str(index))
+        self.assertEqual(len(self._search(limit=5)), 5)
+
+    def test_the_limit_is_capped_so_a_caller_cannot_ask_for_everything(self):
+        for index in range(60):
+            self._card(f"sv1-{index}_en", f"Card {index}", str(index))
+        self.assertEqual(len(self._search(limit=10_000)), 50)
+
+    def test_filters_narrow_the_result(self):
+        self._card("sv1-25_en", "Sprigatito", "25")
+        row = self.db.query(CollectionItem).filter(CollectionItem.card_id == "sv1-25_en").one()
+        row.variant = "Holo"
+        self.db.commit()
+        self.assertEqual(len(self._search(variant="Holo")), 1)
+        self.assertEqual(len(self._search(variant="Normal")), 0)
+        self.assertEqual(len(self._search(condition="NM")), 1)
+        self.assertEqual(len(self._search(condition="LP")), 0)
+
+    def test_an_unsupported_filter_is_refused_rather_than_ignored(self):
+        # Silently ignoring it would show the picker cards it was asked to
+        # exclude, which is worse than an error.
+        for kwargs in ({"variant": "Sparkly"}, {"condition": "Pristine"}):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(HTTPException) as raised:
+                    self._search(**kwargs)
+                self.assertEqual(raised.exception.status_code, 422)
+
+    def test_another_users_cards_are_never_returned(self):
+        other = User(username="someone-else", hashed_password="x")
+        self.db.add(other)
+        self.db.commit()
+        card = self._card("sv1-25_en", "Sprigatito", "25")
+        self.db.query(CollectionItem).filter(CollectionItem.card_id == card.id).update(
+            {CollectionItem.user_id: other.id}
+        )
+        self.db.commit()
+        self.assertEqual(self._search(q="sprig"), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

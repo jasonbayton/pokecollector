@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Response
-from sqlalchemy import func, or_
+import re
+
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from api.auth import get_current_user
@@ -8,7 +10,8 @@ from models import BinderCard, CollectionItem, CollectionCardPhoto, Card, Delete
 from schemas import CollectionItemCreate, CollectionItemUpdate, CollectionItemResponse, BulkCollectionAddRequest, BulkCollectionAddResponse
 from services import pokemon_api
 from services.card_fallbacks import apply_cross_language_fallbacks, build_missing_language_card
-from services.card_numbers import card_number_matches
+from services.card_numbers import card_number_matches, card_number_variants
+from services.text_search import accent_insensitive_contains
 from services.collection_photos import MAX_UPLOAD_BYTES, InvalidPhoto, normalize_photo
 from services.deleted_collection import (
     archive_collection_item,
@@ -512,6 +515,89 @@ def get_collection(
         query = query.order_by(sort_col.asc())
 
     items = query.all()
+    return _annotate_collection_items(db, current_user, items)
+
+
+COLLECTION_SEARCH_LIMIT_MAX = 50
+
+
+@router.get("/search", response_model=List[CollectionItemResponse])
+def search_collection(
+    q: Optional[str] = None,
+    set_id: Optional[str] = None,
+    variant: Optional[str] = None,
+    condition: Optional[str] = None,
+    limit: int = 24,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Find owned cards for a picker, bounded to what the picker will show.
+
+    The trade and binder pickers previously loaded the whole collection and
+    filtered it in the browser to display at most twelve or twenty-four rows.
+    That is fine at a few hundred rows and gets worse exactly as a collection
+    becomes big enough to need a picker at all. It also meant every new screen
+    that wanted "cards I own" reached for the same full download.
+
+    Matching mirrors what those pickers did client-side: card name, set name,
+    and collector number, plus the "SV1 25" shortcode of a set code and a
+    number, all accent-insensitive.
+    """
+    limit = max(1, min(int(limit or 24), COLLECTION_SEARCH_LIMIT_MAX))
+
+    query = db.query(CollectionItem).join(Card, Card.id == CollectionItem.card_id).options(
+        joinedload(CollectionItem.card).joinedload(Card.set_ref)
+    ).filter(
+        CollectionItem.user_id == current_user.id,
+        visible_any_card_filter(db, current_user.id, "all"),
+    )
+
+    if set_id:
+        query = query.filter(Card.set_id == set_id)
+    if variant:
+        if variant not in ALLOWED_VARIANTS:
+            raise HTTPException(status_code=422, detail="variant is not supported")
+        query = query.filter(CollectionItem.variant == variant)
+    if condition:
+        if condition not in ALLOWED_CONDITIONS:
+            raise HTTPException(status_code=422, detail="condition is not supported")
+        query = query.filter(CollectionItem.condition == condition)
+
+    term = (q or "").strip()
+    if term:
+        clauses = [
+            accent_insensitive_contains(db, Card.name, term),
+            accent_insensitive_contains(db, Set.name, term),
+        ]
+        # A number also matches the collector number, on the normalised forms
+        # the rest of the app uses, so "7" finds a card printed "007". Names
+        # containing the digits still match too, as they did in the pickers
+        # this replaces.
+        for form in card_number_variants(term) if term else []:
+            clauses.append(func.lower(Card.number) == form.casefold())
+        # "SV1 25": a set code and a number together. The code may be written
+        # as the abbreviation or the catalogue set id.
+        shortcode = re.fullmatch(r"([A-Za-z]+[0-9]*)\s+([0-9]+[A-Za-z]*)", term)
+        if shortcode:
+            code, number = shortcode.groups()
+            number_forms = {form.casefold() for form in card_number_variants(number)}
+            clauses.append(
+                and_(
+                    or_(
+                        func.lower(Set.abbreviation) == code.casefold(),
+                        func.lower(Set.tcg_set_id) == code.casefold(),
+                        func.lower(Card.set_id) == code.casefold(),
+                    ),
+                    func.lower(Card.number).in_(sorted(number_forms)),
+                )
+            )
+        query = query.outerjoin(Set, Set.id == Card.set_id).filter(or_(*clauses))
+
+    items = (
+        query.order_by(Card.name.asc(), Card.number.asc(), CollectionItem.id.asc())
+        .limit(limit)
+        .all()
+    )
     return _annotate_collection_items(db, current_user, items)
 
 
