@@ -2,12 +2,11 @@
 Description=Check for a new PokeCollector fork tag
 
 [Timer]
-# The host is LAN only, so GitHub cannot reach it with a webhook. Polling is
-# the equivalent, and five minutes is well inside how long a release takes to
-# be wanted.
+# Signed GitHub push webhooks are the normal release trigger.  This remains a
+# low-frequency recovery path in case GitHub cannot deliver a notification.
 OnBootSec=3min
-OnUnitActiveSec=5min
-AccuracySec=30s
+OnUnitActiveSec=1h
+AccuracySec=5min
 
 [Install]
 WantedBy=timers.target

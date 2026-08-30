@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""Accept signed GitHub tag-push notifications and start the deploy job.
+
+This listener deliberately never deploys a revision supplied by the request.  A
+valid notification only wakes the existing deploy service, which fetches the
+configured fork and retains its isolated-build, health-gate and rollback path.
+"""
+
+import hashlib
+import hmac
+import json
+import logging
+import os
+import subprocess
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+LISTEN_HOST = os.environ.get("POKECOLLECTOR_WEBHOOK_HOST", "127.0.0.1")
+LISTEN_PORT = int(os.environ.get("POKECOLLECTOR_WEBHOOK_PORT", "9001"))
+EXPECTED_REPOSITORY = os.environ.get(
+    "POKECOLLECTOR_WEBHOOK_REPOSITORY", "jasonbayton/pokecollector"
+)
+TAG_PREFIX = os.environ.get("POKECOLLECTOR_WEBHOOK_TAG_PREFIX", "refs/tags/bayton-v")
+MAX_BODY_BYTES = 64 * 1024
+
+
+def webhook_secret() -> bytes:
+    secret = os.environ.get("POKECOLLECTOR_WEBHOOK_SECRET", "")
+    if not secret:
+        raise RuntimeError("POKECOLLECTOR_WEBHOOK_SECRET is not configured")
+    return secret.encode("utf-8")
+
+
+class WebhookHandler(BaseHTTPRequestHandler):
+    server_version = "PokeCollectorWebhook"
+    sys_version = ""
+
+    def log_message(self, format, *args):  # noqa: A003 - required by BaseHTTPRequestHandler
+        logging.info("%s - %s", self.address_string(), format % args)
+
+    def send_status(self, status: int, message: str = "") -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(message.encode("utf-8"))))
+        self.end_headers()
+        if message:
+            self.wfile.write(message.encode("utf-8"))
+
+    def do_POST(self) -> None:  # noqa: N802 - HTTP method name
+        if self.path != "/webhooks/github":
+            self.send_status(404)
+            return
+
+        try:
+            content_length = int(self.headers.get("Content-Length", ""))
+        except ValueError:
+            self.send_status(400, "invalid Content-Length\n")
+            return
+        if content_length < 0 or content_length > MAX_BODY_BYTES:
+            self.send_status(413, "payload too large\n")
+            return
+
+        body = self.rfile.read(content_length)
+        signature = self.headers.get("X-Hub-Signature-256", "")
+        expected_signature = "sha256=" + hmac.new(
+            webhook_secret(), body, hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(signature, expected_signature):
+            logging.warning("rejected webhook with an invalid signature")
+            self.send_status(401, "invalid signature\n")
+            return
+
+        event = self.headers.get("X-GitHub-Event", "")
+        if event == "ping":
+            logging.info("accepted GitHub webhook ping")
+            self.send_status(204)
+            return
+        if event != "push":
+            self.send_status(202, "event ignored\n")
+            return
+
+        try:
+            payload = json.loads(body)
+            repository = payload["repository"]["full_name"]
+            ref = payload["ref"]
+        except (KeyError, TypeError, json.JSONDecodeError):
+            self.send_status(400, "invalid push payload\n")
+            return
+        if repository != EXPECTED_REPOSITORY:
+            logging.warning("ignored push for unexpected repository %s", repository)
+            self.send_status(202, "repository ignored\n")
+            return
+        if not ref.startswith(TAG_PREFIX):
+            self.send_status(202, "ref ignored\n")
+            return
+
+        try:
+            subprocess.run(
+                ["systemctl", "start", "--no-block", "pokecollector-update.service"],
+                check=True,
+                timeout=10,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            logging.exception("could not start deploy service: %s", error)
+            self.send_status(503, "deploy service unavailable\n")
+            return
+
+        logging.info("accepted %s and started the deploy service", ref)
+        self.send_status(202, "deploy queued\n")
+
+    def do_GET(self) -> None:  # noqa: N802 - HTTP method name
+        self.send_status(405)
+
+
+def main() -> None:
+    webhook_secret()  # Fail closed before opening a port.
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    server = ThreadingHTTPServer((LISTEN_HOST, LISTEN_PORT), WebhookHandler)
+    logging.info("listening on %s:%s", LISTEN_HOST, LISTEN_PORT)
+    server.serve_forever()
+
+
+if __name__ == "__main__":
+    main()
