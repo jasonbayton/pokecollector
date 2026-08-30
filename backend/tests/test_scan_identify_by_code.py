@@ -185,3 +185,56 @@ class RemoteSetFilterTests(unittest.TestCase):
 
         self.assertEqual(_brief_set_id({"id": "oddity"}), "")
         self.assertEqual(_brief_set_id({}), "")
+
+
+@unittest.skipUnless(DEPS_AVAILABLE, "Scanner dependencies are not installed")
+class LoneCodeNumberConfidenceTests(unittest.TestCase):
+    """One observation must not file a card by itself.
+
+    A misread digit retrieves a DIFFERENT real card, which then matches its own
+    collector number perfectly. The number agrees with itself, nothing
+    contradicts it, and the artwork is never looked at - so a confident
+    automatic add files a card that looks nothing like the photograph.
+    """
+
+    @staticmethod
+    def _candidate(**overrides):
+        card = {
+            "id": "sv1-25_en", "tcg_card_id": "sv1-25", "name": "Sprigatito",
+            "number": "25", "lang": "en", "_lang": "en",
+            "_retrieved_by_code_number": True,
+        }
+        card.update(overrides)
+        return card
+
+    def test_a_code_number_hit_alone_does_not_decide(self):
+        from api.recognize import _metadata_decision
+
+        confident, decision = _metadata_decision(
+            {"set_code": "SVI", "number_local": "25"}, [self._candidate()],
+        )
+        self.assertFalse(confident)
+        self.assertIsNone(decision)
+
+    def test_the_same_hit_decides_once_something_corroborates_it(self):
+        # The bystander: refusing every code-number identification would undo
+        # the feature. A second agreeing signal is enough.
+        from api.recognize import _metadata_decision
+
+        confident, decision = _metadata_decision(
+            {"set_code": "SVI", "number_local": "25", "language": "en"},
+            [self._candidate()],
+        )
+        self.assertTrue(confident)
+        self.assertEqual(decision, "number_unique")
+
+    def test_a_name_search_hit_on_a_unique_number_still_decides(self):
+        # Retrieval by name already constrains the candidate set, so a unique
+        # number there carries more than one observation. Unchanged.
+        from api.recognize import _metadata_decision
+
+        confident, _ = _metadata_decision(
+            {"number_local": "25"},
+            [self._candidate(_retrieved_by_code_number=False)],
+        )
+        self.assertTrue(confident)
