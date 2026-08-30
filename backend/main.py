@@ -21,11 +21,39 @@ logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
 
 
+def read_fork_release() -> str:
+    """The fork's own release tag, or "" when there is not one to read.
+
+    VERSION belongs to upstream and this fork deliberately does not bump it,
+    so it says 1.39.2 no matter which fork release is running. The annotated
+    tag is what actually identifies a build.
+
+    That matters beyond display: the version string is what decides whether a
+    pre-upgrade backup is taken before startup migrations. While it never
+    changed, that backup never fired for any fork release.
+    """
+    import subprocess
+
+    try:
+        described = subprocess.run(
+            ["git", "describe", "--tags", "--dirty"],
+            cwd=Path(__file__).resolve().parent.parent,
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return described.stdout.strip() if described.returncode == 0 else ""
+
+
 def read_app_version() -> str:
-    """Read the release version from the repository VERSION file."""
+    """Read the release version, preferring the fork's own tag."""
     env_version = os.environ.get("APP_VERSION")
     if env_version:
         return env_version
+
+    fork_release = read_fork_release()
+    if fork_release:
+        return fork_release
 
     for candidate in (
         Path(__file__).resolve().parent.parent / "VERSION",
