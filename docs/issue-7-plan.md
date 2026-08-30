@@ -151,13 +151,30 @@ ordinary job, which simply skips the product step.
    request if the product was deleted or sold while preparation was running.
 
    The request must carry an `expected_product_id` and it must be compared
-   against the locked job. Once a product deletion has committed,
+   against the locked job. It is a REQUIRED but nullable field on both bulk
+   and individual filing: an omitted field must not mean the same thing as an
+   explicit null. Omitted is an out-of-date client and must be refused;
+   explicit null is a caller stating this job has no product. Once a product deletion has committed,
    `job.product_id` is null and is indistinguishable from a job that was never
    product-owned, so without that token the common endpoint would silently file
    the card with no provenance instead of returning the conflict this design
    promises.
 3. Lock eligible `ScanJobItem` rows by ascending `position`, then revalidate
-   their stored suggested candidate and prepared catalogue membership.
+   according to which kind of filing this is. The two are NOT the same, and
+   treating them alike would undo #15:
+
+   - **Bulk confident filing** still requires the locked stored suggestion. It
+     is filing what the recogniser proposed, so the proposal must still stand.
+   - **Individual filing** validates the prepared user-selected card against
+     the locked item but does NOT require it to be a stored candidate. A
+     manually identified card is by definition not among the candidates, which
+     is the whole point of #15.
+
+   Candidate versus manual classification and `record_ground_truth` behaviour
+   are preserved exactly as they are today. A manual correction RETAINS its
+   image path and the physical file, because that photo is the only record of
+   what the recogniser could not read. Only candidate filing may clear and
+   delete the image after commit.
 4. Combine candidate copies by the full collection merge identity, sort those
    identities lexically, and lock any existing `CollectionItem` targets in that
    exact order. Create and flush missing targets before making product links.
