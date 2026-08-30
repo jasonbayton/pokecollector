@@ -634,6 +634,9 @@ class ScanJob(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    product_id = Column(Integer, ForeignKey("product_purchases.id", ondelete="SET NULL"), nullable=True, index=True)
+    default_condition = Column(String, nullable=False, default="Mint", server_default="Mint")
+    default_lang = Column(String, nullable=False, default="en", server_default="en")
     status = Column(String, default="pending", nullable=False, index=True)
     created_at = Column(DateTime, default=func.now(), nullable=False)
     updated_at = Column(DateTime, default=func.now(), nullable=False)

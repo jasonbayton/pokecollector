@@ -19,6 +19,7 @@ from schemas import (
     ProductLedgerEntryCreate,
     ProductLedgerEntryResponse,
     ProductLifecycleBulkUpdate,
+    ProductOpenScanCreate,
     ProductPurchaseBatchCreate,
     ProductPurchaseCreate,
     ProductPurchaseResponse,
@@ -39,6 +40,8 @@ from services.product_ledger import (
     sale_total_is_valid,
 )
 from services.product_images import cleanup_product_image_cache_if_unreferenced, product_image_token
+from services.collection_options import ALLOWED_CONDITIONS
+from services.tcgdex_languages import is_supported_tcgdex_language, normalize_tcgdex_language
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -217,6 +220,34 @@ def _validate_lifecycle_choice(
         raise HTTPException(status_code=409, detail="Products with linked-card or ledger history cannot be marked sealed")
     if product_has_completed_sale(product):
         raise HTTPException(status_code=409, detail="Clear the product sale before changing its lifecycle status")
+
+
+@router.post("/{product_id}/open-scan")
+def open_product_scan(
+    product_id: int,
+    data: ProductOpenScanCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Record opening intent and return verified scan-session defaults."""
+    condition = str(data.condition or "").strip()
+    lang = normalize_tcgdex_language(data.lang)
+    if condition not in ALLOWED_CONDITIONS:
+        raise HTTPException(status_code=422, detail="condition is not supported")
+    if not is_supported_tcgdex_language(lang):
+        raise HTTPException(status_code=422, detail="language is not supported")
+
+    product = _get_product_or_404(db, current_user, product_id, lock=True)
+    if product_has_completed_sale(product):
+        raise HTTPException(status_code=409, detail="A sold product cannot be opened for scanning")
+    product.lifecycle_status = "opened"
+    db.commit()
+    return {
+        "product_id": product.id,
+        "product_name": product.product_name,
+        "condition": condition,
+        "lang": lang,
+    }
 
 
 def _ledger_entry_response(entry: ProductLedgerEntry) -> ProductLedgerEntryResponse:

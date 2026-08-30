@@ -397,6 +397,11 @@ class ProductLifecycleBulkUpdate(BaseModel):
     lifecycle_status: Literal["sealed", "opened"]
 
 
+class ProductOpenScanCreate(BaseModel):
+    condition: str = "Mint"
+    lang: str = "en"
+
+
 class ProductCardLinkCreate(BaseModel):
     collection_item_id: int
     quantity: int = Field(default=1, ge=1, le=999)

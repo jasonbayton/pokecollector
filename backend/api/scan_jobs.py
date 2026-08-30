@@ -13,7 +13,9 @@ from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
 from database import get_db
-from models import ScanJob, ScanJobItem, User
+from models import ProductPurchase, ScanJob, ScanJobItem, User
+from services.collection_options import ALLOWED_CONDITIONS
+from services.tcgdex_languages import is_supported_tcgdex_language, normalize_tcgdex_language
 from services.scan_queue import (
     drain_scan_queue,
     job_progress,
@@ -114,6 +116,9 @@ async def enqueue_scan_job(
     background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     individual_positions: str | None = Form(None),
+    product_id: int | None = Form(None),
+    default_condition: str | None = Form(None),
+    default_lang: str | None = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -143,12 +148,37 @@ async def enqueue_scan_job(
         len(files) > 1 and position not in individual_set
         for position in range(len(files))
     ]
+    session_product_id = None
+    session_condition = "Mint"
+    session_lang = "en"
+    if product_id is not None:
+        session_condition = str(default_condition or "").strip()
+        session_lang = normalize_tcgdex_language(default_lang)
+        if session_condition not in ALLOWED_CONDITIONS:
+            raise HTTPException(status_code=422, detail="condition is not supported")
+        if not is_supported_tcgdex_language(session_lang):
+            raise HTTPException(status_code=422, detail="language is not supported")
+        product = db.query(ProductPurchase).filter(
+            ProductPurchase.id == product_id,
+            ProductPurchase.user_id == current_user.id,
+        ).with_for_update().first()
+        if product is None:
+            raise HTTPException(status_code=404, detail="Product not found.")
+        from services.product_ledger import product_has_completed_sale
+        if product_has_completed_sale(product):
+            raise HTTPException(status_code=409, detail="A sold product cannot be scanned")
+        if product.lifecycle_status != "opened":
+            raise HTTPException(status_code=409, detail="Open the product before creating its scan job")
+        session_product_id = product.id
     try:
         job = await create_scan_job(
             db,
             current_user.id,
             files,
             batch_modes=batch_modes,
+            product_id=session_product_id,
+            default_condition=session_condition,
+            default_lang=session_lang,
         )
     except ScanUploadError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
