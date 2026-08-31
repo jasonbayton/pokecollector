@@ -128,6 +128,40 @@ class ScanIdentifyByCodeTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["_identity_confident"])
         self.assertEqual([card["name"] for card in result["matches"]], ["Pikachu"])
 
+    async def test_basic_energy_exact_code_lookup_survives_tcgdex_name_spelling(self):
+        # The live SVE 010 failure reached TCGdex successfully, but "Fire
+        # Energy" was then rejected because the card face says "Basic Fire
+        # Energy".  The exact printed identity must remain reviewable.
+        candidate = {
+            "id": "sve-010_en",
+            "tcg_card_id": "sve-010",
+            "name": "Fire Energy",
+            "set_abbreviation": "SVE",
+            "number": "010",
+            "lang": "en",
+            "_lang": "en",
+            "_retrieved_by_code_number": True,
+        }
+        with patch(
+            "api.recognize._search_code_number_catalogue",
+            new=AsyncMock(return_value=([candidate], 1, 0)),
+        ):
+            candidates, number_matches = await _search_and_rank_candidates(
+                self.db,
+                {
+                    "set_code": "SVE",
+                    "number_local": "010",
+                    "name": "Basic Fire Energy",
+                    "name_en": "Basic Fire Energy",
+                    "language": "en",
+                    "card_type": "Energy",
+                },
+                trace=None,
+            )
+
+        self.assertEqual([card["tcg_card_id"] for card in candidates], ["sve-010"])
+        self.assertEqual(number_matches, 1)
+
     async def test_no_name_or_identifiers_explains_what_could_not_be_read(self):
         with self.assertRaises(HTTPException) as raised:
             await _search_and_rank_candidates(self.db, {"language": "en"}, trace=None)
@@ -194,6 +228,30 @@ class CodeNumberConfirmationTests(unittest.TestCase):
     def test_suffixes_are_identity_bearing(self):
         info = {"name": "Charizard ex", "language": "en"}
         self.assertFalse(_code_number_name_agrees(info, {"name": "Charizard", "lang": "en"}))
+
+    def test_basic_energy_title_agrees_with_tcgdex_energy_mini_set_name(self):
+        # Pokémon prints "Basic Fire Energy" on the face, but TCGdex names
+        # SVE/MEE basic-energy entries "Fire Energy".  That benign catalogue
+        # spelling difference must not hide an otherwise exact code+number hit.
+        info = {
+            "name": "Basic Fire Energy",
+            "name_en": "Basic Fire Energy",
+            "language": "en",
+            "card_type": "Energy",
+        }
+        self.assertTrue(_code_number_name_agrees(info, {"name": "Fire Energy", "lang": "en"}))
+
+    def test_basic_energy_spelling_is_not_ignored_for_non_energy_cards(self):
+        # This must use the otherwise allowlisted words so it independently
+        # proves that the card_type=Energy gate remains in place.
+        info = {"name": "Basic Fire Energy", "language": "en", "card_type": "Pokemon"}
+        self.assertFalse(_code_number_name_agrees(info, {"name": "Fire Energy", "lang": "en"}))
+
+    def test_unknown_energy_name_does_not_bypass_the_closed_allowlist(self):
+        # This keeps the exception to the real basic Energy vocabulary rather
+        # than making every "Basic <anything> Energy" name equivalent.
+        info = {"name": "Basic Jet Energy", "language": "en", "card_type": "Energy"}
+        self.assertFalse(_code_number_name_agrees(info, {"name": "Jet Energy", "lang": "en"}))
 
     def test_unicode_symbols_are_identity_bearing(self):
         info = {"name": "Mew ☆ δ", "language": "en"}
