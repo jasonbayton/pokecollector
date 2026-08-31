@@ -128,6 +128,16 @@ class ScanJobStorageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(item.content_type, "image/jpeg")
         self.assertGreaterEqual(job.expires_at, before + datetime.timedelta(days=13, hours=23))
 
+    async def test_recent_same_owner_image_is_flagged_but_not_rejected(self):
+        raw = _image_bytes()
+        first = await create_scan_job(self.db, self.user.id, [_upload(raw)])
+        second = await create_scan_job(self.db, self.user.id, [_upload(raw)])
+        first_item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == first.id).one()
+        second_item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == second.id).one()
+
+        self.assertEqual(second_item.duplicate_of_item_id, first_item.id)
+        self.assertIsNotNone(second_item.image_stored_at)
+
     async def test_rejects_more_than_fifty_photos_before_writing(self):
         uploads = [_upload(_image_bytes(size=(8, 8))) for _ in range(51)]
         with self.assertRaises(ScanUploadError):
