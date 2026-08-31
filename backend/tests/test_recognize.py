@@ -1,3 +1,4 @@
+import io
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -8,15 +9,18 @@ try:
     from api.recognize import (
         DEFAULT_GEMINI_MODEL,
         COMPOSITE_PROMPT,
+        IDENTITY_REREAD_PROMPT,
         MAX_GEMINI_RETRY_SECONDS,
         PHASH_CANDIDATE_LIMIT,
         RECOGNIZE_PROMPT,
         _candidate_rank_key,
+        _candidate_matches_code_number,
         _download_candidate_images,
         _metadata_decision,
         _normalize_artist,
         _perceptual_hash,
         _phash_best_match,
+        _reread_identity,
         build_gemini_generate_url,
         get_gemini_model,
         gemini_error_message,
@@ -26,6 +30,7 @@ try:
         normalize_recognized_card_info,
         normalize_scanner_card_number,
         post_gemini_generate,
+        recognize_sanitized_card,
         prioritize_cards_by_number,
         retain_ranked_candidates,
         select_search_candidates,
@@ -58,6 +63,96 @@ class RecognizeConfigTests(unittest.TestCase):
 
 @unittest.skipUnless(API_TEST_DEPS_AVAILABLE, "FastAPI/httpx are not installed in this lightweight test environment")
 class RecognizeCardNumberTests(unittest.TestCase):
+    def test_candidate_requires_both_set_code_and_collector_number(self):
+        recognized = {"set_code": "SVI", "number_local": "070"}
+        self.assertTrue(_candidate_matches_code_number(recognized, {
+            "set_abbreviation": "SVI", "number": "70",
+        }))
+        self.assertFalse(_candidate_matches_code_number(recognized, {
+            "set_abbreviation": "OBF", "number": "230",
+        }))
+
+
+@unittest.skipUnless(API_TEST_DEPS_AVAILABLE, "FastAPI/httpx are not installed in this lightweight test environment")
+class IdentityRereadTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reads_only_the_lower_identity_band_and_requires_both_fields(self):
+        from PIL import Image
+
+        image = Image.new("RGB", (100, 200), "white")
+        payload = io.BytesIO()
+        image.save(payload, format="JPEG")
+        calls = []
+
+        class Provider:
+            async def generate_text(self, client, api_key, parts):
+                calls.append(parts)
+                return '{"set_code": "SVE", "number_local": "010"}', {}
+
+        reread = await _reread_identity(Provider(), "key", payload.getvalue())
+
+        self.assertEqual(reread["set_code"], "SVE")
+        self.assertEqual(reread["number_local"], "010")
+        self.assertEqual(calls[0][0]["text"], IDENTITY_REREAD_PROMPT)
+        self.assertEqual(calls[0][1]["image"]["mime_type"], "image/jpeg")
+
+    async def test_catalogue_failure_after_reread_keeps_original_unresolved_result(self):
+        class Provider:
+            name = "test"
+
+            def credential(self, db, user_id):
+                return "key"
+
+            def requires_credential(self):
+                return False
+
+            async def generate_text(self, client, api_key, parts):
+                return '{"name":"Basic Fire Energy","set_code":"SVI","number_local":"070"}', {}
+
+        original = {
+            "matches": [], "_identity_confident": False,
+            "_identity_decision": "code_number_unresolved",
+            "_identity_suggested_match_id": None,
+        }
+        with patch("api.recognize.get_provider", return_value=Provider()), \
+                patch("api.recognize.visual_verification_enabled", return_value=False), \
+                patch("api.recognize.match_card_info", new=AsyncMock(side_effect=[
+                    original, HTTPException(status_code=503, detail="catalogue down"),
+                ])), \
+                patch("api.recognize._reread_identity", new=AsyncMock(return_value={
+                    "set_code": "SVE", "number_local": "010", "number": "010",
+                })):
+            result = await recognize_sanitized_card(Mock(), 1, b"photo", "image/jpeg")
+
+        self.assertIs(result, original)
+
+    async def test_reread_returns_only_an_exact_code_number_candidate(self):
+        class Provider:
+            name = "test"
+
+            def credential(self, db, user_id):
+                return "key"
+
+            def requires_credential(self):
+                return False
+
+            async def generate_text(self, client, api_key, parts):
+                return '{"name":"Basic Fire Energy","set_code":"SVI","number_local":"070"}', {}
+
+        original = {"matches": [], "_identity_confident": False}
+        recovered = {
+            "matches": [{"set_abbreviation": "SVE", "number": "010"}],
+            "_identity_confident": False,
+        }
+        with patch("api.recognize.get_provider", return_value=Provider()), \
+                patch("api.recognize.visual_verification_enabled", return_value=False), \
+                patch("api.recognize.match_card_info", new=AsyncMock(side_effect=[original, recovered])), \
+                patch("api.recognize._reread_identity", new=AsyncMock(return_value={
+                    "set_code": "SVE", "number_local": "010", "number": "010",
+                })):
+            result = await recognize_sanitized_card(Mock(), 1, b"photo", "image/jpeg")
+
+        self.assertIs(result, recovered)
+
     def test_normalizes_leading_zeros_and_fractional_printed_numbers(self):
         self.assertEqual(normalize_scanner_card_number("063"), "63")
         self.assertEqual(normalize_scanner_card_number("136/182"), "136")

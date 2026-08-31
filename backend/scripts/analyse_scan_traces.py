@@ -36,6 +36,25 @@ def usage_tokens(usage):
     return None
 
 
+def provider_latency(trace):
+    """Total primary extraction plus any focused identity recovery time."""
+    values = [
+        (trace.get("extraction") or {}).get("latency_seconds"),
+        (trace.get("identity_reread") or {}).get("latency_seconds"),
+    ]
+    return sum(value for value in values if isinstance(value, (int, float)))
+
+
+def provider_tokens(trace):
+    """Total reported tokens across the primary and recovery provider calls."""
+    values = [
+        usage_tokens((trace.get("extraction") or {}).get("usage")),
+        usage_tokens((trace.get("identity_reread") or {}).get("usage")),
+    ]
+    reported = [value for value in values if value is not None]
+    return sum(reported) if reported else None
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("trace_dir", nargs="?", default="data/scan-traces")
@@ -125,14 +144,8 @@ def main():
             (trace.get("resolution") or {}).get("request_bytes") for trace in cohort
             if isinstance((trace.get("resolution") or {}).get("request_bytes"), int)
         ]
-        latencies = [
-            (trace.get("extraction") or {}).get("latency_seconds") for trace in cohort
-            if isinstance((trace.get("extraction") or {}).get("latency_seconds"), (int, float))
-        ]
-        tokens = [
-            usage_tokens((trace.get("extraction") or {}).get("usage")) for trace in cohort
-            if usage_tokens((trace.get("extraction") or {}).get("usage")) is not None
-        ]
+        latencies = [provider_latency(trace) for trace in cohort if provider_latency(trace) > 0]
+        tokens = [provider_tokens(trace) for trace in cohort if provider_tokens(trace) is not None]
         details = [
             f"{len(cohort)} traces",
             f"correct {correct_cohort}/{len(judged_cohort)} ({pct(correct_cohort, len(judged_cohort))})",

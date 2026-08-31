@@ -156,6 +156,24 @@ class ScanTraceTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(path.with_suffix(".jpg").stat().st_mode), 0o600)
 
+    def test_identity_reread_records_cost_and_outcome_without_another_image(self):
+        self._enable(self.user)
+        trace = create_scan_trace(self.db, self.user.id, mode="single")
+        trace.record_identity_reread(
+            outcome="candidate",
+            raw_response='{"set_code":"SVE","number_local":"010"}',
+            parsed={"set_code": "SVE", "number_local": "010"},
+            usage={"total_tokens": 123},
+            latency_seconds=0.4,
+        )
+        trace.record_identity_reread(outcome="accepted")
+        path = trace.save()
+
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(payload["identity_reread"]["outcome"], "accepted")
+        self.assertEqual(payload["identity_reread"]["usage"]["total_tokens"], 123)
+        self.assertFalse(path.with_suffix(".jpg").exists())
+
     def test_trace_records_resolution_profile_and_analysis_groups_it(self):
         self._enable(self.user)
         image = io.BytesIO()
@@ -169,6 +187,10 @@ class ScanTraceTests(unittest.TestCase):
         trace.record_extraction(
             parsed={"name": "Pikachu"}, latency_seconds=1.25,
             usage={"total_tokens": 456},
+        )
+        trace.record_identity_reread(
+            outcome="accepted", latency_seconds=0.4,
+            usage={"total_tokens": 123},
         )
         trace.record_candidates([{"tcg_card_id": "right-card"}])
         trace.record_decision("test", "right-card")
@@ -202,8 +224,8 @@ class ScanTraceTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("composite/source-low/request-high/cards-2: 1 traces", result.stdout)
         self.assertIn("composite/source-low/request-high/cards-4: 1 traces", result.stdout)
-        self.assertIn("median latency 1.25s", result.stdout)
-        self.assertIn("median reported tokens 456", result.stdout)
+        self.assertIn("median latency 1.65s", result.stdout)
+        self.assertIn("median reported tokens 579", result.stdout)
         self.assertIn("errors 1/1", result.stdout)
 
     def test_errors_are_redacted_before_persistence(self):
