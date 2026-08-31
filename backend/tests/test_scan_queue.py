@@ -1,4 +1,5 @@
 import datetime
+import hashlib
 import io
 import os
 import tempfile
@@ -598,6 +599,29 @@ class ScanQueueTests(unittest.TestCase):
             sorted(entry.name for entry in old_file.parent.iterdir()),
             [old_file.name],
         )
+
+    def test_retake_recomputes_recent_duplicate_link(self):
+        from PIL import Image
+
+        job = self._job(self.users[0], positions=(0, 1))
+        first, second = self.db.query(ScanJobItem).order_by(ScanJobItem.position).all()
+        first.status = second.status = "done"
+        first_path = scan_storage.resolve_scan_path(first.image_path)
+        second_path = scan_storage.resolve_scan_path(second.image_path)
+        first_path.parent.mkdir(exist_ok=True)
+        first_path.write_bytes(b"old")
+        second_path.write_bytes(b"other")
+        output = io.BytesIO()
+        Image.new("RGB", (400, 560), "#385898").save(output, format="JPEG")
+        sanitized = scan_storage.sanitize_image_bytes(output.getvalue())
+        first.image_hash = hashlib.sha256(sanitized.data).hexdigest()
+        first.image_stored_at = datetime.datetime.utcnow()
+        self.db.commit()
+
+        replace_scan_item_photo(self.db, second, output.getvalue())
+
+        self.assertEqual(second.duplicate_of_item_id, first.id)
+        self.assertIsNotNone(second.image_stored_at)
 
     def test_progress_counts_only_reviewable_items_as_attention(self):
         job = self._job(self.users[0], positions=(0, 1, 2, 3))
