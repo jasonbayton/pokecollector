@@ -893,6 +893,19 @@ def purge_expired_scan_jobs(db: Session, *, now: datetime.datetime | None = None
 
 def job_progress(db: Session, job: ScanJob) -> dict:
     items = db.query(ScanJobItem).filter(ScanJobItem.job_id == job.id).all()
+    suggested_ids = {
+        str(item.suggested_match_id)
+        for item in items
+        if item.identity_confident is True and item.suggested_match_id
+    }
+    from models import CollectionItem
+    owned_card_ids = {
+        card_id for (card_id,) in db.query(CollectionItem.card_id).filter(
+            CollectionItem.user_id == job.user_id,
+            CollectionItem.quantity > 0,
+            CollectionItem.card_id.in_(suggested_ids),
+        ).all()
+    } if suggested_ids else set()
     counts = {status: sum(1 for item in items if item.status == status) for status in {
         "pending", "processing", "retrying", "done", "failed"
     }}
@@ -934,7 +947,7 @@ def job_progress(db: Session, job: ScanJob) -> dict:
         "attention": attention,
         # The client must not guess from a rank or a null-era scan row. This is
         # the same full eligibility predicate the atomic bulk action uses.
-        "confident_addable": confident_addable_count(items),
+        "confident_addable": confident_addable_count(items, owned_card_ids=owned_card_ids),
         "failed_attention": failed_attention,
         "next_retry_at": (
             next_retry_item.next_attempt_at.isoformat() if next_retry_item else None

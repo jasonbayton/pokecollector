@@ -146,6 +146,24 @@ class ScanBulkAddTests(unittest.TestCase):
         self.assertEqual(self.db.query(CollectionItem).count(), 0)
         self.assertTrue(stale_image.exists())
 
+    def test_already_owned_suggestion_stays_for_explicit_review(self):
+        card = self._card("card-1_en")
+        item, image = self._item(0, card_id=card.id)
+        self.db.add(CollectionItem(
+            card_id=card.id,
+            user_id=self.user.id,
+            quantity=2,
+            condition="Mint",
+            variant="Normal",
+            lang="en",
+        ))
+        self.db.commit()
+
+        self.assertEqual(self._file({card.id}), 0)
+        self.assertEqual(self.db.query(CollectionItem).one().quantity, 2)
+        self.assertFalse(self.db.get(ScanJobItem, item.id).resolved)
+        self.assertTrue(image.exists())
+
     def test_uses_an_available_print_when_normal_does_not_exist(self):
         holo_only = self._card("holo-only_en", variants_normal=False, variants_holo=True)
         self._item(0, card_id=holo_only.id)
@@ -229,10 +247,11 @@ class ScanBulkAddTests(unittest.TestCase):
     def test_a_mid_transaction_failure_rolls_back_cards_and_resolutions(self):
         first = self._card("card-1_en")
         second = self._card("card-2_en")
+        bystander_card = self._card("card-3_en")
         first_item, first_image = self._item(0, card_id=first.id)
         second_item, second_image = self._item(1, card_id=second.id)
         existing = CollectionItem(
-            card_id=first.id,
+            card_id=bystander_card.id,
             user_id=self.user.id,
             quantity=7,
             condition="Mint",

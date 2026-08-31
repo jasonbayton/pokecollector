@@ -75,9 +75,13 @@ def _get_own_item(
     return item
 
 
-def _item_payload(db: Session, item: ScanJobItem) -> dict:
+def _item_payload(
+    db: Session, item: ScanJobItem, *, owned_card_ids: set[str] | None = None,
+) -> dict:
     suggested_already_owned = False
-    if item.identity_confident is True and item.suggested_match_id:
+    if owned_card_ids is not None:
+        suggested_already_owned = str(item.suggested_match_id or "") in owned_card_ids
+    elif item.identity_confident is True and item.suggested_match_id:
         suggested_already_owned = db.query(CollectionItem.id).filter(
             CollectionItem.user_id == item.user_id,
             CollectionItem.card_id == item.suggested_match_id,
@@ -232,7 +236,22 @@ def get_scan_job(
         .order_by(ScanJobItem.position.asc())
         .all()
     )
-    return {**job_progress(db, job), "items": [_item_payload(db, item) for item in items]}
+    suggested_ids = {
+        str(item.suggested_match_id)
+        for item in items
+        if item.identity_confident is True and item.suggested_match_id
+    }
+    owned_card_ids = {
+        card_id for (card_id,) in db.query(CollectionItem.card_id).filter(
+            CollectionItem.user_id == current_user.id,
+            CollectionItem.quantity > 0,
+            CollectionItem.card_id.in_(suggested_ids),
+        ).all()
+    } if suggested_ids else set()
+    return {
+        **job_progress(db, job),
+        "items": [_item_payload(db, item, owned_card_ids=owned_card_ids) for item in items],
+    }
 
 
 @router.get("/recognize/jobs/{job_id}/items/{item_id}/image")

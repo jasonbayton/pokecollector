@@ -138,18 +138,26 @@ def _suggested_match(item: ScanJobItem) -> dict | None:
     return None
 
 
-def is_confident_addable(item: ScanJobItem) -> bool:
+def is_confident_addable(
+    item: ScanJobItem, *, owned_card_ids: set[str] | None = None,
+) -> bool:
     return bool(
         not item.resolved
         and item.status == "done"
         and item.identity_confident is True
         and item.suggested_match_id
         and _suggested_match(item)
+        # A likely second copy is useful information, but it needs explicit
+        # per-item confirmation. Bulk add must never turn the review warning
+        # into a silent quantity increment.
+        and str(item.suggested_match_id) not in (owned_card_ids or set())
     )
 
 
-def confident_addable_count(items: Iterable[ScanJobItem]) -> int:
-    return sum(1 for item in items if is_confident_addable(item))
+def confident_addable_count(
+    items: Iterable[ScanJobItem], *, owned_card_ids: set[str] | None = None,
+) -> int:
+    return sum(1 for item in items if is_confident_addable(item, owned_card_ids=owned_card_ids))
 
 
 def candidate_ids_to_prepare(items: Iterable[ScanJobItem]) -> set[str]:
@@ -226,6 +234,19 @@ def add_all_confident_scan_items(
             .with_for_update()
             .all()
         )
+        candidate_ids = {
+            str(match.get("id") or "").strip()
+            for item in candidates
+            for match in [_suggested_match(item)]
+            if match is not None and str(match.get("id") or "").strip()
+        }
+        owned_card_ids = {
+            card_id for (card_id,) in db.query(CollectionItem.card_id).filter(
+                CollectionItem.user_id == current_user.id,
+                CollectionItem.quantity > 0,
+                CollectionItem.card_id.in_(candidate_ids),
+            ).all()
+        } if candidate_ids else set()
 
         now = datetime.datetime.utcnow()
         added = 0
@@ -237,6 +258,10 @@ def add_all_confident_scan_items(
                     detail="Suggested card is not a stored scan candidate.",
                 )
             card_id = str(match.get("id") or "").strip()
+            if card_id in owned_card_ids:
+                # Leave it unresolved. The review screen explains why and the
+                # user can deliberately file another copy from that card.
+                continue
             if not card_id or card_id not in prepared_card_ids:
                 raise HTTPException(
                     status_code=409,
