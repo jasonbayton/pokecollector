@@ -941,6 +941,19 @@ async def _fill_candidate_details(
                 )
                 official_total = ((detail.get("set") or {}).get("cardCount") or {}).get("official")
                 card["printed_total"] = card.get("printed_total") or official_total
+                variants = detail.get("variants") or []
+                if isinstance(variants, dict):
+                    available = {name.casefold() for name, enabled in variants.items() if enabled}
+                else:
+                    available = {str(name).casefold() for name in variants}
+                for field, names in {
+                    "variants_normal": {"normal"},
+                    "variants_reverse": {"reverse", "reverseholo", "reverse holo"},
+                    "variants_holo": {"holo", "holofoil"},
+                    "variants_first_edition": {"firstedition", "first edition"},
+                }.items():
+                    if card.get(field) is None:
+                        card[field] = bool(available.intersection(names))
             except Exception:
                 return
 
@@ -1016,6 +1029,10 @@ def _local_catalogue_candidates(db, card_info, search_pairs) -> list:
             "number": row.number,
             "image": row.images_small or row.custom_image_url,
             "rarity": row.rarity,
+            "variants_normal": row.variants_normal,
+            "variants_reverse": row.variants_reverse,
+            "variants_holo": row.variants_holo,
+            "variants_first_edition": row.variants_first_edition,
             "lang": language,
             "_lang": language,
             "_number_extra": False,
@@ -1174,6 +1191,10 @@ def _code_number_candidate(card: Card, set_row: Set | None, *, code: str) -> dic
         "number": card.number,
         "image": card.images_small or card.custom_image_url,
         "rarity": card.rarity,
+        "variants_normal": card.variants_normal,
+        "variants_reverse": card.variants_reverse,
+        "variants_holo": card.variants_holo,
+        "variants_first_edition": card.variants_first_edition,
         "lang": language,
         "_lang": language,
         "_number_extra": False,
