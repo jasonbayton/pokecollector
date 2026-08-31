@@ -148,7 +148,7 @@ def calculate_portfolio_valuation(
     items = list(collection_items) if collection_items is not None else _collection_items(db, user_id)
 
     card_value = sum(
-        effective_market_price(item.card, item.variant, price_field) * int(item.quantity or 0)
+        effective_market_price(item.card, item.variant, price_field) * max(int(item.quantity or 0), 0)
         for item in items
         if item.card
     )
