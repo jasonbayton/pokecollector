@@ -25,6 +25,20 @@ permissions:
 jobs:
   card-system:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: visual_test
+          POSTGRES_PASSWORD: visual_test
+          POSTGRES_DB: pokecollector_visual
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U visual_test -d pokecollector_visual"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     defaults:
       run:
         working-directory: frontend
@@ -50,6 +64,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Set up the visual-test API
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install visual-test API dependencies
+        working-directory: .
+        run: python -m pip install --disable-pip-version-check -r backend/requirements.txt
+
       - name: Run translation and unit tests
         run: npm test
 
@@ -59,8 +82,48 @@ jobs:
       - name: Install visual-test browsers
         run: npx playwright install --with-deps chromium webkit
 
+      - name: Start visual-test API
+        working-directory: .
+        env:
+          DATABASE_URL: postgresql://visual_test:visual_test@127.0.0.1:5432/pokecollector_visual
+          JWT_SECRET_KEY: visual-test-only-not-a-production-secret
+          USER_MODE: multi
+        run: |
+          PYTHONPATH=backend python -m uvicorn main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/pokecollector-visual-api.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/pokecollector-visual-api.pid"
+          for attempt in $(seq 1 20); do
+            if curl -fsS --max-time 1 http://127.0.0.1:8000/api/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/pokecollector-visual-api.log"
+          exit 1
+
       - name: Run desktop and mobile visual regression tests
         run: npm run test:visual
 
+      - name: Upload visual-test failures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-card-system-failures
+          path: frontend/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Run WebKit card-list regression test
         run: npm run test:visual:webkit
+
+      - name: Show visual-test API log on failure
+        if: failure()
+        working-directory: .
+        run: cat "$RUNNER_TEMP/pokecollector-visual-api.log"
+
+      - name: Stop visual-test API
+        if: always()
+        working-directory: .
+        run: |
+          if [ -f "$RUNNER_TEMP/pokecollector-visual-api.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/pokecollector-visual-api.pid")" 2>/dev/null || true
+          fi

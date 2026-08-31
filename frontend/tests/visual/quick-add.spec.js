@@ -121,7 +121,7 @@ test('quick add opens the scanner from a page that is not the card search', asyn
   await quickAdd(page).click()
   await page.getByRole('menuitem', { name: 'Scan card' }).click()
 
-  await expect(page.getByRole('button', { name: 'Take photo' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Start camera' })).toBeVisible()
   // The scanner opens over the page rather than moving the user to one.
   expect(new URL(page.url()).pathname).toBe('/collection')
 })

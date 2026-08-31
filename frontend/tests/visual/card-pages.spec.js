@@ -136,6 +136,7 @@ async function installApiFixtures(page) {
       },
       '/api/settings/tcgdex-filter-languages': ['en', 'de'],
       '/api/collection/': collection,
+      '/api/collection/search': collection,
       '/api/wishlist/': [],
       '/api/sets/': [],
       '/api/analytics/duplicates': duplicates,
@@ -159,10 +160,19 @@ async function installApiFixtures(page) {
 async function expectVisibleArtwork(page) {
   const artwork = page.locator('.unified-card-compact-artwork:visible')
   await expect(artwork.first()).toBeVisible()
-  await expect.poll(async () => artwork.locator('img').evaluateAll(images => (
-    images.length > 0 && images.every(image => image.complete && image.naturalWidth > 0)
-  ))).toBe(true)
-  await expect(artwork.locator('.unified-card-skeleton')).toHaveCount(0)
+  // `:visible` means rendered, not on screen. The card system deliberately
+  // keeps off-screen artwork lazy, so hold the rows a user can see to the
+  // loaded-artwork contract without scrolling the page before its screenshot.
+  await expect.poll(async () => artwork.evaluateAll(nodes => {
+    const inViewport = nodes.filter(node => {
+      const rect = node.getBoundingClientRect()
+      return rect.bottom > 0 && rect.top < window.innerHeight
+    })
+    return inViewport.length > 0 && inViewport.every(node => {
+      const image = node.querySelector('img')
+      return image?.complete && image.naturalWidth > 0 && !node.querySelector('.unified-card-skeleton')
+    })
+  })).toBe(true)
 }
 
 test.beforeEach(async ({ page }) => {
