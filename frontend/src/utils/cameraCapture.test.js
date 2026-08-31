@@ -8,12 +8,14 @@ import {
   classifyCameraError,
   createCameraSession,
   detectCameraSupport,
+  preferContinuousAutofocus,
   stopMediaStream,
 } from './cameraCapture'
 
-function createTrack({ throwOnStop = false, unremovableListeners = false } = {}) {
+function createTrack({ throwOnStop = false, unremovableListeners = false, focusModes = null } = {}) {
   const listeners = new Map()
   const track = {
+    kind: 'video',
     stopCount: 0,
     stop() {
       track.stopCount += 1
@@ -33,6 +35,10 @@ function createTrack({ throwOnStop = false, unremovableListeners = false } = {})
     listenerCount(type) {
       return (listeners.get(type) || []).length
     },
+  }
+  if (focusModes) {
+    track.getCapabilities = () => ({ focusMode: focusModes })
+    track.applyConstraints = vi.fn().mockResolvedValue(undefined)
   }
   return track
 }
@@ -65,13 +71,14 @@ function createCanvasFactory() {
 const namedError = name => Object.assign(new Error(name), { name })
 
 describe('buildViewfinderConstraints', () => {
-  it('asks for the rear camera as an ideal, at photo resolution, with no audio', () => {
+  it('asks for the rear camera, 4K capture detail, and continuous focus as ideals', () => {
     expect(buildViewfinderConstraints()).toEqual({
       audio: false,
       video: {
         facingMode: { ideal: 'environment' },
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
+        width: { ideal: 3840 },
+        height: { ideal: 2160 },
+        focusMode: { ideal: 'continuous' },
       },
     })
   })
@@ -82,6 +89,29 @@ describe('buildViewfinderConstraints', () => {
 
     expect(first).not.toBe(second)
     expect(first.video).not.toBe(second.video)
+  })
+})
+
+describe('preferContinuousAutofocus', () => {
+  it('enables continuous focus when the selected video track supports it', async () => {
+    const focusTrack = createTrack({ focusModes: ['manual', 'continuous'] })
+
+    await expect(preferContinuousAutofocus(createStream([focusTrack]))).resolves.toBe(true)
+
+    expect(focusTrack.applyConstraints).toHaveBeenCalledWith({ focusMode: 'continuous' })
+  })
+
+  it('leaves unsupported focus controls alone', async () => {
+    const focusTrack = createTrack()
+
+    await expect(preferContinuousAutofocus(createStream([focusTrack]))).resolves.toBe(false)
+  })
+
+  it('keeps scanning available when a camera rejects focus controls', async () => {
+    const focusTrack = createTrack({ focusModes: ['continuous'] })
+    focusTrack.applyConstraints.mockRejectedValue(new Error('unsupported by driver'))
+
+    await expect(preferContinuousAutofocus(createStream([focusTrack]))).resolves.toBe(false)
   })
 })
 
@@ -221,8 +251,9 @@ describe('createCameraSession', () => {
       audio: false,
       video: {
         facingMode: { ideal: 'environment' },
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
+        width: { ideal: 3840 },
+        height: { ideal: 2160 },
+        focusMode: { ideal: 'continuous' },
       },
     })
     expect(state.status).toBe(CAMERA_STATUS.LIVE)

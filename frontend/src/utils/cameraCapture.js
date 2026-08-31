@@ -53,9 +53,42 @@ export function buildViewfinderConstraints() {
     audio: false,
     video: {
       facingMode: { ideal: 'environment' },
-      width: { ideal: 1920 },
-      height: { ideal: 1080 },
+      // This is a still-image capture surface, not merely a preview. The
+      // server's high-resolution profile accepts up to 4096 px, so capping
+      // the browser stream at 1080p threw detail away before upload.
+      width: { ideal: 3840 },
+      height: { ideal: 2160 },
+      // Unsupported ideal constraints are ignored by the browser. The
+      // post-open negotiation below confirms continuous focus only where a
+      // camera explicitly advertises that capability.
+      focusMode: { ideal: 'continuous' },
     },
+  }
+}
+
+/**
+ * Ask a capable camera to keep focusing while the viewfinder is live.
+ *
+ * Camera controls are deliberately best-effort: a device can expose a working
+ * video stream without focus controls, and failure to tune focus must never
+ * make scanning unavailable. This runs after getUserMedia because capabilities
+ * belong to the selected physical track, not to navigator.mediaDevices.
+ */
+export async function preferContinuousAutofocus(stream) {
+  const tracks = typeof stream?.getVideoTracks === 'function'
+    ? stream.getVideoTracks()
+    : (typeof stream?.getTracks === 'function' ? stream.getTracks() : [])
+  const track = tracks.find(candidate => candidate?.kind === 'video')
+  if (!track || typeof track.getCapabilities !== 'function' || typeof track.applyConstraints !== 'function') {
+    return false
+  }
+  const focusModes = track.getCapabilities()?.focusMode
+  if (!Array.isArray(focusModes) || !focusModes.includes('continuous')) return false
+  try {
+    await track.applyConstraints({ focusMode: 'continuous' })
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -304,6 +337,10 @@ export function createCameraSession({
       return getState()
     }
 
+    // Do not delay the usable preview on a camera-control round trip. The
+    // helper catches unsupported/rejected controls, so this cannot create an
+    // unhandled rejection or turn a good camera into a failed scan.
+    void preferContinuousAutofocus(stream)
     untrackEnded = watchForInterruption(stream)
     publish({ status: CAMERA_STATUS.LIVE, failure: null, stream })
     return getState()
