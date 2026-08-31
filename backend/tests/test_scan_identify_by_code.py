@@ -111,8 +111,22 @@ class ScanIdentifyByCodeTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertFalse(result["_identity_confident"])
-        self.assertIsNone(result["_identity_decision"])
-        self.assertEqual([card["name"] for card in result["matches"]], ["Basic Fire Energy"])
+        self.assertEqual(result["_identity_decision"], "code_number_unresolved")
+        self.assertEqual(result["matches"], [])
+
+    async def test_partial_number_keeps_matching_candidates_reviewable(self):
+        result = await match_card_info(
+            self.db,
+            {
+                "set_code": "SVI",
+                "number_local": "0?5",
+                "name": "Pikachu",
+                "language": "en",
+            },
+        )
+
+        self.assertFalse(result["_identity_confident"])
+        self.assertEqual([card["name"] for card in result["matches"]], ["Pikachu"])
 
     async def test_no_name_or_identifiers_explains_what_could_not_be_read(self):
         with self.assertRaises(HTTPException) as raised:

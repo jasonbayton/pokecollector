@@ -274,6 +274,32 @@ class ScanTrace:
         if latency_seconds is not None:
             section["latency_seconds"] = latency_seconds
 
+    def record_identity_reread(
+        self,
+        *,
+        outcome: str,
+        raw_response=None,
+        parsed=None,
+        usage=None,
+        latency_seconds: float | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Record the focused identifier recovery without retaining its crop."""
+        if not self.enabled:
+            return
+        section = self.data.setdefault("identity_reread", {})
+        section["outcome"] = outcome
+        if raw_response is not None:
+            section["raw_response"] = raw_response
+        if parsed is not None:
+            section["parsed"] = parsed
+        if usage is not None:
+            section["usage"] = usage
+        if latency_seconds is not None:
+            section["latency_seconds"] = latency_seconds
+        if error:
+            section["error"] = redact_sensitive(error)
+
     def record_visual_verification(self, *, raw_response: str, selected: int | None) -> None:
         if self.enabled:
             self.data["visual_verification"] = {

@@ -557,6 +557,15 @@ Respond ONLY with this exact JSON:
 Replace a null only when that exact value is clearly visible."""
 
 
+IDENTITY_REREAD_PROMPT = """This is the lower identity strip cropped from a Pokemon Trading Card Game card.
+
+Read only the visibly printed set code/abbreviation and local collector number. Do not infer either value from the card name, artwork, or a known set. If a character is unclear, return null for that field; for number_local only, preserve a positioned unreadable character as `?`.
+
+Respond ONLY with this JSON object:
+{"set_code": null, "number_local": null}
+"""
+
+
 _SUFFIXES = re.compile(
     r"[\s-]+(?:EX|ex|GX|gx|V|VMAX|VSTAR|VStar|TAG\s*TEAM|BREAK|LV\.?\s*X)\s*$",
     re.IGNORECASE,
@@ -1190,6 +1199,107 @@ def _has_usable_code_number(card_info: dict) -> bool:
     )
 
 
+def _has_complete_code_number(card_info: dict) -> bool:
+    """Whether both identity fields are exact observations, not a pattern."""
+    number = str(card_info.get("number_local") or "").strip()
+    return _has_usable_code_number(card_info) and "?" not in number and bool(
+        normalize_scanner_card_number(number)
+    )
+
+
+def _candidate_matches_code_number(card_info: dict, candidate: dict) -> bool:
+    """Whether a public candidate confirms both visibly reported identifiers."""
+    set_code = str(card_info.get("set_code") or "").strip().casefold()
+    candidate_code = str(candidate.get("set_abbreviation") or "").strip().casefold()
+    return bool(
+        set_code
+        and candidate_code == set_code
+        and _numbers_match(card_info.get("number_local"), candidate.get("number"))
+    )
+
+
+def _has_matching_code_number_candidate(card_info: dict, candidates: list[dict]) -> bool:
+    return any(_candidate_matches_code_number(card_info, candidate) for candidate in candidates)
+
+
+def _identity_reread_crop(image_bytes: bytes) -> bytes | None:
+    """Return a losslessly focused lower card band for a second identity read."""
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            width, height = image.size
+            if width <= 0 or height <= 0:
+                return None
+            # Set marks and collector numbers are printed at the bottom of the
+            # card. Cropping concentrates the model's visual budget on the
+            # text which uniquely identifies a repeated Energy printing.
+            band = image.crop((0, height * 3 // 5, width, height)).convert("RGB")
+            output = io.BytesIO()
+            band.save(output, format="JPEG", quality=95, optimize=True)
+            return output.getvalue()
+    except Exception:
+        return None
+
+
+async def _reread_identity(
+    provider: ScanProvider,
+    api_key: str | None,
+    image_bytes: bytes,
+    *,
+    trace: ScanTrace | None = None,
+) -> dict | None:
+    """Do one narrow, non-authoritative set/number reread for a bad lookup."""
+    crop = _identity_reread_crop(image_bytes)
+    if not crop:
+        if trace:
+            trace.record_identity_reread(outcome="crop_failed")
+        return None
+    started_at = time.monotonic()
+    image_b64 = base64.b64encode(crop).decode()
+    try:
+        async with httpx.AsyncClient(timeout=recognition_timeout()) as client:
+            response_text, usage = await provider.generate_text(
+                client,
+                api_key,
+                [text_part(IDENTITY_REREAD_PROMPT), image_part("image/jpeg", image_b64)],
+            )
+        json_match = re.search(r"\{.*\}", response_text.strip(), re.DOTALL)
+        if not json_match:
+            if trace:
+                trace.record_identity_reread(
+                    raw_response=response_text, usage=usage,
+                    latency_seconds=time.monotonic() - started_at, outcome="unparseable",
+                )
+            return None
+        reread = json.loads(json_match.group())
+        if not isinstance(reread, dict):
+            if trace:
+                trace.record_identity_reread(
+                    raw_response=response_text, usage=usage,
+                    latency_seconds=time.monotonic() - started_at, outcome="invalid_shape",
+                )
+            return None
+        identity = normalize_recognized_card_info(reread)
+        accepted = _has_complete_code_number(identity)
+        if trace:
+            trace.record_identity_reread(
+                raw_response=response_text, parsed=identity, usage=usage,
+                latency_seconds=time.monotonic() - started_at,
+                outcome="candidate" if accepted else "incomplete",
+            )
+        return identity if accepted else None
+    except Exception as exc:
+        # The first extraction is still a usable scan result. An optional
+        # recovery read must never turn a catalogue mismatch into a failed job.
+        if trace:
+            trace.record_identity_reread(
+                latency_seconds=time.monotonic() - started_at,
+                outcome="error", error=type(exc).__name__,
+            )
+        return None
+
+
 def _code_number_candidate(card: Card, set_row: Set | None, *, code: str) -> dict:
     language = card.lang or "en"
     return {
@@ -1552,6 +1662,24 @@ async def match_card_info(
     candidates, number_match_count = await _search_and_rank_candidates(
         db, card_info, trace, request_gate=request_gate
     )
+    # A complete printed identifier is authoritative over a broad same-name
+    # search. Stop before confidence, pHash or visual verification when none
+    # of the candidates can actually satisfy it: those mechanisms must not
+    # bless a candidate that will be hidden from review, and a composite needs
+    # this unconfident result to fall back to an individual scan safely.
+    if _has_complete_code_number(card_info) and not _has_matching_code_number_candidate(
+        card_info, candidates
+    ):
+        if trace:
+            trace.record_decision("code_number_unresolved", None)
+        return {
+            "recognized": card_info,
+            "matches": [],
+            "_number_match_count": number_match_count,
+            "_identity_confident": False,
+            "_identity_decision": "code_number_unresolved",
+            "_identity_suggested_match_id": None,
+        }
     confident, decision = _metadata_decision(card_info, candidates)
     if (
         candidates
@@ -1765,7 +1893,7 @@ async def recognize_sanitized_card(
         raise HTTPException(status_code=500, detail=f"Recognition failed: {exc}")
 
     try:
-        return await match_card_info(
+        result = await match_card_info(
             db,
             card_info,
             api_key=api_key,
@@ -1778,6 +1906,51 @@ async def recognize_sanitized_card(
             trace=trace,
             provider=provider,
         )
+        if _has_complete_code_number(card_info) and not _has_matching_code_number_candidate(
+            card_info, result["matches"]
+        ):
+            reread = await _reread_identity(provider, api_key, image_bytes, trace=trace)
+            if reread:
+                reread_info = dict(card_info)
+                reread_info.update({
+                    "set_code": reread["set_code"],
+                    "number_local": reread["number_local"],
+                    "number": reread["number"],
+                })
+                try:
+                    reread_result = await match_card_info(
+                        db,
+                        reread_info,
+                        api_key=api_key,
+                        image_b64=image_b64,
+                        mime_type=content_type,
+                        # This recovery call only checks the exact printed
+                        # identity. Do not spend a third model call choosing by
+                        # artwork when it remains ambiguous.
+                        allow_visual_verification=False,
+                        photo_bytes=image_bytes,
+                        trace=trace,
+                        provider=provider,
+                    )
+                except HTTPException as exc:
+                    if trace:
+                        trace.record_identity_reread(
+                            outcome="catalogue_error", error=str(exc.detail)
+                        )
+                    return result
+                except Exception as exc:
+                    if trace:
+                        trace.record_identity_reread(
+                            outcome="matching_error", error=type(exc).__name__
+                        )
+                    return result
+                if _has_matching_code_number_candidate(reread_info, reread_result["matches"]):
+                    if trace:
+                        trace.record_identity_reread(outcome="accepted")
+                    return reread_result
+                if trace:
+                    trace.record_identity_reread(outcome="no_catalogue_match")
+        return result
     except HTTPException as exc:
         if trace:
             trace.record_error(str(exc.detail))
