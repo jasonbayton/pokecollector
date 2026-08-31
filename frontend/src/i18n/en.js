@@ -1349,6 +1349,8 @@ const en = {
     dailyQuotaRetry: 'Daily quota reached · {countdown}',
     dailyQuotaWaiting: 'Daily quota reached · Waiting to retry…',
     suggestedMatch: 'Suggested',
+    suggestedAlreadyOwned: 'This suggested card is already in your collection. It may be another copy; review it or dismiss this scan.',
+    duplicateScanDetected: 'This photo matches a recent scan. Review it before adding another copy.',
     addAllConfident: 'Add all confident - {count} cards',
     addAllConfidentOne: 'Add all confident - 1 card',
     addAllConfidentTitle: 'Add all confident cards',

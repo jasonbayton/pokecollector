@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from api.auth import get_current_user
 from database import get_db
-from models import ProductPurchase, ScanJob, ScanJobItem, User
+from models import CollectionItem, ProductPurchase, ScanJob, ScanJobItem, User
 from services.collection_options import ALLOWED_CONDITIONS
 from services.tcgdex_languages import is_supported_tcgdex_language, normalize_tcgdex_language
 from services.scan_queue import (
@@ -75,7 +75,18 @@ def _get_own_item(
     return item
 
 
-def _item_payload(item: ScanJobItem) -> dict:
+def _item_payload(
+    db: Session, item: ScanJobItem, *, owned_card_ids: set[str] | None = None,
+) -> dict:
+    suggested_already_owned = False
+    if owned_card_ids is not None:
+        suggested_already_owned = str(item.suggested_match_id or "") in owned_card_ids
+    elif item.identity_confident is True and item.suggested_match_id:
+        suggested_already_owned = db.query(CollectionItem.id).filter(
+            CollectionItem.user_id == item.user_id,
+            CollectionItem.card_id == item.suggested_match_id,
+            CollectionItem.quantity > 0,
+        ).first() is not None
     return {
         "id": item.id,
         "position": item.position,
@@ -92,6 +103,10 @@ def _item_payload(item: ScanJobItem) -> dict:
         "identity_confident": item.identity_confident,
         "identity_decision": item.identity_decision,
         "suggested_match_id": item.suggested_match_id,
+        # A suggestion can be a legitimate second copy, so this is deliberately
+        # a review hint rather than permission to resolve it automatically.
+        "suggested_already_owned": suggested_already_owned,
+        "duplicate_scan_detected": item.duplicate_of_item_id is not None,
         "error": item.error,
         "has_image": bool(item.image_path),
         # Changes when, and only when, the stored file changes. The review
@@ -222,7 +237,22 @@ def get_scan_job(
         .order_by(ScanJobItem.position.asc())
         .all()
     )
-    return {**job_progress(db, job), "items": [_item_payload(item) for item in items]}
+    suggested_ids = {
+        str(item.suggested_match_id)
+        for item in items
+        if item.identity_confident is True and item.suggested_match_id
+    }
+    owned_card_ids = {
+        card_id for (card_id,) in db.query(CollectionItem.card_id).filter(
+            CollectionItem.user_id == current_user.id,
+            CollectionItem.quantity > 0,
+            CollectionItem.card_id.in_(suggested_ids),
+        ).all()
+    } if suggested_ids else set()
+    return {
+        **job_progress(db, job),
+        "items": [_item_payload(db, item, owned_card_ids=owned_card_ids) for item in items],
+    }
 
 
 @router.get("/recognize/jobs/{job_id}/items/{item_id}/image")
@@ -306,7 +336,13 @@ def resolve_scan_job_item(
         keep_image = manual_correction or corrected_the_suggestion
     else:
         keep_image = False
-    return _item_payload(resolve_scan_item(db, item, keep_image=keep_image))
+    try:
+        resolved = resolve_scan_item(db, item, keep_image=keep_image)
+    except ValueError as exc:
+        # The pre-flight check is only advisory: an add-all, re-take, or second
+        # dismiss can win the row lock while catalogue preparation runs.
+        raise HTTPException(status_code=409, detail=str(exc))
+    return _item_payload(db, resolved)
 
 
 @router.post("/recognize/jobs/{job_id}/add-all-confident")
@@ -362,7 +398,7 @@ async def retry_scan_job_item(
     except (ValueError, ScanUploadError) as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     background_tasks.add_task(drain_scan_queue, max_items=1)
-    return _item_payload(item)
+    return _item_payload(db, item)
 
 
 @router.post("/recognize/jobs/{job_id}/items/{item_id}/photo")
@@ -417,7 +453,7 @@ async def replace_scan_job_item_photo(
         raise HTTPException(status_code=400, detail=str(exc))
 
     background_tasks.add_task(drain_scan_queue, max_items=1)
-    return _item_payload(item)
+    return _item_payload(db, item)
 
 
 @router.delete("/recognize/jobs/{job_id}")

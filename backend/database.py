@@ -540,6 +540,13 @@ def _run_migrations(conn):
         "ALTER TABLE scan_job_items ADD COLUMN IF NOT EXISTS identity_confident BOOLEAN",
         "ALTER TABLE scan_job_items ADD COLUMN IF NOT EXISTS identity_decision VARCHAR",
         "ALTER TABLE scan_job_items ADD COLUMN IF NOT EXISTS suggested_match_id VARCHAR",
+        # v: detect a repeated recent upload using only the sanitised-image digest.
+        "ALTER TABLE scan_job_items ADD COLUMN IF NOT EXISTS image_hash VARCHAR",
+        "ALTER TABLE scan_job_items ADD COLUMN IF NOT EXISTS image_stored_at TIMESTAMP",
+        "ALTER TABLE scan_job_items ADD COLUMN IF NOT EXISTS duplicate_of_item_id INTEGER REFERENCES scan_job_items(id) ON DELETE SET NULL",
+        "CREATE INDEX IF NOT EXISTS ix_scan_job_items_image_hash ON scan_job_items (image_hash)",
+        "CREATE INDEX IF NOT EXISTS ix_scan_job_items_image_stored_at ON scan_job_items (image_stored_at)",
+        "CREATE INDEX IF NOT EXISTS ix_scan_job_items_duplicate_of_item_id ON scan_job_items (duplicate_of_item_id)",
         # v62: bounded retries for an unreachable card catalogue. Existing rows
         # start at zero, which is correct: nothing has failed this way yet, and
         # an upgraded install must not inherit a spent budget.

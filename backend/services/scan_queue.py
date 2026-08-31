@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import hashlib
 import logging
 import uuid
 from dataclasses import dataclass
@@ -742,32 +743,61 @@ def resolve_scan_item(
     keeps its own copy, but only when SCAN_TRACE_DIR is configured, so it
     cannot be relied on to retain it.
     """
-    relative_path = item.image_path
-    item.resolved = True
+    # The endpoint's item was loaded before the request body was parsed.  It
+    # must not be written back blindly: a simultaneous re-take can have reset
+    # it to pending with a replacement image in the meantime.
+    locked = (
+        db.query(ScanJobItem)
+        .filter(ScanJobItem.id == item.id)
+        # ``item`` was already loaded by the endpoint.  A plain FOR UPDATE
+        # acquires PostgreSQL's lock but may return that identity-map object
+        # without overwriting its values after waiting for a re-take/add-all.
+        .populate_existing()
+        .with_for_update()
+        .one_or_none()
+    )
+    if locked is None:
+        raise ValueError("This scan no longer exists.")
+    if locked.resolved:
+        raise ValueError("This scan has already been handled.")
+    if locked.status not in {"done", "failed"}:
+        raise ValueError("This scan is still being processed.")
+
+    relative_path = locked.image_path
+    locked.resolved = True
     if not keep_image:
-        item.image_path = None
-    item.updated_at = datetime.datetime.utcnow()
+        locked.image_path = None
+    locked.updated_at = datetime.datetime.utcnow()
     db.commit()
-    db.refresh(item)
+    db.refresh(locked)
     if not keep_image:
         delete_scan_image(relative_path)
-    return item
+    return locked
 
 
 def retry_scan_item(db: Session, item: ScanJobItem) -> ScanJobItem:
     """Start a fresh individual recognition cycle for a reviewable item."""
-    if item.resolved:
+    locked = (
+        db.query(ScanJobItem)
+        .filter(ScanJobItem.id == item.id)
+        .populate_existing()
+        .with_for_update()
+        .one_or_none()
+    )
+    if locked is None:
+        raise ValueError("This scan no longer exists.")
+    if locked.resolved:
         raise ValueError("This scan has already been handled.")
-    if item.status not in {"done", "failed"}:
+    if locked.status not in {"done", "failed"}:
         raise ValueError("This scan is still being processed.")
-    if not item.image_path or not resolve_scan_path(item.image_path).is_file():
+    if not locked.image_path or not resolve_scan_path(locked.image_path).is_file():
         raise ValueError("The stored scan photo is no longer available.")
 
     now = datetime.datetime.utcnow()
-    _reset_item_for_rescan(item, now)
+    _reset_item_for_rescan(locked, now)
     db.commit()
-    db.refresh(item)
-    return item
+    db.refresh(locked)
+    return locked
 
 
 def _reset_item_for_rescan(item: ScanJobItem, now: datetime.datetime) -> None:
@@ -813,6 +843,7 @@ def replace_scan_item_photo(db: Session, item: ScanJobItem, raw_image: bytes) ->
         high_resolution=high_resolution_samples_enabled(db),
     )
     new_path, byte_size = store_sanitized_image(item.job.id, sanitized)
+    image_hash = hashlib.sha256(sanitized.data).hexdigest()
     now = datetime.datetime.utcnow()
 
     try:
@@ -826,13 +857,33 @@ def replace_scan_item_photo(db: Session, item: ScanJobItem, raw_image: bytes) ->
         # other, both conclude they fitted, and commit a job over the limit:
         # two 10 MB photos becoming 15 MB in a 195 MB job each see 185 + 15,
         # while the committed result is 205.
-        db.query(ScanJob).filter(ScanJob.id == item.job.id).with_for_update().first()
+        # Match deletion's child-before-parent order. Locking the job first
+        # and then this item deadlocks a cascade that has already locked the
+        # child and is waiting to remove its parent.
+        locked = (
+            db.query(ScanJobItem)
+            .filter(ScanJobItem.id == item.id)
+            .populate_existing()
+            .with_for_update()
+            .one_or_none()
+        )
+        if locked is None:
+            raise ScanItemNoLongerReviewable("This scan no longer exists.")
+        job = (
+            db.query(ScanJob)
+            .filter(ScanJob.id == locked.job_id)
+            .populate_existing()
+            .with_for_update()
+            .one_or_none()
+        )
+        if job is None:
+            raise ScanItemNoLongerReviewable("This scan no longer exists.")
         # Only photos still on disk. byte_size survives resolution, but the
         # file does not, so counting a released photo would charge a job for
         # storage it is no longer using.
         others = db.query(func.coalesce(func.sum(ScanJobItem.byte_size), 0)).filter(
-            ScanJobItem.job_id == item.job.id,
-            ScanJobItem.id != item.id,
+            ScanJobItem.job_id == locked.job_id,
+            ScanJobItem.id != locked.id,
             ScanJobItem.image_path.isnot(None),
         ).scalar() or 0
         if others + byte_size > MAX_JOB_BYTES:
@@ -842,21 +893,22 @@ def replace_scan_item_photo(db: Session, item: ScanJobItem, raw_image: bytes) ->
                 "Please remove some photos, or scan it in a job of its own."
             )
 
-        locked = (
-            db.query(ScanJobItem)
-            .filter(ScanJobItem.id == item.id)
-            .with_for_update()
-            .one_or_none()
-        )
-        if locked is None:
-            raise ScanItemNoLongerReviewable("This scan no longer exists.")
         if locked.resolved:
             raise ScanItemNoLongerReviewable("This scan has already been handled.")
         if locked.status not in {"done", "failed"}:
             raise ScanItemNoLongerReviewable("This scan is still being processed.")
 
         old_path = locked.image_path
+        duplicate = db.query(ScanJobItem.id).filter(
+            ScanJobItem.id != locked.id,
+            ScanJobItem.user_id == locked.user_id,
+            ScanJobItem.image_hash == image_hash,
+            ScanJobItem.image_stored_at >= now - datetime.timedelta(minutes=10),
+        ).order_by(ScanJobItem.id.desc()).first()
         locked.image_path = new_path
+        locked.image_hash = image_hash
+        locked.image_stored_at = now
+        locked.duplicate_of_item_id = duplicate[0] if duplicate else None
         locked.content_type = sanitized.content_type
         locked.byte_size = byte_size
         _reset_item_for_rescan(locked, now)
@@ -893,6 +945,19 @@ def purge_expired_scan_jobs(db: Session, *, now: datetime.datetime | None = None
 
 def job_progress(db: Session, job: ScanJob) -> dict:
     items = db.query(ScanJobItem).filter(ScanJobItem.job_id == job.id).all()
+    suggested_ids = {
+        str(item.suggested_match_id)
+        for item in items
+        if item.identity_confident is True and item.suggested_match_id
+    }
+    from models import CollectionItem
+    owned_card_ids = {
+        card_id for (card_id,) in db.query(CollectionItem.card_id).filter(
+            CollectionItem.user_id == job.user_id,
+            CollectionItem.quantity > 0,
+            CollectionItem.card_id.in_(suggested_ids),
+        ).all()
+    } if suggested_ids else set()
     counts = {status: sum(1 for item in items if item.status == status) for status in {
         "pending", "processing", "retrying", "done", "failed"
     }}
@@ -934,7 +999,7 @@ def job_progress(db: Session, job: ScanJob) -> dict:
         "attention": attention,
         # The client must not guess from a rank or a null-era scan row. This is
         # the same full eligibility predicate the atomic bulk action uses.
-        "confident_addable": confident_addable_count(items),
+        "confident_addable": confident_addable_count(items, owned_card_ids=owned_card_ids),
         "failed_attention": failed_attention,
         "next_retry_at": (
             next_retry_item.next_attempt_at.isoformat() if next_retry_item else None

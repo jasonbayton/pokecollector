@@ -1,7 +1,9 @@
 """Real PostgreSQL locking coverage for confident scan bulk filing."""
 
 import datetime
+import io
 import os
+import tempfile
 import threading
 import time
 import unittest
@@ -10,10 +12,13 @@ from unittest.mock import patch
 try:
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
+    from PIL import Image
 
     from database import Base
     from models import Card, CollectionItem, ScanJob, ScanJobItem, User
     from services import scan_bulk_add
+    from services.scan_queue import replace_scan_item_photo
+    from services.scan_storage import ScanItemNoLongerReviewable
 
     DEPS_AVAILABLE = True
 except ModuleNotFoundError:
@@ -154,6 +159,86 @@ class ScanBulkAddPostgresTests(unittest.TestCase):
             self.assertTrue(db.get(ScanJobItem, self.item_id).resolved)
         finally:
             db.close()
+
+    def test_bulk_add_and_retake_complete_without_a_lock_cycle(self):
+        """Both paths lock the item before its job on a real PostgreSQL DB."""
+        temp_dir = tempfile.TemporaryDirectory()
+        source = os.path.join(temp_dir.name, f"{self.job_id}-source.jpg")
+        with open(source, "wb") as handle:
+            handle.write(b"old scan")
+        db = self.Session()
+        try:
+            item = db.get(ScanJobItem, self.item_id)
+            item.image_path = os.path.basename(source)
+            db.commit()
+        finally:
+            db.close()
+
+        entered_copy = threading.Event()
+        release_copy = threading.Event()
+        results = []
+        errors = []
+        guard = threading.Lock()
+        original = scan_bulk_add._add_collection_copy
+
+        def pause_bulk(*args, **kwargs):
+            original(*args, **kwargs)
+            entered_copy.set()
+            self.assertTrue(release_copy.wait(timeout=5), "re-take did not reach the item lock")
+
+        image = io.BytesIO()
+        Image.new("RGB", (400, 560), "#385898").save(image, format="JPEG")
+
+        def bulk_add():
+            db = self.Session()
+            try:
+                results.append(scan_bulk_add.add_all_confident_scan_items(
+                    db, job_id=self.job_id, current_user=self.current_user,
+                    prepared_card_ids={"pg-card-1_en"},
+                ))
+            except BaseException as exc:
+                with guard:
+                    errors.append(exc)
+            finally:
+                db.close()
+
+        def retake():
+            db = self.Session()
+            try:
+                item = db.get(ScanJobItem, self.item_id)
+                replace_scan_item_photo(db, item, image.getvalue())
+                results.append("retaken")
+            except ScanItemNoLongerReviewable:
+                # Bulk filing won the item lock. That is a safe race outcome;
+                # the important property is that both transactions complete.
+                results.append("already-handled")
+            except BaseException as exc:
+                with guard:
+                    errors.append(exc)
+            finally:
+                db.close()
+
+        try:
+            with patch.dict(os.environ, {"SCAN_UPLOAD_DIR": temp_dir.name}), \
+                    patch("services.scan_bulk_add._add_collection_copy", side_effect=pause_bulk):
+                first = threading.Thread(target=bulk_add, name="bulk-add-lock-order")
+                first.start()
+                self.assertTrue(entered_copy.wait(timeout=5), "bulk add did not acquire its locks")
+                second = threading.Thread(target=retake, name="retake-lock-order")
+                second.start()
+                time.sleep(0.2)
+                self.assertTrue(second.is_alive(), "re-take should wait on the bulk item's lock")
+                release_copy.set()
+                first.join(timeout=10)
+                second.join(timeout=10)
+        finally:
+            temp_dir.cleanup()
+
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertEqual(errors, [])
+        self.assertIn(1, results)
+        self.assertIn("already-handled", results)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
 import io
 import os
 import shutil
@@ -302,6 +303,7 @@ async def create_scan_job(
                 remaining_job_bytes=MAX_FILE_BYTES,
             )
             sanitized = sanitize_image_bytes(raw, high_resolution=high_resolution)
+            image_hash = hashlib.sha256(sanitized.data).hexdigest()
             relative_path, byte_size = store_sanitized_image(job.id, sanitized)
             stored_total += byte_size
             if stored_total > MAX_JOB_BYTES:
@@ -310,12 +312,19 @@ async def create_scan_job(
                     "These photos are too large to scan in one job. "
                     "Please split them across more than one scan."
                 )
-            db.add(
-                ScanJobItem(
+            duplicate = db.query(ScanJobItem.id).filter(
+                ScanJobItem.user_id == user_id,
+                ScanJobItem.image_hash == image_hash,
+                ScanJobItem.image_stored_at >= now - datetime.timedelta(minutes=10),
+            ).order_by(ScanJobItem.id.desc()).first()
+            item = ScanJobItem(
                     job_id=job.id,
                     user_id=user_id,
                     position=position,
                     image_path=relative_path,
+                    image_hash=image_hash,
+                    image_stored_at=now,
+                    duplicate_of_item_id=duplicate[0] if duplicate else None,
                     content_type=sanitized.content_type,
                     byte_size=byte_size,
                     batch_mode=bool(batch_modes[position]) and len(uploads) > 1,
@@ -327,7 +336,9 @@ async def create_scan_job(
                     created_at=now,
                     updated_at=now,
                 )
-            )
+            db.add(item)
+            # Make an earlier photo in this same multi-upload job detectable.
+            db.flush()
         db.commit()
         db.refresh(job)
         return job

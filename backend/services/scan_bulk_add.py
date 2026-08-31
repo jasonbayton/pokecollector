@@ -138,18 +138,27 @@ def _suggested_match(item: ScanJobItem) -> dict | None:
     return None
 
 
-def is_confident_addable(item: ScanJobItem) -> bool:
+def is_confident_addable(
+    item: ScanJobItem, *, owned_card_ids: set[str] | None = None,
+) -> bool:
     return bool(
         not item.resolved
         and item.status == "done"
         and item.identity_confident is True
         and item.suggested_match_id
         and _suggested_match(item)
+        and item.duplicate_of_item_id is None
+        # A likely second copy is useful information, but it needs explicit
+        # per-item confirmation. Bulk add must never turn the review warning
+        # into a silent quantity increment.
+        and str(item.suggested_match_id) not in (owned_card_ids or set())
     )
 
 
-def confident_addable_count(items: Iterable[ScanJobItem]) -> int:
-    return sum(1 for item in items if is_confident_addable(item))
+def confident_addable_count(
+    items: Iterable[ScanJobItem], *, owned_card_ids: set[str] | None = None,
+) -> int:
+    return sum(1 for item in items if is_confident_addable(item, owned_card_ids=owned_card_ids))
 
 
 def candidate_ids_to_prepare(items: Iterable[ScanJobItem]) -> set[str]:
@@ -198,16 +207,20 @@ def add_all_confident_scan_items(
 
     Catalogue preparation happens in the API before this function takes a lock.
     This function deliberately trusts neither that preparation snapshot nor the
-    prior read of ``matches``: it locks the job and rows, then checks membership
-    again before mutating collection or scan state.
+    prior read of ``matches``: it locks the item rows and then their job, then
+    checks membership again before mutating collection or scan state.  Every
+    operation which needs both locks uses that child-before-parent order; it is
+    also the order used by PostgreSQL's cascading job deletion.
     """
     image_paths: list[str | None] = []
     variant_decisions: list[tuple[int, int, object, str | None, str | None]] = []
     try:
+        # Locate the job first only to establish ownership.  Do not lock it
+        # yet: a re-take locks its item before its job, and the inverse order
+        # creates a deadlock under PostgreSQL.
         job = (
             db.query(ScanJob)
             .filter(ScanJob.id == job_id, ScanJob.user_id == current_user.id)
-            .with_for_update()
             .first()
         )
         if job is None:
@@ -221,11 +234,36 @@ def add_all_confident_scan_items(
                 ScanJobItem.status == "done",
                 ScanJobItem.identity_confident.is_(True),
                 ScanJobItem.suggested_match_id.is_not(None),
+                ScanJobItem.duplicate_of_item_id.is_(None),
             )
             .order_by(ScanJobItem.position.asc())
             .with_for_update()
             .all()
         )
+        # Re-check existence and ownership after taking child locks.  A
+        # concurrent deletion may have removed the job between the lookup and
+        # this point, in which case this request has no safe work to perform.
+        job = (
+            db.query(ScanJob)
+            .filter(ScanJob.id == job_id, ScanJob.user_id == current_user.id)
+            .with_for_update()
+            .first()
+        )
+        if job is None:
+            raise HTTPException(status_code=404, detail="Scan job not found.")
+        candidate_ids = {
+            str(match.get("id") or "").strip()
+            for item in candidates
+            for match in [_suggested_match(item)]
+            if match is not None and str(match.get("id") or "").strip()
+        }
+        owned_card_ids = {
+            card_id for (card_id,) in db.query(CollectionItem.card_id).filter(
+                CollectionItem.user_id == current_user.id,
+                CollectionItem.quantity > 0,
+                CollectionItem.card_id.in_(candidate_ids),
+            ).all()
+        } if candidate_ids else set()
 
         now = datetime.datetime.utcnow()
         added = 0
@@ -237,6 +275,10 @@ def add_all_confident_scan_items(
                     detail="Suggested card is not a stored scan candidate.",
                 )
             card_id = str(match.get("id") or "").strip()
+            if card_id in owned_card_ids:
+                # Leave it unresolved. The review screen explains why and the
+                # user can deliberately file another copy from that card.
+                continue
             if not card_id or card_id not in prepared_card_ids:
                 raise HTTPException(
                     status_code=409,
