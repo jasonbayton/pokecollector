@@ -291,34 +291,14 @@ def _add_collection_item(db: Session, current_user: User, item: CollectionItemCr
         effective_card_id = f"{tcg_card_id}_{item_lang}"
         ensure_card_exists(db, effective_card_id, lang=item_lang)
 
-    existing = db.query(CollectionItem).filter(
-        CollectionItem.card_id == effective_card_id,
-        CollectionItem.variant == item_variant,
-        CollectionItem.lang == item_lang,
-        CollectionItem.condition == item.condition,
-        CollectionItem.purchase_price == item.purchase_price,
-        CollectionItem.user_id == current_user.id,
-    ).first()
-
-    if existing:
-        existing.quantity += item.quantity or 1
-        if commit:
-            db.commit()
-        return "updated"
-
-    db.add(CollectionItem(
-        card_id=effective_card_id,
-        quantity=item.quantity,
-        condition=item.condition,
-        variant=item_variant,
-        purchase_price=item.purchase_price,
-        lang=item_lang,
-        user_id=current_user.id,
-        added_at=datetime.datetime.utcnow(),
-    ))
+    _, created = merge_collection_item(
+        db, user_id=current_user.id, card_id=effective_card_id,
+        quantity=item.quantity or 1, condition=item.condition, variant=item_variant,
+        lang=item_lang, purchase_price=item.purchase_price,
+    )
     if commit:
         db.commit()
-    return "added"
+    return "added" if created else "updated"
 
 
 def _get_api_sets_by_code(include_digital: bool = False) -> dict[str, List[dict]]:
@@ -758,36 +738,14 @@ def add_to_collection(
         effective_card_id = f"{tcg_card_id}_{item_lang}"
         ensure_card_exists(db, effective_card_id, lang=item_lang)
 
-    # Find existing entry for same card + variant + lang + condition + purchase_price combination
-    existing = db.query(CollectionItem).filter(
-        CollectionItem.card_id == effective_card_id,
-        CollectionItem.variant == item_variant,
-        CollectionItem.lang == item_lang,
-        CollectionItem.condition == item.condition,
-        CollectionItem.purchase_price == item.purchase_price,
-        CollectionItem.user_id == current_user.id,
-    ).first()
-
-    if existing:
-        existing.quantity += item.quantity or 1
-        db.commit()
-        db.refresh(existing)
-        return _annotate_collection_item(db, current_user, existing)
-    else:
-        db_item = CollectionItem(
-            card_id=effective_card_id,
-            quantity=item.quantity,
-            condition=item.condition,
-            variant=item_variant,
-            purchase_price=item.purchase_price,
-            lang=item_lang,
-            user_id=current_user.id,
-            added_at=datetime.datetime.utcnow(),
-        )
-        db.add(db_item)
-        db.commit()
-        db.refresh(db_item)
-        return _annotate_collection_item(db, current_user, db_item)
+    db_item, _ = merge_collection_item(
+        db, user_id=current_user.id, card_id=effective_card_id,
+        quantity=item.quantity or 1, condition=item.condition, variant=item_variant,
+        lang=item_lang, purchase_price=item.purchase_price,
+    )
+    db.commit()
+    db.refresh(db_item)
+    return _annotate_collection_item(db, current_user, db_item)
 
 
 @router.post("/bulk-add", response_model=BulkCollectionAddResponse)
@@ -828,32 +786,16 @@ def bulk_add_to_collection(
                 effective_card_id = f"{tcg_card_id}_{item_lang}"
                 ensure_card_exists(db, effective_card_id, lang=item_lang)
 
-            existing = db.query(CollectionItem).filter(
-                CollectionItem.card_id == effective_card_id,
-                CollectionItem.variant == item_variant,
-                CollectionItem.lang == item_lang,
-                CollectionItem.condition == item.condition,
-                CollectionItem.purchase_price == item.purchase_price,
-                CollectionItem.user_id == current_user.id,
-            ).first()
-
-            if existing:
-                existing.quantity += item.quantity or 1
-                db.commit()
-                updated += 1
-            else:
-                db.add(CollectionItem(
-                    card_id=effective_card_id,
-                    quantity=item.quantity,
-                    condition=item.condition,
-                    variant=item_variant,
-                    purchase_price=item.purchase_price,
-                    lang=item_lang,
-                    user_id=current_user.id,
-                    added_at=datetime.datetime.utcnow(),
-                ))
-                db.commit()
+            _, created = merge_collection_item(
+                db, user_id=current_user.id, card_id=effective_card_id,
+                quantity=item.quantity or 1, condition=item.condition, variant=item_variant,
+                lang=item_lang, purchase_price=item.purchase_price,
+            )
+            db.commit()
+            if created:
                 added += 1
+            else:
+                updated += 1
         except HTTPException as exc:
             db.rollback()
             failed += 1
@@ -989,6 +931,9 @@ def update_collection_item(
     db: Session = Depends(get_db),
 ):
     """Update a collection item."""
+    # Must precede the row lock: merge paths take the owner advisory lock
+    # before row locks, and reversing those two locks can deadlock an edit.
+    lock_collection_identities(db, [{"user_id": current_user.id}])
     item = db.query(CollectionItem).filter(
         CollectionItem.id == item_id,
         CollectionItem.user_id == current_user.id,

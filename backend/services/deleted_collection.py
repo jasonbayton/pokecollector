@@ -6,10 +6,10 @@ domain-correct reversal paths, and restoring from here would desynchronise the
 product and trade ledgers.
 """
 
-from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from models import Card, CollectionItem, DeletedCollectionItem, User
+from services.collection_merge import merge_collection_item
 
 # Restore is refused rather than guessed at when the world has moved on. These
 # codes are stable so the UI can explain why without parsing prose.
@@ -63,45 +63,13 @@ def restore_entry(db: Session, entry: DeletedCollectionItem) -> tuple[Collection
     already; this at least does not add a third writer with the same flaw, and
     it needs no table lock to do it.
     """
-    match = (
-        db.query(CollectionItem)
-        .filter(
-            CollectionItem.user_id == entry.user_id,
-            CollectionItem.card_id == entry.card_id,
-            CollectionItem.variant == entry.variant,
-            CollectionItem.condition == entry.condition,
-            CollectionItem.lang == entry.lang,
-            CollectionItem.purchase_price == entry.purchase_price,
-        )
-        # Locked: without this a concurrent edit could change the row's
-        # condition, variant, language or price between the match and the
-        # increment, and the restore would add to a row it no longer matches.
-        .with_for_update()
-        .first()
+    restored, created = merge_collection_item(
+        db, user_id=entry.user_id, card_id=entry.card_id,
+        quantity=int(entry.quantity), condition=entry.condition,
+        variant=entry.variant or "Normal", purchase_price=entry.purchase_price,
+        lang=entry.lang, grade=entry.grade, added_at=entry.added_at,
     )
-
-    if match:
-        db.execute(
-            update(CollectionItem)
-            .where(CollectionItem.id == match.id)
-            .values(quantity=CollectionItem.quantity + int(entry.quantity))
-        )
-        db.refresh(match)
-        return match, "merged"
-
-    restored = CollectionItem(
-        card_id=entry.card_id,
-        user_id=entry.user_id,
-        quantity=int(entry.quantity),
-        condition=entry.condition,
-        variant=entry.variant or "Normal",
-        purchase_price=entry.purchase_price,
-        lang=entry.lang,
-        grade=entry.grade,
-        added_at=entry.added_at,
-    )
-    db.add(restored)
-    return restored, "recreated"
+    return restored, "recreated" if created else "merged"
 
 
 def serialize_entries(db: Session, entries: list, *, include_owner: bool) -> list:
