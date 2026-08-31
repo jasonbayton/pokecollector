@@ -863,8 +863,16 @@ def replace_scan_item_photo(db: Session, item: ScanJobItem, raw_image: bytes) ->
             raise ScanItemNoLongerReviewable("This scan is still being processed.")
 
         old_path = locked.image_path
+        duplicate = db.query(ScanJobItem.id).filter(
+            ScanJobItem.id != locked.id,
+            ScanJobItem.user_id == locked.user_id,
+            ScanJobItem.image_hash == image_hash,
+            ScanJobItem.image_stored_at >= now - datetime.timedelta(minutes=10),
+        ).order_by(ScanJobItem.id.desc()).first()
         locked.image_path = new_path
         locked.image_hash = image_hash
+        locked.image_stored_at = now
+        locked.duplicate_of_item_id = duplicate[0] if duplicate else None
         locked.content_type = sanitized.content_type
         locked.byte_size = byte_size
         _reset_item_for_rescan(locked, now)

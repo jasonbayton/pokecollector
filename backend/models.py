@@ -674,6 +674,7 @@ class ScanJobItem(Base):
     # Digest of the sanitised image, never the original upload. It lets a
     # repeated recent upload be flagged without retaining raw image bytes.
     image_hash = Column(String, nullable=True, index=True)
+    image_stored_at = Column(DateTime, nullable=True, index=True)
     duplicate_of_item_id = Column(Integer, ForeignKey("scan_job_items.id", ondelete="SET NULL"), nullable=True, index=True)
     content_type = Column(String, default="image/jpeg", nullable=False)
     byte_size = Column(Integer, nullable=False)

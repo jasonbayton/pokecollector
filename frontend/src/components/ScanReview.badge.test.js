@@ -84,6 +84,13 @@ beforeEach(() => {
 })
 
 describe('ScanItemPanel suggested match', () => {
+  it('shows a non-destructive warning for a recent duplicate scan', () => {
+    const markup = render({ duplicate_scan_detected: true })
+
+    expect(markup).toContain('scanner.duplicateScanDetected')
+    expect(markup).toContain('role="status"')
+  })
+
   it('badges the candidate the matcher actually chose', () => {
     const markup = render({
       identity_confident: true,

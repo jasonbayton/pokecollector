@@ -315,7 +315,7 @@ async def create_scan_job(
             duplicate = db.query(ScanJobItem.id).filter(
                 ScanJobItem.user_id == user_id,
                 ScanJobItem.image_hash == image_hash,
-                ScanJobItem.created_at >= now - datetime.timedelta(minutes=10),
+                ScanJobItem.image_stored_at >= now - datetime.timedelta(minutes=10),
             ).order_by(ScanJobItem.id.desc()).first()
             item = ScanJobItem(
                     job_id=job.id,
@@ -323,6 +323,7 @@ async def create_scan_job(
                     position=position,
                     image_path=relative_path,
                     image_hash=image_hash,
+                    image_stored_at=now,
                     duplicate_of_item_id=duplicate[0] if duplicate else None,
                     content_type=sanitized.content_type,
                     byte_size=byte_size,

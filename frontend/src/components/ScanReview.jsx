@@ -224,6 +224,12 @@ export function ScanItemPanel({ jobId, item, onAdd, onRetry, onRetake, onDismiss
             </p>
           )}
 
+          {item.duplicate_scan_detected && !active && (
+            <p role="status" className="mt-3 rounded-xl border border-amber-300/25 bg-amber-300/10 px-3 py-2 text-sm text-amber-100">
+              {t('scanner.duplicateScanDetected')}
+            </p>
+          )}
+
           {(item.status === 'failed' || noMatches) && (
             <div className="mt-3 space-y-3">
               <p role="alert" className={`rounded-xl border px-3 py-2 text-sm ${
