@@ -83,20 +83,36 @@ class ScanIdentifyByCodeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([card["tcg_card_id"] for card in candidates], ["sv1-205"])
         self.assertEqual(number_matches, 0)
 
-    async def test_name_disagreement_with_a_code_hit_stays_for_review(self):
-        result = await match_card_info(
-            self.db,
-            {
-                "set_code": "SVI",
-                "number_local": "25",
-                "name": "Charizard",
-                "language": "en",
-            },
-        )
+    async def test_name_disagreement_with_a_code_hit_recovers_by_name(self):
+        # This mirrors a Fire Energy whose ``SVI 010`` was read as the number
+        # for Vivillon.  The wrong code hit must not be the only candidate the
+        # review screen offers.
+        name_result = [{
+            "id": "sv03-230_en",
+            "tcg_card_id": "sv03-230",
+            "name": "Basic Fire Energy",
+            "number": "230",
+            "lang": "en",
+            "_lang": "en",
+        }]
+        with patch(
+            "api.recognize._search_one_catalogue",
+            new=AsyncMock(return_value=(name_result, 1, 0)),
+        ):
+            result = await match_card_info(
+                self.db,
+                {
+                    "set_code": "SVI",
+                    "number_local": "25",
+                    "name": "Basic Fire Energy",
+                    "language": "en",
+                    "card_type": "Energy",
+                },
+            )
 
         self.assertFalse(result["_identity_confident"])
-        self.assertEqual(result["_identity_decision"], "code_number_name_disagrees")
-        self.assertEqual(result["matches"][0]["name"], "Pikachu")
+        self.assertIsNone(result["_identity_decision"])
+        self.assertEqual([card["name"] for card in result["matches"]], ["Basic Fire Energy"])
 
     async def test_no_name_or_identifiers_explains_what_could_not_be_read(self):
         with self.assertRaises(HTTPException) as raised:
@@ -156,6 +172,18 @@ class CodeNumberConfirmationTests(unittest.TestCase):
     def test_full_width_and_half_width_forms_are_the_same_name(self):
         info = {"name": "Ｃｈａｒｉｚａｒｄ", "language": "en"}
         self.assertTrue(_code_number_name_agrees(info, {"name": "Charizard", "lang": "en"}))
+
+    def test_gender_symbols_are_identity_bearing(self):
+        info = {"name": "Nidoran♀", "language": "en"}
+        self.assertFalse(_code_number_name_agrees(info, {"name": "Nidoran♂", "lang": "en"}))
+
+    def test_suffixes_are_identity_bearing(self):
+        info = {"name": "Charizard ex", "language": "en"}
+        self.assertFalse(_code_number_name_agrees(info, {"name": "Charizard", "lang": "en"}))
+
+    def test_unicode_symbols_are_identity_bearing(self):
+        info = {"name": "Mew ☆ δ", "language": "en"}
+        self.assertFalse(_code_number_name_agrees(info, {"name": "Mew δ", "lang": "en"}))
 
     def test_a_candidate_with_no_name_is_unknown_rather_than_disagreement(self):
         info = {"name": "Charizard", "language": "en"}

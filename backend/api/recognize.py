@@ -584,8 +584,17 @@ def _confirmation_name(value) -> str | None:
     contradicted the photograph. Compatibility-normalise first so full-width
     and half-width forms of the same name compare equal.
     """
-    text = unicodedata.normalize("NFKC", _simplify_name(str(value or ""))).casefold()
-    text = "".join(ch for ch in text if ch.isalnum())
+    # Searching may deliberately simplify a name (for example ``Charizard
+    # ex`` -> ``Charizard``) to find a useful broad candidate set. Confirmation
+    # has the opposite job: it must retain every identity-bearing suffix and
+    # symbol. In particular, Nidoran♀ and Nidoran♂ are different cards, as are
+    # Mew ☆ δ and Mew δ. Preserve all Unicode Symbol categories rather than
+    # trying to maintain an incomplete catalogue-specific allow-list.
+    text = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    text = "".join(
+        ch for ch in text
+        if ch.isalnum() or unicodedata.category(ch).startswith("S")
+    )
     return text or None
 
 
@@ -1407,7 +1416,16 @@ async def _search_and_rank_candidates(
             unreachable += base_unreachable
             if not (base_attempted and base_unreachable == base_attempted):
                 break
-    if not candidates and search_pairs:
+    # A code-and-number lookup is precise only if the code and number were
+    # read correctly.  When its candidate's printed name contradicts the
+    # readable name on the photo, it must not suppress the name search: that
+    # is how a misread ``SVI 010`` previously made a Basic Fire Energy review
+    # show Vivillon as its only result.
+    code_hit_name_conflicts = bool(candidates) and all(
+        not _code_number_name_agrees(card_info, candidate)
+        for candidate in candidates
+    )
+    if (not candidates or code_hit_name_conflicts) and search_pairs:
         for catalogue_name, base_url in _catalogue_bases():
             found, base_attempted, base_unreachable = await _search_one_catalogue(
                 base_url, search_pairs, card_info, trace, request_gate, catalogue_name
@@ -1474,6 +1492,18 @@ async def _search_and_rank_candidates(
             deduped.append(candidate)
 
     await _fill_candidate_details(db, deduped, card_info, request_gate=request_gate)
+
+    # Do not present a named, contradictory card as a possible resolution.
+    # An unrecognised name remains deliberately non-blocking (the helper
+    # treats it as unknown), but a readable name is stronger evidence than a
+    # collector number that may have been misread.  Returning no candidate is
+    # safer than inviting a reviewer to select an unrelated Pokemon.
+    if any(_confirmation_name(card_info.get(field)) for field in ("name", "name_en")):
+        deduped = [
+            candidate
+            for candidate in deduped
+            if _code_number_name_agrees(card_info, candidate)
+        ]
     deduped.sort(key=lambda card: _candidate_rank_key(card_info, card))
     number_match_count = sum(
         1
