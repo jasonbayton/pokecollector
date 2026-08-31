@@ -106,6 +106,7 @@ def _item_payload(
         # A suggestion can be a legitimate second copy, so this is deliberately
         # a review hint rather than permission to resolve it automatically.
         "suggested_already_owned": suggested_already_owned,
+        "duplicate_scan_detected": item.duplicate_of_item_id is not None,
         "error": item.error,
         "has_image": bool(item.image_path),
         # Changes when, and only when, the stored file changes. The review

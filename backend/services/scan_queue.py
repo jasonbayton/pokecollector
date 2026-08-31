@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import hashlib
 import logging
 import uuid
 from dataclasses import dataclass
@@ -813,6 +814,7 @@ def replace_scan_item_photo(db: Session, item: ScanJobItem, raw_image: bytes) ->
         high_resolution=high_resolution_samples_enabled(db),
     )
     new_path, byte_size = store_sanitized_image(item.job.id, sanitized)
+    image_hash = hashlib.sha256(sanitized.data).hexdigest()
     now = datetime.datetime.utcnow()
 
     try:
@@ -857,6 +859,7 @@ def replace_scan_item_photo(db: Session, item: ScanJobItem, raw_image: bytes) ->
 
         old_path = locked.image_path
         locked.image_path = new_path
+        locked.image_hash = image_hash
         locked.content_type = sanitized.content_type
         locked.byte_size = byte_size
         _reset_item_for_rescan(locked, now)
