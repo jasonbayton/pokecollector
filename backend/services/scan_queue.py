@@ -749,6 +749,10 @@ def resolve_scan_item(
     locked = (
         db.query(ScanJobItem)
         .filter(ScanJobItem.id == item.id)
+        # ``item`` was already loaded by the endpoint.  A plain FOR UPDATE
+        # acquires PostgreSQL's lock but may return that identity-map object
+        # without overwriting its values after waiting for a re-take/add-all.
+        .populate_existing()
         .with_for_update()
         .one_or_none()
     )
@@ -776,6 +780,7 @@ def retry_scan_item(db: Session, item: ScanJobItem) -> ScanJobItem:
     locked = (
         db.query(ScanJobItem)
         .filter(ScanJobItem.id == item.id)
+        .populate_existing()
         .with_for_update()
         .one_or_none()
     )
@@ -858,20 +863,27 @@ def replace_scan_item_photo(db: Session, item: ScanJobItem, raw_image: bytes) ->
         locked = (
             db.query(ScanJobItem)
             .filter(ScanJobItem.id == item.id)
+            .populate_existing()
             .with_for_update()
             .one_or_none()
         )
         if locked is None:
             raise ScanItemNoLongerReviewable("This scan no longer exists.")
-        job = db.query(ScanJob).filter(ScanJob.id == locked.job_id).with_for_update().one_or_none()
+        job = (
+            db.query(ScanJob)
+            .filter(ScanJob.id == locked.job_id)
+            .populate_existing()
+            .with_for_update()
+            .one_or_none()
+        )
         if job is None:
             raise ScanItemNoLongerReviewable("This scan no longer exists.")
         # Only photos still on disk. byte_size survives resolution, but the
         # file does not, so counting a released photo would charge a job for
         # storage it is no longer using.
         others = db.query(func.coalesce(func.sum(ScanJobItem.byte_size), 0)).filter(
-            ScanJobItem.job_id == item.job.id,
-            ScanJobItem.id != item.id,
+            ScanJobItem.job_id == locked.job_id,
+            ScanJobItem.id != locked.id,
             ScanJobItem.image_path.isnot(None),
         ).scalar() or 0
         if others + byte_size > MAX_JOB_BYTES:

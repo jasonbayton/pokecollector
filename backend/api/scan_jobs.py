@@ -336,7 +336,13 @@ def resolve_scan_job_item(
         keep_image = manual_correction or corrected_the_suggestion
     else:
         keep_image = False
-    return _item_payload(db, resolve_scan_item(db, item, keep_image=keep_image))
+    try:
+        resolved = resolve_scan_item(db, item, keep_image=keep_image)
+    except ValueError as exc:
+        # The pre-flight check is only advisory: an add-all, re-take, or second
+        # dismiss can win the row lock while catalogue preparation runs.
+        raise HTTPException(status_code=409, detail=str(exc))
+    return _item_payload(db, resolved)
 
 
 @router.post("/recognize/jobs/{job_id}/add-all-confident")

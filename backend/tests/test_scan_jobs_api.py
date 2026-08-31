@@ -247,6 +247,18 @@ class ScanJobsApiTests(unittest.TestCase):
         self.assertFalse(stored.exists())
         self.assertEqual(self.client.get("/api/cards/recognize/jobs").json()["jobs"], [])
 
+    def test_repeated_resolve_is_a_conflict_not_a_server_error(self):
+        created = self._enqueue()
+        item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
+        item.status = "done"
+        self.db.commit()
+        url = f"/api/cards/recognize/jobs/{created['id']}/items/{item.id}/resolve"
+
+        self.assertEqual(self.client.post(url).status_code, 200)
+        repeated = self.client.post(url)
+        self.assertEqual(repeated.status_code, 409, repeated.text)
+        self.assertEqual(repeated.json()["detail"], "This scan has already been handled.")
+
     def test_add_all_confident_files_only_validated_candidates(self):
         created = self._enqueue()
         item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
