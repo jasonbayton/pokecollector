@@ -676,6 +676,9 @@ class ScanJobItem(Base):
     image_hash = Column(String, nullable=True, index=True)
     image_stored_at = Column(DateTime, nullable=True, index=True)
     duplicate_of_item_id = Column(Integer, ForeignKey("scan_job_items.id", ondelete="SET NULL"), nullable=True, index=True)
+    # Captured at sanitisation time. A queued retry must never relabel an
+    # already-stored JPEG using a setting that changed after upload.
+    upload_resolution_profile = Column(String, nullable=True)
     content_type = Column(String, default="image/jpeg", nullable=False)
     byte_size = Column(Integer, nullable=False)
     batch_mode = Column(Boolean, default=False, nullable=False)

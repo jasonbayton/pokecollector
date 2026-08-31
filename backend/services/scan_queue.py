@@ -415,6 +415,7 @@ async def default_scan_processor(
     *,
     job_id: int | None = None,
     item_id: int | None = None,
+    source_profile: str | None = None,
 ) -> dict:
     """Reuse the proven single-card scanner path with background priority."""
     from api.recognize import recognize_sanitized_card
@@ -435,6 +436,10 @@ async def default_scan_processor(
         model=provider.model(),
     )
     trace.set_image(image_bytes)
+    trace.record_resolution_profile(
+        source_profile=source_profile,
+        request_image=image_bytes,
+    )
     try:
         # Only Gemini has a shared per-key budget to protect; other providers get
         # a no-op scope rather than queueing behind Gemini's limiter.
@@ -461,6 +466,7 @@ async def default_composite_processor(
     *,
     job_id: int | None = None,
     item_ids: list[int] | tuple[int, ...] | None = None,
+    source_profiles: list[str | None] | tuple[str | None, ...] | None = None,
 ) -> list[dict | None]:
     """Recognize a small grid and flag unclear positions for individual work."""
     from api.recognize import (
@@ -487,6 +493,7 @@ async def default_composite_processor(
         )
 
     trace_item_ids = list(item_ids or [])
+    high_resolution = high_resolution_samples_enabled(db)
     traces = [
         create_scan_trace(
             db,
@@ -505,9 +512,21 @@ async def default_composite_processor(
     try:
         with provider.rate_limit_scope("background"):
             try:
+                composite_image = build_composite(images, high_resolution=high_resolution)
+                for position, trace in enumerate(traces):
+                    trace.record_resolution_profile(
+                        source_profile=(
+                            source_profiles[position]
+                            if source_profiles and position < len(source_profiles)
+                            else None
+                        ),
+                        request_image=composite_image,
+                        request_profile="high" if high_resolution else "low",
+                        composite_cards=len(images),
+                    )
                 recognized_by_position = await recognize_composite_card_info(
                     api_key,
-                    build_composite(images, high_resolution=high_resolution_samples_enabled(db)),
+                    composite_image,
                     len(images),
                     traces=traces,
                     provider=provider,
@@ -637,6 +656,7 @@ async def process_claimed_scan_item(
             content_types = [item.content_type for item in items]
             job_id = items[0].job_id
             item_ids = [item.id for item in items]
+            source_profiles = [item.upload_resolution_profile for item in items]
             db.rollback()  # Release the row lock during upstream network work.
             if claim.composite:
                 if composite_processor is default_composite_processor:
@@ -647,6 +667,7 @@ async def process_claimed_scan_item(
                         content_types,
                         job_id=job_id,
                         item_ids=item_ids,
+                        source_profiles=source_profiles,
                     )
                 else:
                     results = await composite_processor(
@@ -661,6 +682,7 @@ async def process_claimed_scan_item(
                         content_types[0],
                         job_id=job_id,
                         item_id=item_ids[0],
+                        source_profile=source_profiles[0],
                     )
                 else:
                     result = await processor(
@@ -838,9 +860,10 @@ def replace_scan_item_photo(db: Session, item: ScanJobItem, raw_image: bytes) ->
 
     from services.scan_storage import MAX_JOB_BYTES, ScanJobBytesExceeded
 
+    high_resolution = high_resolution_samples_enabled(db)
     sanitized = sanitize_image_bytes(
         raw_image,
-        high_resolution=high_resolution_samples_enabled(db),
+        high_resolution=high_resolution,
     )
     new_path, byte_size = store_sanitized_image(item.job.id, sanitized)
     image_hash = hashlib.sha256(sanitized.data).hexdigest()
@@ -909,6 +932,7 @@ def replace_scan_item_photo(db: Session, item: ScanJobItem, raw_image: bytes) ->
         locked.image_hash = image_hash
         locked.image_stored_at = now
         locked.duplicate_of_item_id = duplicate[0] if duplicate else None
+        locked.upload_resolution_profile = "high" if high_resolution else "low"
         locked.content_type = sanitized.content_type
         locked.byte_size = byte_size
         _reset_item_for_rescan(locked, now)

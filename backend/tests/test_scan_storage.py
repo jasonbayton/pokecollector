@@ -15,7 +15,7 @@ try:
     from starlette.datastructures import Headers
 
     from database import Base
-    from models import ScanJobItem, User
+    from models import ScanJobItem, Setting, User
     from services import scan_storage
     from services.scan_storage import ScanUploadError, create_scan_job, sanitize_image_bytes
 
@@ -165,6 +165,17 @@ class ScanJobStorageTests(unittest.IsolatedAsyncioTestCase):
         second_item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == second.id).one()
 
         self.assertIsNone(second_item.duplicate_of_item_id)
+
+    async def test_upload_persists_its_sanitisation_profile_for_delayed_queue_work(self):
+        low_job = await create_scan_job(self.db, self.user.id, [_upload(_image_bytes())])
+        low_item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == low_job.id).one()
+        self.assertEqual(low_item.upload_resolution_profile, "low")
+
+        self.db.add(Setting(key="scanner_high_resolution", value="true"))
+        self.db.commit()
+        high_job = await create_scan_job(self.db, self.user.id, [_upload(_image_bytes())])
+        high_item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == high_job.id).one()
+        self.assertEqual(high_item.upload_resolution_profile, "high")
 
     async def test_rejects_more_than_fifty_photos_before_writing(self):
         uploads = [_upload(_image_bytes(size=(8, 8))) for _ in range(51)]

@@ -8,6 +8,7 @@ import math
 import os
 import json
 import re
+import time
 import unicodedata
 import warnings
 from email.utils import parsedate_to_datetime
@@ -1697,7 +1698,9 @@ async def recognize_sanitized_card(
         )
 
     image_b64 = base64.b64encode(image_bytes).decode()
+    started_at = None
     try:
+        started_at = time.monotonic()
         async with httpx.AsyncClient(timeout=recognition_timeout()) as client:
             response_text, usage = await provider.generate_text(
                 client,
@@ -1710,6 +1713,7 @@ async def recognize_sanitized_card(
                 prompt=RECOGNIZE_PROMPT,
                 raw_response=response_text,
                 usage=usage,
+                latency_seconds=time.monotonic() - started_at,
             )
         json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
         if not json_match:
@@ -1719,10 +1723,14 @@ async def recognize_sanitized_card(
             trace.record_extraction(parsed=card_info)
     except HTTPException as exc:
         if trace:
+            if started_at is not None:
+                trace.record_extraction(latency_seconds=time.monotonic() - started_at)
             trace.record_error(str(exc.detail))
         raise
     except Exception as exc:
         if trace:
+            if started_at is not None:
+                trace.record_extraction(latency_seconds=time.monotonic() - started_at)
             trace.record_error(f"Recognition parsing failed: {type(exc).__name__}")
         raise HTTPException(status_code=500, detail=f"Recognition failed: {exc}")
 
@@ -1758,9 +1766,10 @@ async def recognize_card(
 ):
     try:
         raw_image = await read_limited_upload(file, remaining_job_bytes=MAX_FILE_BYTES)
+        high_resolution = high_resolution_samples_enabled(db)
         sanitized = sanitize_image_bytes(
             raw_image,
-            high_resolution=high_resolution_samples_enabled(db),
+            high_resolution=high_resolution,
         )
     except ScanUploadError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -1775,6 +1784,10 @@ async def recognize_card(
         model=get_provider(db, current_user.id).model(),
     )
     trace.set_image(sanitized.data)
+    trace.record_resolution_profile(
+        source_profile="high" if high_resolution else "low",
+        request_image=sanitized.data,
+    )
     try:
         return await recognize_sanitized_card(
             db,
@@ -1833,7 +1846,9 @@ async def recognize_composite_card_info(
     """Return recognized card information keyed by zero-based composite position."""
     provider = provider or ScanProvider(GEMINI)
     image_b64 = base64.b64encode(image_bytes).decode()
+    started_at = None
     try:
+        started_at = time.monotonic()
         async with httpx.AsyncClient(timeout=recognition_timeout()) as client:
             response_text, usage = await provider.generate_text(
                 client,
@@ -1849,6 +1864,7 @@ async def recognize_composite_card_info(
                 prompt=COMPOSITE_PROMPT.format(count=count),
                 raw_response=response_text,
                 usage=usage,
+                latency_seconds=time.monotonic() - started_at,
             )
         array_match = re.search(r"\[.*\]", response_text, re.DOTALL)
         if not array_match:
@@ -1857,10 +1873,16 @@ async def recognize_composite_card_info(
         if not isinstance(rows, list):
             raise CompositeRecognitionError("The scanner returned an invalid composite card list.")
     except HTTPException:
+        for trace in traces or []:
+            if started_at is not None:
+                trace.record_extraction(latency_seconds=time.monotonic() - started_at)
         raise
     except CompositeRecognitionError:
         raise
     except Exception as exc:
+        for trace in traces or []:
+            if started_at is not None:
+                trace.record_extraction(latency_seconds=time.monotonic() - started_at)
         raise CompositeRecognitionError(f"Could not parse the composite result: {exc}") from exc
 
     mapped: dict[int, dict] = {}

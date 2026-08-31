@@ -8,6 +8,7 @@ Usage:
 import argparse
 import json
 import sys
+from statistics import median
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -22,6 +23,17 @@ def load(trace_dir: Path):
 
 def pct(part, whole):
     return f"{100 * part / whole:.0f}%" if whole else "n/a"
+
+
+def usage_tokens(usage):
+    """Normalise the two provider response shapes without inventing a cost."""
+    if not isinstance(usage, dict):
+        return None
+    for key in ("total_tokens", "totalTokenCount"):
+        value = usage.get(key)
+        if isinstance(value, (int, float)):
+            return value
+    return None
 
 
 def main():
@@ -90,6 +102,54 @@ def main():
 
     modes = Counter(trace.get("mode") or "?" for _, trace in traces)
     print("\nmode: " + ", ".join(f"{key}={value}" for key, value in modes.items()))
+
+    cohorts = defaultdict(list)
+    for _, trace in traces:
+        resolution = trace.get("resolution") or {}
+        source_profile = resolution.get("source_profile") or "unknown"
+        request_profile = (
+            resolution.get("request_profile") or resolution.get("profile") or "unknown"
+        )
+        cards = resolution.get("composite_cards") if trace.get("mode") == "composite" else 1
+        cohorts[(trace.get("mode") or "?", source_profile, request_profile, cards)].append(trace)
+    print("\nresolution cohorts:")
+    for (mode, source_profile, request_profile, cards), cohort in sorted(cohorts.items()):
+        reviewed = [trace for trace in cohort if trace.get("ground_truth")]
+        judged_cohort = [trace for trace in reviewed if trace.get("correct") is not None]
+        correct_cohort = sum(trace.get("correct") is True for trace in judged_cohort)
+        never_retrieved = sum(trace.get("ground_truth_rank") is None for trace in reviewed)
+        manual = sum(
+            trace.get("ground_truth_source") == "manual" for trace in reviewed
+        )
+        request_bytes = [
+            (trace.get("resolution") or {}).get("request_bytes") for trace in cohort
+            if isinstance((trace.get("resolution") or {}).get("request_bytes"), int)
+        ]
+        latencies = [
+            (trace.get("extraction") or {}).get("latency_seconds") for trace in cohort
+            if isinstance((trace.get("extraction") or {}).get("latency_seconds"), (int, float))
+        ]
+        tokens = [
+            usage_tokens((trace.get("extraction") or {}).get("usage")) for trace in cohort
+            if usage_tokens((trace.get("extraction") or {}).get("usage")) is not None
+        ]
+        details = [
+            f"{len(cohort)} traces",
+            f"correct {correct_cohort}/{len(judged_cohort)} ({pct(correct_cohort, len(judged_cohort))})",
+            f"never-retrieved {never_retrieved}/{len(reviewed)}",
+            f"manual {manual}/{len(reviewed)}",
+            f"errors {sum(bool(trace.get('error')) for trace in cohort)}/{len(cohort)}",
+        ]
+        if request_bytes:
+            details.append(f"median request {median(request_bytes):.0f} B")
+        if latencies:
+            details.append(f"median latency {median(latencies):.2f}s")
+        if tokens:
+            details.append(f"median reported tokens {median(tokens):.0f}")
+        print(
+            f"  {mode}/source-{source_profile}/request-{request_profile}/cards-{cards}: "
+            + "; ".join(details)
+        )
 
     phash = [trace.get("phash") for _, trace in traces if trace.get("phash")]
     if phash:
