@@ -29,15 +29,17 @@ class CraftAchievementTests(unittest.TestCase):
     def tearDown(self):
         self.db.close()
 
-    def _add_owned_card(self, card_id, *, quantity=1, variant="Normal", rarity="Common", artist=None):
+    def _add_owned_card(self, card_id, *, quantity=1, variant="Normal", rarity="Common", artist=None, set_id=None, price_trend=None):
         self.db.add(Card(
             id=card_id,
             tcg_card_id=card_id,
             name=card_id,
             number=card_id,
+            set_id=set_id,
             lang="en",
             rarity=rarity,
             artist=artist,
+            price_trend=price_trend,
             is_custom=False,
         ))
         self.db.flush()
@@ -165,6 +167,32 @@ class CraftAchievementTests(unittest.TestCase):
         self.assertEqual(stats["secret_rare_flag"], 0)
         self.assertEqual(stats["artist_diversity"], 1)
         self.assertEqual(stats["holo_cards"], 10)
+
+    def test_zero_rows_do_not_count_toward_legacy_ownership_stats(self):
+        # These legacy metrics must use the same positive-quantity definition
+        # as the newer craft badges. There are two catalogue cards in the set,
+        # but only one physical copy is owned.
+        self._add_owned_card("owned-set-card", set_id="owned-set", quantity=1)
+        self._add_owned_card("zero-set-card", set_id="owned-set", quantity=0)
+        self._add_owned_card("zero-illustration", quantity=0, rarity="Illustration Rare")
+        self.db.commit()
+
+        stats = _load_user_stats(self.db, [self.user.id])[self.user.id]
+
+        self.assertEqual(stats["total_cards"], 1)
+        self.assertEqual(stats["unique_cards"], 1)
+        self.assertEqual(stats["set_diversity"], 1)
+        self.assertEqual(stats["sets_completed"], 0)
+        self.assertEqual(stats["illustration_rare_flag"], 0)
+
+    def test_zero_row_cannot_be_the_most_valuable_card(self):
+        self._add_owned_card("owned", quantity=1, price_trend=5)
+        self._add_owned_card("zero-expensive", quantity=0, price_trend=500)
+        self.db.commit()
+
+        stats = _load_user_stats(self.db, [self.user.id])[self.user.id]
+
+        self.assertEqual(stats["most_valuable_card"]["id"], "owned")
 
     def test_a_legacy_binder_with_no_type_still_earns_its_milestone(self):
         # NULL is a collection binder made before the column existed, which is

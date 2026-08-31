@@ -123,6 +123,17 @@ class PortfolioValuationTests(unittest.TestCase):
         self.assertEqual(result.total_pnl, 0)
         self.assertEqual(result.product_value_fallback_count, 1)
 
+    def test_zero_and_negative_collection_rows_have_no_value_or_cost(self):
+        zero = self.add_item(quantity=0, purchase_price=3)
+        negative = self.add_item(quantity=-2, purchase_price=3)
+
+        result = self.valuation([zero, negative])
+
+        self.assertEqual(result.total_cards, 0)
+        self.assertEqual(result.card_value, 0)
+        self.assertEqual(result.card_cost_basis, 0)
+        self.assertEqual(result.total_value, 0)
+
     def test_explicit_zero_product_value_is_not_treated_as_missing(self):
         self.add_product(purchase_price=50, current_value=0)
 

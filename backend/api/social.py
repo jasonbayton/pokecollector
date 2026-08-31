@@ -509,13 +509,19 @@ def _load_user_stats(db: Session, user_ids: list[int] | None = None, price_field
 
     for user in users:
         rows = items_by_user.get(user.id, [])
-        total_cards = sum(row.quantity or 0 for row in rows)
-        unique_card_ids = {row.card_id for row in rows}
+        # A collection row can remain after its quantity reaches zero (for
+        # example after a partial sale or edit). It records history, not an
+        # owned card. Keep every ownership-derived stat on this same positive
+        # subset so badges, totals, set completion, and the highlight card
+        # cannot disagree about whether the user owns a printing.
+        owned_rows = [row for row in rows if (row.quantity or 0) > 0]
+        total_cards = sum(row.quantity for row in owned_rows)
+        unique_card_ids = {row.card_id for row in owned_rows}
         valuation = calculate_portfolio_valuation(db, user.id, price_field)
 
         most_valuable = None
-        if rows:
-            most_valuable_rows[user.id] = max(rows, key=lambda row: _get_price(row))
+        if owned_rows:
+            most_valuable_rows[user.id] = max(owned_rows, key=lambda row: _get_price(row))
 
         owned_by_set = defaultdict(set)
         owned_set_ids = set()
@@ -527,27 +533,15 @@ def _load_user_stats(db: Session, user_ids: list[int] | None = None, price_field
         has_ultra_rare = False
         has_secret_rare = False
         artists = set()
-        for row in rows:
+        for row in owned_rows:
             if row.set_id:
                 owned_by_set[(row.set_id, row.lang)].add(row.card_id)
                 owned_set_ids.add(row.set_id)
             variant = (row.variant or "").strip().casefold()
             rarity = (row.rarity or "").strip().casefold()
-            quantity = row.quantity or 0
+            quantity = row.quantity
             if "illustration rare" in rarity:
                 has_illustration_rare = True
-            # A row of zero, or of a negative left by an edit, is not a card
-            # anybody owns: card_state treats a variant as owned only while
-            # its quantity is positive. Without this a zero-quantity row
-            # unlocked a first-of-its-kind milestone, and a negative one
-            # subtracted from the counted milestones.
-            #
-            # Deliberately guards only the craft metrics below. The set
-            # completion and illustration-rare metrics above predate this
-            # change and read the same rows; correcting those is a change to
-            # existing achievements rather than to these new ones.
-            if quantity <= 0:
-                continue
             if variant == "holo":
                 holo_cards += quantity
             elif variant == "reverse holo":
