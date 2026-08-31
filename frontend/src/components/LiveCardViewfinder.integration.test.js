@@ -145,8 +145,9 @@ describe('LiveCardViewfinder against the real camera session', () => {
       audio: false,
       video: {
         facingMode: { ideal: 'environment' },
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
+        width: { ideal: 3840 },
+        height: { ideal: 2160 },
+        focusMode: { ideal: 'continuous' },
       },
     })
   })
