@@ -1698,6 +1698,7 @@ async def recognize_sanitized_card(
         )
 
     image_b64 = base64.b64encode(image_bytes).decode()
+    started_at = None
     try:
         started_at = time.monotonic()
         async with httpx.AsyncClient(timeout=recognition_timeout()) as client:
@@ -1722,10 +1723,14 @@ async def recognize_sanitized_card(
             trace.record_extraction(parsed=card_info)
     except HTTPException as exc:
         if trace:
+            if started_at is not None:
+                trace.record_extraction(latency_seconds=time.monotonic() - started_at)
             trace.record_error(str(exc.detail))
         raise
     except Exception as exc:
         if trace:
+            if started_at is not None:
+                trace.record_extraction(latency_seconds=time.monotonic() - started_at)
             trace.record_error(f"Recognition parsing failed: {type(exc).__name__}")
         raise HTTPException(status_code=500, detail=f"Recognition failed: {exc}")
 
@@ -1780,7 +1785,7 @@ async def recognize_card(
     )
     trace.set_image(sanitized.data)
     trace.record_resolution_profile(
-        profile="high" if high_resolution else "low",
+        source_profile="high" if high_resolution else "low",
         request_image=sanitized.data,
     )
     try:
@@ -1841,6 +1846,7 @@ async def recognize_composite_card_info(
     """Return recognized card information keyed by zero-based composite position."""
     provider = provider or ScanProvider(GEMINI)
     image_b64 = base64.b64encode(image_bytes).decode()
+    started_at = None
     try:
         started_at = time.monotonic()
         async with httpx.AsyncClient(timeout=recognition_timeout()) as client:
@@ -1867,10 +1873,16 @@ async def recognize_composite_card_info(
         if not isinstance(rows, list):
             raise CompositeRecognitionError("The scanner returned an invalid composite card list.")
     except HTTPException:
+        for trace in traces or []:
+            if started_at is not None:
+                trace.record_extraction(latency_seconds=time.monotonic() - started_at)
         raise
     except CompositeRecognitionError:
         raise
     except Exception as exc:
+        for trace in traces or []:
+            if started_at is not None:
+                trace.record_extraction(latency_seconds=time.monotonic() - started_at)
         raise CompositeRecognitionError(f"Could not parse the composite result: {exc}") from exc
 
     mapped: dict[int, dict] = {}

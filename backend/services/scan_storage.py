@@ -325,6 +325,7 @@ async def create_scan_job(
                     image_hash=image_hash,
                     image_stored_at=now,
                     duplicate_of_item_id=duplicate[0] if duplicate else None,
+                    upload_resolution_profile="high" if high_resolution else "low",
                     content_type=sanitized.content_type,
                     byte_size=byte_size,
                     batch_mode=bool(batch_modes[position]) and len(uploads) > 1,

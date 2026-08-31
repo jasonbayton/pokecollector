@@ -221,15 +221,16 @@ class ScanTrace:
     def record_resolution_profile(
         self,
         *,
-        profile: str,
+        source_profile: str | None,
         request_image: bytes,
+        request_profile: str | None = None,
         composite_cards: int | None = None,
     ) -> None:
         """Persist only the image geometry needed to compare scan cohorts.
 
         The stored source remains separately consent-controlled.  Dimensions,
-        byte counts and the active profile are enough to distinguish a low/high
-        experiment and to relate recognition quality to its request cost.
+        byte counts and both profiles distinguish an already-stored source from
+        a composite canvas built later under a changed setting.
         """
         if not self.enabled:
             return
@@ -239,7 +240,12 @@ class ScanTrace:
         except (OSError, ValueError):
             request_dimensions = None
         self.data["resolution"] = {
-            "profile": profile,
+            # Retained for old scripts. New analysis must use the explicit
+            # source/request fields so toggling the experiment cannot relabel
+            # a queued upload.
+            "profile": request_profile or source_profile or "unknown",
+            "source_profile": source_profile or "unknown",
+            "request_profile": request_profile or source_profile or "unknown",
             "request_dimensions": request_dimensions,
             "request_bytes": len(request_image),
             **({"composite_cards": composite_cards} if composite_cards else {}),

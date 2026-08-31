@@ -163,7 +163,8 @@ class ScanTraceTests(unittest.TestCase):
         trace = create_scan_trace(self.db, self.user.id, mode="composite", job_id=7, item_id=9)
         trace.set_image(image.getvalue())
         trace.record_resolution_profile(
-            profile="high", request_image=image.getvalue(), composite_cards=2,
+            source_profile="low", request_profile="high",
+            request_image=image.getvalue(), composite_cards=2,
         )
         trace.record_extraction(
             parsed={"name": "Pikachu"}, latency_seconds=1.25,
@@ -174,8 +175,19 @@ class ScanTraceTests(unittest.TestCase):
         trace.save()
         record_ground_truth(self.user.id, 7, 9, "right-card")
 
-        payload = json.loads(next(Path(self.temp_dir.name).glob("user-*/*/*.json")).read_text())
-        self.assertEqual(payload["resolution"]["profile"], "high")
+        failed = create_scan_trace(self.db, self.user.id, mode="composite", job_id=7, item_id=10)
+        failed.record_resolution_profile(
+            source_profile="low", request_profile="high",
+            request_image=image.getvalue(), composite_cards=4,
+        )
+        failed.record_extraction(latency_seconds=2.5)
+        failed.record_error("provider rejected image")
+        failed.save()
+
+        payload_path = next(Path(self.temp_dir.name).glob("user-*/**/job7-item9-*.json"))
+        payload = json.loads(payload_path.read_text())
+        self.assertEqual(payload["resolution"]["source_profile"], "low")
+        self.assertEqual(payload["resolution"]["request_profile"], "high")
         self.assertEqual(payload["resolution"]["request_dimensions"], {
             "width": 1280, "height": 1792,
         })
@@ -188,9 +200,11 @@ class ScanTraceTests(unittest.TestCase):
             check=False, capture_output=True, text=True,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("composite/high: 1 traces", result.stdout)
+        self.assertIn("composite/source-low/request-high/cards-2: 1 traces", result.stdout)
+        self.assertIn("composite/source-low/request-high/cards-4: 1 traces", result.stdout)
         self.assertIn("median latency 1.25s", result.stdout)
         self.assertIn("median reported tokens 456", result.stdout)
+        self.assertIn("errors 1/1", result.stdout)
 
     def test_errors_are_redacted_before_persistence(self):
         self._enable(self.user)

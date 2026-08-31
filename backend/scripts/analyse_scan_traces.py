@@ -106,10 +106,14 @@ def main():
     cohorts = defaultdict(list)
     for _, trace in traces:
         resolution = trace.get("resolution") or {}
-        profile = resolution.get("profile") or "unknown"
-        cohorts[(trace.get("mode") or "?", profile)].append(trace)
+        source_profile = resolution.get("source_profile") or "unknown"
+        request_profile = (
+            resolution.get("request_profile") or resolution.get("profile") or "unknown"
+        )
+        cards = resolution.get("composite_cards") if trace.get("mode") == "composite" else 1
+        cohorts[(trace.get("mode") or "?", source_profile, request_profile, cards)].append(trace)
     print("\nresolution cohorts:")
-    for (mode, profile), cohort in sorted(cohorts.items()):
+    for (mode, source_profile, request_profile, cards), cohort in sorted(cohorts.items()):
         reviewed = [trace for trace in cohort if trace.get("ground_truth")]
         judged_cohort = [trace for trace in reviewed if trace.get("correct") is not None]
         correct_cohort = sum(trace.get("correct") is True for trace in judged_cohort)
@@ -134,6 +138,7 @@ def main():
             f"correct {correct_cohort}/{len(judged_cohort)} ({pct(correct_cohort, len(judged_cohort))})",
             f"never-retrieved {never_retrieved}/{len(reviewed)}",
             f"manual {manual}/{len(reviewed)}",
+            f"errors {sum(bool(trace.get('error')) for trace in cohort)}/{len(cohort)}",
         ]
         if request_bytes:
             details.append(f"median request {median(request_bytes):.0f} B")
@@ -141,7 +146,10 @@ def main():
             details.append(f"median latency {median(latencies):.2f}s")
         if tokens:
             details.append(f"median reported tokens {median(tokens):.0f}")
-        print(f"  {mode}/{profile}: " + "; ".join(details))
+        print(
+            f"  {mode}/source-{source_profile}/request-{request_profile}/cards-{cards}: "
+            + "; ".join(details)
+        )
 
     phash = [trace.get("phash") for _, trace in traces if trace.get("phash")]
     if phash:

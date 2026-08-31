@@ -642,6 +642,25 @@ class ScanQueueTests(unittest.TestCase):
 
         self.assertIsNone(second.duplicate_of_item_id)
 
+    def test_retake_persists_the_profile_that_sanitised_the_replacement(self):
+        from PIL import Image
+
+        job = self._job(self.users[0])
+        item = self.db.query(ScanJobItem).one()
+        old_file = scan_storage.resolve_scan_path(item.image_path)
+        old_file.parent.mkdir(exist_ok=True)
+        old_file.write_bytes(b"old photo")
+        item.status = "done"
+        item.upload_resolution_profile = "low"
+        self.db.commit()
+
+        output = io.BytesIO()
+        Image.new("RGB", (400, 560), "#385898").save(output, format="JPEG")
+        with patch("services.scan_providers.high_resolution_samples_enabled", return_value=True):
+            replace_scan_item_photo(self.db, item, output.getvalue())
+
+        self.assertEqual(item.upload_resolution_profile, "high")
+
     def test_progress_counts_only_reviewable_items_as_attention(self):
         job = self._job(self.users[0], positions=(0, 1, 2, 3))
         items = self.db.query(ScanJobItem).order_by(ScanJobItem.position).all()
