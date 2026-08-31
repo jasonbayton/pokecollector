@@ -1,4 +1,5 @@
 import json
+import io
 import os
 import stat
 import subprocess
@@ -12,6 +13,7 @@ try:
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
+    from PIL import Image
 
     from models import Base, User, UserSetting
     from api.settings import _get_user_settings, update_settings
@@ -153,6 +155,42 @@ class ScanTraceTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(path.parent.stat().st_mode), 0o700)
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(path.with_suffix(".jpg").stat().st_mode), 0o600)
+
+    def test_trace_records_resolution_profile_and_analysis_groups_it(self):
+        self._enable(self.user)
+        image = io.BytesIO()
+        Image.new("RGB", (1280, 1792), "#d92828").save(image, format="JPEG")
+        trace = create_scan_trace(self.db, self.user.id, mode="composite", job_id=7, item_id=9)
+        trace.set_image(image.getvalue())
+        trace.record_resolution_profile(
+            profile="high", request_image=image.getvalue(), composite_cards=2,
+        )
+        trace.record_extraction(
+            parsed={"name": "Pikachu"}, latency_seconds=1.25,
+            usage={"total_tokens": 456},
+        )
+        trace.record_candidates([{"tcg_card_id": "right-card"}])
+        trace.record_decision("test", "right-card")
+        trace.save()
+        record_ground_truth(self.user.id, 7, 9, "right-card")
+
+        payload = json.loads(next(Path(self.temp_dir.name).glob("user-*/*/*.json")).read_text())
+        self.assertEqual(payload["resolution"]["profile"], "high")
+        self.assertEqual(payload["resolution"]["request_dimensions"], {
+            "width": 1280, "height": 1792,
+        })
+        self.assertEqual(payload["resolution"]["composite_cards"], 2)
+        self.assertEqual(payload["extraction"]["latency_seconds"], 1.25)
+
+        script = Path(__file__).parents[1] / "scripts" / "analyse_scan_traces.py"
+        result = subprocess.run(
+            [sys.executable, str(script), self.temp_dir.name],
+            check=False, capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("composite/high: 1 traces", result.stdout)
+        self.assertIn("median latency 1.25s", result.stdout)
+        self.assertIn("median reported tokens 456", result.stdout)
 
     def test_errors_are_redacted_before_persistence(self):
         self._enable(self.user)

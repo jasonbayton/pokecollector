@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import io
 import json
 import logging
 import os
@@ -18,6 +19,8 @@ import shutil
 import uuid
 from pathlib import Path
 from typing import Any
+
+from PIL import Image
 
 from models import UserSetting
 
@@ -215,6 +218,33 @@ class ScanTrace:
         self.data["image_sha256"] = hashlib.sha256(image_bytes).hexdigest()
         self.data["image_bytes"] = len(image_bytes)
 
+    def record_resolution_profile(
+        self,
+        *,
+        profile: str,
+        request_image: bytes,
+        composite_cards: int | None = None,
+    ) -> None:
+        """Persist only the image geometry needed to compare scan cohorts.
+
+        The stored source remains separately consent-controlled.  Dimensions,
+        byte counts and the active profile are enough to distinguish a low/high
+        experiment and to relate recognition quality to its request cost.
+        """
+        if not self.enabled:
+            return
+        try:
+            with Image.open(io.BytesIO(request_image)) as image:
+                request_dimensions = {"width": image.width, "height": image.height}
+        except (OSError, ValueError):
+            request_dimensions = None
+        self.data["resolution"] = {
+            "profile": profile,
+            "request_dimensions": request_dimensions,
+            "request_bytes": len(request_image),
+            **({"composite_cards": composite_cards} if composite_cards else {}),
+        }
+
     def record_extraction(
         self,
         *,
@@ -222,6 +252,7 @@ class ScanTrace:
         raw_response=None,
         parsed=None,
         usage=None,
+        latency_seconds: float | None = None,
     ) -> None:
         if not self.enabled:
             return
@@ -234,6 +265,8 @@ class ScanTrace:
             section["parsed"] = parsed
         if usage is not None:
             section["usage"] = usage
+        if latency_seconds is not None:
+            section["latency_seconds"] = latency_seconds
 
     def record_visual_verification(self, *, raw_response: str, selected: int | None) -> None:
         if self.enabled:

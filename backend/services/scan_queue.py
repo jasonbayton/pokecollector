@@ -418,13 +418,14 @@ async def default_scan_processor(
 ) -> dict:
     """Reuse the proven single-card scanner path with background priority."""
     from api.recognize import recognize_sanitized_card
-    from services.scan_providers import get_provider
+    from services.scan_providers import get_provider, high_resolution_samples_enabled
     from services.scan_trace import create_scan_trace
 
     user = db.get(User, user_id)
     if user is None or not user.is_active:
         raise PermanentScanError("The scan owner is no longer an active user.")
     provider = get_provider(db, user_id)
+    high_resolution = high_resolution_samples_enabled(db)
     trace = create_scan_trace(
         db,
         user_id,
@@ -435,6 +436,10 @@ async def default_scan_processor(
         model=provider.model(),
     )
     trace.set_image(image_bytes)
+    trace.record_resolution_profile(
+        profile="high" if high_resolution else "low",
+        request_image=image_bytes,
+    )
     try:
         # Only Gemini has a shared per-key budget to protect; other providers get
         # a no-op scope rather than queueing behind Gemini's limiter.
@@ -487,6 +492,7 @@ async def default_composite_processor(
         )
 
     trace_item_ids = list(item_ids or [])
+    high_resolution = high_resolution_samples_enabled(db)
     traces = [
         create_scan_trace(
             db,
@@ -505,9 +511,16 @@ async def default_composite_processor(
     try:
         with provider.rate_limit_scope("background"):
             try:
+                composite_image = build_composite(images, high_resolution=high_resolution)
+                for trace in traces:
+                    trace.record_resolution_profile(
+                        profile="high" if high_resolution else "low",
+                        request_image=composite_image,
+                        composite_cards=len(images),
+                    )
                 recognized_by_position = await recognize_composite_card_info(
                     api_key,
-                    build_composite(images, high_resolution=high_resolution_samples_enabled(db)),
+                    composite_image,
                     len(images),
                     traces=traces,
                     provider=provider,

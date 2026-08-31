@@ -8,6 +8,7 @@ import math
 import os
 import json
 import re
+import time
 import unicodedata
 import warnings
 from email.utils import parsedate_to_datetime
@@ -1698,6 +1699,7 @@ async def recognize_sanitized_card(
 
     image_b64 = base64.b64encode(image_bytes).decode()
     try:
+        started_at = time.monotonic()
         async with httpx.AsyncClient(timeout=recognition_timeout()) as client:
             response_text, usage = await provider.generate_text(
                 client,
@@ -1710,6 +1712,7 @@ async def recognize_sanitized_card(
                 prompt=RECOGNIZE_PROMPT,
                 raw_response=response_text,
                 usage=usage,
+                latency_seconds=time.monotonic() - started_at,
             )
         json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
         if not json_match:
@@ -1758,9 +1761,10 @@ async def recognize_card(
 ):
     try:
         raw_image = await read_limited_upload(file, remaining_job_bytes=MAX_FILE_BYTES)
+        high_resolution = high_resolution_samples_enabled(db)
         sanitized = sanitize_image_bytes(
             raw_image,
-            high_resolution=high_resolution_samples_enabled(db),
+            high_resolution=high_resolution,
         )
     except ScanUploadError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -1775,6 +1779,10 @@ async def recognize_card(
         model=get_provider(db, current_user.id).model(),
     )
     trace.set_image(sanitized.data)
+    trace.record_resolution_profile(
+        profile="high" if high_resolution else "low",
+        request_image=sanitized.data,
+    )
     try:
         return await recognize_sanitized_card(
             db,
@@ -1834,6 +1842,7 @@ async def recognize_composite_card_info(
     provider = provider or ScanProvider(GEMINI)
     image_b64 = base64.b64encode(image_bytes).decode()
     try:
+        started_at = time.monotonic()
         async with httpx.AsyncClient(timeout=recognition_timeout()) as client:
             response_text, usage = await provider.generate_text(
                 client,
@@ -1849,6 +1858,7 @@ async def recognize_composite_card_info(
                 prompt=COMPOSITE_PROMPT.format(count=count),
                 raw_response=response_text,
                 usage=usage,
+                latency_seconds=time.monotonic() - started_at,
             )
         array_match = re.search(r"\[.*\]", response_text, re.DOTALL)
         if not array_match:
