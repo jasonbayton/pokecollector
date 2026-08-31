@@ -102,6 +102,25 @@ class ScanJobsApiTests(unittest.TestCase):
         self.assertEqual(image.status_code, 200)
         self.assertEqual(image.content[:2], b"\xff\xd8")
 
+    def test_detail_flags_a_confident_suggestion_already_owned_by_the_user(self):
+        created = self._enqueue()
+        item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
+        item.status = "done"
+        item.identity_confident = True
+        item.suggested_match_id = "owned-card_en"
+        self.db.add(CollectionItem(
+            user_id=self.user.id,
+            card_id="owned-card_en",
+            quantity=1,
+            condition="Mint",
+            variant="Normal",
+            lang="en",
+        ))
+        self.db.commit()
+
+        detail = self.client.get(f"/api/cards/recognize/jobs/{created['id']}")
+        self.assertTrue(detail.json()["items"][0]["suggested_already_owned"])
+
     def test_retry_schedule_is_exposed_in_list_and_detail_payloads(self):
         created = self._enqueue()
         retry_at = datetime.datetime.utcnow() + datetime.timedelta(minutes=30)

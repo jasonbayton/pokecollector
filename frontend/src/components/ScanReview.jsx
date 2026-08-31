@@ -218,6 +218,12 @@ export function ScanItemPanel({ jobId, item, onAdd, onRetry, onRetake, onDismiss
             </p>
           )}
 
+          {item.suggested_already_owned && !active && (
+            <p className="mt-3 rounded-xl border border-amber-300/25 bg-amber-300/10 px-3 py-2 text-sm text-amber-100">
+              {t('scanner.suggestedAlreadyOwned')}
+            </p>
+          )}
+
           {(item.status === 'failed' || noMatches) && (
             <div className="mt-3 space-y-3">
               <p role="alert" className={`rounded-xl border px-3 py-2 text-sm ${

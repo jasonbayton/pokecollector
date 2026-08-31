@@ -1349,6 +1349,7 @@ const en = {
     dailyQuotaRetry: 'Daily quota reached · {countdown}',
     dailyQuotaWaiting: 'Daily quota reached · Waiting to retry…',
     suggestedMatch: 'Suggested',
+    suggestedAlreadyOwned: 'This suggested card is already in your collection. It may be another copy; review it or dismiss this scan.',
     addAllConfident: 'Add all confident - {count} cards',
     addAllConfidentOne: 'Add all confident - 1 card',
     addAllConfidentTitle: 'Add all confident cards',
