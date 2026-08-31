@@ -176,6 +176,28 @@ class CollectionPhotoTests(unittest.TestCase):
         self.assertEqual(self.client.get(f"/api/collection/{remaining.id}/photo").status_code, 200)
         self.assertEqual(self.client.get(f"/api/collection/{self.entry.id}/photo").status_code, 404)
 
+    def test_editing_into_an_existing_identity_returns_a_conflict(self):
+        """A database unique-index collision must never become an API 500."""
+        from models import CollectionItem
+
+        self.db.add(CollectionItem(
+            card_id=self.entry.card_id,
+            user_id=self.owner.id,
+            quantity=1,
+            condition="LP",
+            variant="Normal",
+            lang="ja",
+        ))
+        self.db.commit()
+
+        response = self.client.put(
+            f"/api/collection/{self.entry.id}",
+            json={"condition": "LP"},
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("identical collection row", response.json()["detail"])
+
     def test_the_stored_photo_carries_no_exif(self):
         """The reason normalisation exists: a phone photo carries GPS, a camera
         serial and a timestamp, none of which describe a Pokémon card."""

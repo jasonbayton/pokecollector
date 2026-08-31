@@ -19,6 +19,7 @@ from services.binder_allocations import (
     collection_item_allocated_quantity,
 )
 from services.collection_csv import normalize_collection_variant
+from services.collection_merge import lock_collection_identities, merge_collection_item
 from services.product_ledger import finite_non_negative, positive_quantity
 from services.tcgdex_languages import is_supported_tcgdex_language, normalize_tcgdex_language
 
@@ -128,31 +129,11 @@ def _merge_or_create_collection_item(
     lang: str,
     purchase_price,
 ) -> CollectionItem:
-    existing = db.query(CollectionItem).filter(
-        CollectionItem.card_id == card.id,
-        CollectionItem.variant == variant,
-        CollectionItem.lang == lang,
-        CollectionItem.condition == condition,
-        CollectionItem.purchase_price == purchase_price,
-        CollectionItem.user_id == current_user.id,
-    ).first()
-
-    if existing:
-        existing.quantity += quantity
-        return existing
-
-    item = CollectionItem(
-        card_id=card.id,
-        user_id=current_user.id,
-        quantity=quantity,
-        condition=condition,
-        variant=variant,
+    item, _ = merge_collection_item(
+        db, user_id=current_user.id, card_id=card.id, quantity=quantity,
+        condition=condition, variant=variant, lang=lang,
         purchase_price=purchase_price,
-        lang=lang,
-        added_at=datetime.datetime.utcnow(),
     )
-    db.add(item)
-    db.flush()
     return item
 
 
@@ -652,6 +633,7 @@ def create_trade(
         _prepare_incoming_card(db, incoming, price_field, current_user.id)
         for incoming in trade.incoming
     ]
+    lock_collection_identities(db, [{"user_id": current_user.id}])
     db.query(User).filter(User.id == current_user.id).with_for_update(of=User).one()
 
     db_trade = Trade(
@@ -875,6 +857,7 @@ def update_trade(
     try:
         # All inventory writers introduced here use this order:
         # User -> Trade -> CollectionItem -> ProductCard -> ledger rows.
+        lock_collection_identities(db, [{"user_id": current_user.id}])
         db.query(User).filter(User.id == current_user.id).with_for_update(of=User).one()
         db_trade = db.query(Trade).filter(
             Trade.id == trade_id,

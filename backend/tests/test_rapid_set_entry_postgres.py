@@ -5,7 +5,6 @@ import threading
 import unittest
 import uuid
 from types import SimpleNamespace
-from unittest.mock import patch
 
 try:
     from sqlalchemy import create_engine, text
@@ -49,16 +48,14 @@ class RapidSetEntryPostgresTests(unittest.TestCase):
         try:
             user = User(username="pg-rapid-entry-owner", hashed_password="x", is_active=True)
             set_row = Set(id="pg-rapid_en", tcg_set_id="pg-rapid", name="Postgres rapid", lang="en")
-            card = Card(id="pg-rapid-001_en", tcg_card_id="pg-rapid-001", name="Postgres card", set_id="pg-rapid", number="001", lang="en")
-            db.add_all([user, set_row, card])
+            first_card = Card(id="pg-rapid-001_en", tcg_card_id="pg-rapid-001", name="Postgres card one", set_id="pg-rapid", number="001", lang="en")
+            second_card = Card(id="pg-rapid-002_en", tcg_card_id="pg-rapid-002", name="Postgres card two", set_id="pg-rapid", number="002", lang="en")
+            db.add_all([user, set_row, first_card, second_card])
             db.commit()
             self.user_id = user.id
             self.set_id = set_row.id
-            self.card_id = card.id
-            # The existing row is the locking target. This directly exercises
-            # the production race where two rapid sessions merge the same copy.
-            db.add(CollectionItem(card_id=card.id, user_id=user.id, quantity=1, condition="Mint", variant="Normal", lang="en"))
-            db.commit()
+            self.card_id = first_card.id
+            self.second_card_id = second_card.id
         finally:
             db.close()
 
@@ -68,24 +65,11 @@ class RapidSetEntryPostgresTests(unittest.TestCase):
             conn.execute(text(f'DROP SCHEMA "{self.schema}" CASCADE'))
         self.admin_engine.dispose()
 
-    def test_two_concurrent_sessions_merge_without_losing_a_copy(self):
+    def test_two_concurrent_first_inserts_merge_without_duplicate_rows(self):
         start = threading.Barrier(2)
-        entered_write = threading.Event()
-        release_first = threading.Event()
         results = []
         errors = []
         guard = threading.Lock()
-        lock_entries = 0
-        original_locked_item = rapid_set_entry._locked_collection_item
-
-        def pause_after_lock(*args, **kwargs):
-            nonlocal lock_entries
-            item = original_locked_item(*args, **kwargs)
-            with guard:
-                lock_entries += 1
-                entered_write.set()
-            self.assertTrue(release_first.wait(timeout=5), "second session did not block on the collection row")
-            return item
 
         def run_session():
             db = self.Session()
@@ -105,19 +89,14 @@ class RapidSetEntryPostgresTests(unittest.TestCase):
             finally:
                 db.close()
 
-        # PostgreSQL itself, rather than SQLite's no-op FOR UPDATE behaviour,
-        # is the concurrency control. Both workers race the same existing row.
-        with patch("services.rapid_set_entry._locked_collection_item", side_effect=pause_after_lock):
-            first = threading.Thread(target=run_session, name="rapid-entry-first")
-            second = threading.Thread(target=run_session, name="rapid-entry-second")
-            first.start()
-            second.start()
-            self.assertTrue(entered_write.wait(timeout=5), "no session reached the locked collection row")
-            # The bystander session must still be blocked on SELECT FOR UPDATE.
-            self.assertEqual(lock_entries, 1)
-            release_first.set()
-            first.join(timeout=10)
-            second.join(timeout=10)
+        # No collection row exists at the start. A row lock alone cannot
+        # protect this case, so this must use the transaction-scoped owner lock.
+        first = threading.Thread(target=run_session, name="rapid-entry-first")
+        second = threading.Thread(target=run_session, name="rapid-entry-second")
+        first.start()
+        second.start()
+        first.join(timeout=10)
+        second.join(timeout=10)
 
         self.assertFalse(first.is_alive())
         self.assertFalse(second.is_alive())
@@ -125,7 +104,53 @@ class RapidSetEntryPostgresTests(unittest.TestCase):
         self.assertEqual(len(results), 2)
         db = self.Session()
         try:
-            self.assertEqual(db.query(CollectionItem).one().quantity, 3)
+            self.assertEqual(db.query(CollectionItem).one().quantity, 2)
+        finally:
+            db.close()
+
+    def test_reversed_multi_card_requests_cannot_deadlock(self):
+        """One owner lock gives scan/request ordering a shared boundary."""
+        start = threading.Barrier(2)
+        errors = []
+        guard = threading.Lock()
+
+        def run_session(card_ids):
+            db = self.Session()
+            try:
+                start.wait(timeout=5)
+                rapid_set_entry.commit_rapid_set_entry(
+                    db,
+                    set_id=self.set_id,
+                    items=[
+                        SimpleNamespace(card_id=card_id, quantity=1, condition="Mint", variant="Normal", lang="en")
+                        for card_id in card_ids
+                    ],
+                    current_user=User(id=self.user_id),
+                )
+            except BaseException as exc:
+                with guard:
+                    errors.append(exc)
+            finally:
+                db.close()
+
+        first = threading.Thread(
+            target=run_session, args=([self.card_id, self.second_card_id],), name="rapid-entry-forward"
+        )
+        second = threading.Thread(
+            target=run_session, args=([self.second_card_id, self.card_id],), name="rapid-entry-reverse"
+        )
+        first.start()
+        second.start()
+        first.join(timeout=10)
+        second.join(timeout=10)
+
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertEqual(errors, [])
+        db = self.Session()
+        try:
+            quantities = dict(db.query(CollectionItem.card_id, CollectionItem.quantity).all())
+            self.assertEqual(quantities, {self.card_id: 2, self.second_card_id: 2})
         finally:
             db.close()
 

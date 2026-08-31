@@ -687,6 +687,132 @@ def install_custom_match_uniqueness(conn) -> bool:
         return False
 
 
+def install_collection_merge_uniqueness(conn) -> bool:
+    """Consolidate legacy duplicate collection rows and protect their identity.
+
+    A collection identity includes the owner, card, condition, finish,
+    language, and purchase price. Binder allocations are merged before loser
+    rows are removed, and the historical product/trade pointers are retargeted
+    to the retained row. This runs as one transaction: an error leaves the old
+    schema and rows untouched rather than installing a partial constraint.
+    """
+    if conn.dialect.name != "postgresql":
+        return True
+    try:
+        # This migration is deliberately destructive only once. Once the
+        # unique index exists it is the authoritative proof that no duplicate
+        # identity can be inserted, so revisiting every row on each startup
+        # would create needless locks, tuple churn, and table bloat.
+        if conn.execute(text(
+            "SELECT to_regclass('uq_collection_merge_identity')"
+        )).scalar():
+            return True
+        conn.execute(text("""
+            CREATE TEMP TABLE collection_merge_map ON COMMIT DROP AS
+            SELECT id AS loser_id,
+                   min(id) OVER (
+                       PARTITION BY user_id, card_id, condition, variant, lang, purchase_price
+                   ) AS keeper_id
+            FROM collection
+        """))
+        conn.execute(text("DELETE FROM collection_merge_map WHERE loser_id = keeper_id"))
+
+        # BinderCard is unique per binder and collection row. Fold its duplicate
+        # entries first so retargeting cannot violate that uniqueness, then move
+        # their physical slots onto the retained entry.
+        if conn.execute(text("SELECT to_regclass('binder_cards')")).scalar():
+            conn.execute(text("""
+                CREATE TEMP TABLE collection_binder_merge ON COMMIT DROP AS
+                WITH grouped AS (
+                    SELECT b.binder_id,
+                           COALESCE(m.keeper_id, b.collection_item_id) AS target_item_id,
+                           COALESCE(
+                               min(b.id) FILTER (WHERE m.loser_id IS NULL), min(b.id)
+                           ) AS keeper_binder_card_id,
+                           sum(b.required_quantity) AS required_quantity
+                    FROM binder_cards b
+                    LEFT JOIN collection_merge_map m ON m.loser_id = b.collection_item_id
+                    WHERE b.collection_item_id IN (
+                        SELECT loser_id FROM collection_merge_map
+                        UNION SELECT keeper_id FROM collection_merge_map
+                    )
+                    GROUP BY b.binder_id, COALESCE(m.keeper_id, b.collection_item_id)
+                )
+                SELECT b.id AS loser_binder_card_id, g.keeper_binder_card_id,
+                       g.target_item_id, g.required_quantity
+                FROM binder_cards b
+                LEFT JOIN collection_merge_map m ON m.loser_id = b.collection_item_id
+                JOIN grouped g ON g.binder_id = b.binder_id
+                    AND g.target_item_id = COALESCE(m.keeper_id, b.collection_item_id)
+            """))
+            conn.execute(text("""
+                UPDATE binder_cards b
+                SET collection_item_id = m.target_item_id,
+                    required_quantity = m.required_quantity
+                FROM collection_binder_merge m
+                WHERE b.id = m.keeper_binder_card_id
+            """))
+            if conn.execute(text("SELECT to_regclass('binder_slots')")).scalar():
+                conn.execute(text("""
+                    UPDATE binder_slots s SET binder_card_id = m.keeper_binder_card_id
+                    FROM collection_binder_merge m
+                    WHERE s.binder_card_id = m.loser_binder_card_id
+                      AND m.loser_binder_card_id <> m.keeper_binder_card_id
+                """))
+            conn.execute(text("""
+                DELETE FROM binder_cards b USING collection_binder_merge m
+                WHERE b.id = m.loser_binder_card_id
+                  AND m.loser_binder_card_id <> m.keeper_binder_card_id
+            """))
+
+        # These are historical pointers rather than foreign keys, but retaining
+        # a resolvable canonical row keeps product and trade histories useful.
+        for table, column in (
+            ("product_cards", "collection_item_id"),
+            ("product_ledger_entries", "original_collection_item_id"),
+            ("trade_items", "original_collection_item_id"),
+            ("trade_items", "created_collection_item_id"),
+            ("deleted_collection_items", "original_collection_item_id"),
+        ):
+            if conn.execute(text("SELECT to_regclass(:table)"), {"table": table}).scalar():
+                conn.execute(text(f"""
+                    UPDATE {table} target SET {column} = map.keeper_id
+                    FROM collection_merge_map map
+                    WHERE target.{column} = map.loser_id
+                """))
+
+        conn.execute(text("""
+            WITH totals AS (
+                SELECT COALESCE(map.keeper_id, c.id) AS keeper_id,
+                       sum(c.quantity) AS quantity
+                FROM collection c
+                LEFT JOIN collection_merge_map map ON map.loser_id = c.id
+                GROUP BY COALESCE(map.keeper_id, c.id)
+            )
+            UPDATE collection c SET quantity = totals.quantity
+            FROM totals WHERE c.id = totals.keeper_id
+        """))
+        conn.execute(text("""
+            DELETE FROM collection c USING collection_merge_map map
+            WHERE c.id = map.loser_id
+        """))
+        conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_collection_merge_identity
+            ON collection (
+                user_id, card_id, condition, variant, lang,
+                (purchase_price IS NULL), COALESCE(purchase_price, 0)
+            )
+        """))
+        conn.commit()
+        return True
+    except Exception as exc:
+        conn.rollback()
+        logger.error(
+            "Could not install uq_collection_merge_identity: %s. Concurrent first "
+            "adds remain protected by advisory locks, but direct writes are not.", exc,
+        )
+        return False
+
 def migrate_collection_variants():
     """Move rarity-like values out of collection.variant into explicit physical variants."""
     rarity_values = (
@@ -1094,6 +1220,7 @@ def init_db():
         with engine.connect() as conn:
             _run_migrations(conn)
             install_custom_match_uniqueness(conn)
+            install_collection_merge_uniqueness(conn)
     except Exception:
         pass  # Non-blocking — may not be needed on fresh installs
 

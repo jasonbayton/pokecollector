@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from models import Card, CollectionItem, ScanJob, ScanJobItem, User
 from services.scan_storage import delete_scan_image
 from services.collection_options import ALLOWED_VARIANTS
+from services.collection_merge import merge_collection_item
 from services.scan_trace import record_variant_decision
 
 
@@ -179,32 +180,11 @@ def _add_collection_copy(
 ) -> None:
     """Apply the manual add defaults without committing the surrounding job."""
     variant = variant_for_recognized_finish(card, recognized_finish)
-    existing = (
-        db.query(CollectionItem)
-        .filter(
-            CollectionItem.card_id == card.id,
-            CollectionItem.variant == variant,
-            CollectionItem.lang == card.lang,
-            CollectionItem.condition == DEFAULT_CONDITION,
-            CollectionItem.purchase_price.is_(None),
-            CollectionItem.user_id == current_user.id,
-        )
-        .with_for_update()
-        .first()
-    )
-    if existing:
-        existing.quantity += 1
-        return
-    db.add(CollectionItem(
-        card_id=card.id,
-        quantity=1,
-        condition=DEFAULT_CONDITION,
-        variant=variant,
+    merge_collection_item(
+        db, user_id=current_user.id, card_id=card.id, quantity=1,
+        condition=DEFAULT_CONDITION, variant=variant, lang=card.lang,
         purchase_price=None,
-        lang=card.lang,
-        user_id=current_user.id,
-        added_at=datetime.datetime.utcnow(),
-    ))
+    )
 
 
 def add_all_confident_scan_items(
