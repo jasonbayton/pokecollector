@@ -67,7 +67,8 @@ class ScanBulkAddTests(unittest.TestCase):
         return card
 
     def _item(self, position, *, card_id="card-1_en", status="done", confident=True,
-              suggested=None, resolved=False, image=True, matches=None, recognized=None):
+              suggested=None, resolved=False, image=True, matches=None, recognized=None,
+              duplicate_of_item_id=None):
         suggested = card_id if suggested is None else suggested
         relative_path = f"{self.job.id}/bulk-add-{position}.jpg" if image else None
         if relative_path:
@@ -86,6 +87,7 @@ class ScanBulkAddTests(unittest.TestCase):
             recognized=recognized,
             identity_confident=confident,
             suggested_match_id=suggested,
+            duplicate_of_item_id=duplicate_of_item_id,
         )
         self.db.add(item)
         self.db.commit()
@@ -162,6 +164,19 @@ class ScanBulkAddTests(unittest.TestCase):
         self.assertEqual(self._file({card.id}), 0)
         self.assertEqual(self.db.query(CollectionItem).one().quantity, 2)
         self.assertFalse(self.db.get(ScanJobItem, item.id).resolved)
+        self.assertTrue(image.exists())
+
+    def test_recent_duplicate_stays_for_explicit_review(self):
+        """The duplicate warning is a safety gate, not merely a UI hint."""
+        card = self._card("card-1_en")
+        original, _ = self._item(0, card_id=card.id)
+        duplicate, image = self._item(
+            1, card_id=card.id, duplicate_of_item_id=original.id,
+        )
+
+        self.assertEqual(self._file({card.id}), 1)
+        self.assertTrue(self.db.get(ScanJobItem, original.id).resolved)
+        self.assertFalse(self.db.get(ScanJobItem, duplicate.id).resolved)
         self.assertTrue(image.exists())
 
     def test_uses_an_available_print_when_normal_does_not_exist(self):

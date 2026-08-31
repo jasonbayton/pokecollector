@@ -743,32 +743,56 @@ def resolve_scan_item(
     keeps its own copy, but only when SCAN_TRACE_DIR is configured, so it
     cannot be relied on to retain it.
     """
-    relative_path = item.image_path
-    item.resolved = True
+    # The endpoint's item was loaded before the request body was parsed.  It
+    # must not be written back blindly: a simultaneous re-take can have reset
+    # it to pending with a replacement image in the meantime.
+    locked = (
+        db.query(ScanJobItem)
+        .filter(ScanJobItem.id == item.id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if locked is None:
+        raise ValueError("This scan no longer exists.")
+    if locked.resolved:
+        raise ValueError("This scan has already been handled.")
+    if locked.status not in {"done", "failed"}:
+        raise ValueError("This scan is still being processed.")
+
+    relative_path = locked.image_path
+    locked.resolved = True
     if not keep_image:
-        item.image_path = None
-    item.updated_at = datetime.datetime.utcnow()
+        locked.image_path = None
+    locked.updated_at = datetime.datetime.utcnow()
     db.commit()
-    db.refresh(item)
+    db.refresh(locked)
     if not keep_image:
         delete_scan_image(relative_path)
-    return item
+    return locked
 
 
 def retry_scan_item(db: Session, item: ScanJobItem) -> ScanJobItem:
     """Start a fresh individual recognition cycle for a reviewable item."""
-    if item.resolved:
+    locked = (
+        db.query(ScanJobItem)
+        .filter(ScanJobItem.id == item.id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if locked is None:
+        raise ValueError("This scan no longer exists.")
+    if locked.resolved:
         raise ValueError("This scan has already been handled.")
-    if item.status not in {"done", "failed"}:
+    if locked.status not in {"done", "failed"}:
         raise ValueError("This scan is still being processed.")
-    if not item.image_path or not resolve_scan_path(item.image_path).is_file():
+    if not locked.image_path or not resolve_scan_path(locked.image_path).is_file():
         raise ValueError("The stored scan photo is no longer available.")
 
     now = datetime.datetime.utcnow()
-    _reset_item_for_rescan(item, now)
+    _reset_item_for_rescan(locked, now)
     db.commit()
-    db.refresh(item)
-    return item
+    db.refresh(locked)
+    return locked
 
 
 def _reset_item_for_rescan(item: ScanJobItem, now: datetime.datetime) -> None:

@@ -138,6 +138,34 @@ class ScanJobStorageTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second_item.duplicate_of_item_id, first_item.id)
         self.assertIsNotNone(second_item.image_stored_at)
 
+    async def test_same_image_from_another_user_is_not_linked(self):
+        raw = _image_bytes()
+        await create_scan_job(self.db, self.user.id, [_upload(raw)])
+        other = User(username="another-scan-owner", hashed_password="x")
+        self.db.add(other)
+        self.db.commit()
+
+        other_job = await create_scan_job(self.db, other.id, [_upload(raw)])
+        other_item = self.db.query(ScanJobItem).filter(
+            ScanJobItem.job_id == other_job.id
+        ).one()
+
+        self.assertIsNone(other_item.duplicate_of_item_id)
+
+    async def test_same_image_older_than_ten_minutes_is_not_linked(self):
+        raw = _image_bytes()
+        first = await create_scan_job(self.db, self.user.id, [_upload(raw)])
+        first_item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == first.id).one()
+        first_item.image_stored_at = datetime.datetime.utcnow() - datetime.timedelta(
+            minutes=10, seconds=1,
+        )
+        self.db.commit()
+
+        second = await create_scan_job(self.db, self.user.id, [_upload(raw)])
+        second_item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == second.id).one()
+
+        self.assertIsNone(second_item.duplicate_of_item_id)
+
     async def test_rejects_more_than_fifty_photos_before_writing(self):
         uploads = [_upload(_image_bytes(size=(8, 8))) for _ in range(51)]
         with self.assertRaises(ScanUploadError):

@@ -121,6 +121,15 @@ class ScanJobsApiTests(unittest.TestCase):
         detail = self.client.get(f"/api/cards/recognize/jobs/{created['id']}")
         self.assertTrue(detail.json()["items"][0]["suggested_already_owned"])
 
+    def test_detail_exposes_a_persisted_duplicate_scan_warning(self):
+        created = self._enqueue()
+        item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
+        item.duplicate_of_item_id = item.id
+        self.db.commit()
+
+        detail = self.client.get(f"/api/cards/recognize/jobs/{created['id']}")
+        self.assertTrue(detail.json()["items"][0]["duplicate_scan_detected"])
+
     def test_retry_schedule_is_exposed_in_list_and_detail_payloads(self):
         created = self._enqueue()
         retry_at = datetime.datetime.utcnow() + datetime.timedelta(minutes=30)
@@ -267,6 +276,30 @@ class ScanJobsApiTests(unittest.TestCase):
         self.assertEqual((added.card_id, added.quantity, added.condition, added.variant), (
             "card-1_en", 1, "Mint", "Normal",
         ))
+
+    def test_add_all_confident_leaves_a_duplicate_for_explicit_review(self):
+        created = self._enqueue()
+        item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
+        self.db.add(Card(
+            id="card-1_en", tcg_card_id="card-1", name="Confident card",
+            lang="en", variants_normal=True,
+        ))
+        item.status = "done"
+        item.matches = [{"id": "card-1_en", "tcg_card_id": "card-1"}]
+        item.identity_confident = True
+        item.suggested_match_id = "card-1_en"
+        item.duplicate_of_item_id = item.id
+        self.db.commit()
+
+        self.assertEqual(
+            self.client.get(f"/api/cards/recognize/jobs/{created['id']}").json()["confident_addable"],
+            0,
+        )
+        response = self.client.post(f"/api/cards/recognize/jobs/{created['id']}/add-all-confident")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["added"], 0)
+        self.assertFalse(self.db.get(ScanJobItem, item.id).resolved)
+        self.assertEqual(self.db.query(CollectionItem).count(), 0)
 
     def test_resolve_labels_a_returned_candidate_as_a_candidate_correction(self):
         created = self._enqueue()

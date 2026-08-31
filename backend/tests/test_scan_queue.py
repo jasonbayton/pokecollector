@@ -623,6 +623,25 @@ class ScanQueueTests(unittest.TestCase):
         self.assertEqual(second.duplicate_of_item_id, first.id)
         self.assertIsNotNone(second.image_stored_at)
 
+    def test_retake_clears_a_previous_duplicate_link_when_photo_changes(self):
+        from PIL import Image
+
+        job = self._job(self.users[0], positions=(0, 1))
+        first, second = self.db.query(ScanJobItem).order_by(ScanJobItem.position).all()
+        first.status = second.status = "done"
+        for item in (first, second):
+            path = scan_storage.resolve_scan_path(item.image_path)
+            path.parent.mkdir(exist_ok=True)
+            path.write_bytes(b"old")
+        second.duplicate_of_item_id = first.id
+        self.db.commit()
+
+        output = io.BytesIO()
+        Image.new("RGB", (400, 560), "#743c98").save(output, format="JPEG")
+        replace_scan_item_photo(self.db, second, output.getvalue())
+
+        self.assertIsNone(second.duplicate_of_item_id)
+
     def test_progress_counts_only_reviewable_items_as_attention(self):
         job = self._job(self.users[0], positions=(0, 1, 2, 3))
         items = self.db.query(ScanJobItem).order_by(ScanJobItem.position).all()

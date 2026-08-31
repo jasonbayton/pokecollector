@@ -235,6 +235,44 @@ class StartupUpgradeTests(unittest.TestCase):
                     "AND column_name = 'identity_confident'"
                 )).scalar(), 1)
 
+    def test_startup_adds_duplicate_scan_columns_to_an_existing_database(self):
+        """Existing scan rows get nullable duplicate metadata without a backfill."""
+        database = self._build_pre_confidence_scan_schema()
+        with self.engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE scan_job_items DROP CONSTRAINT IF EXISTS "
+                "scan_job_items_duplicate_of_item_id_fkey"
+            ))
+            for column in ("image_hash", "image_stored_at", "duplicate_of_item_id"):
+                conn.execute(text(
+                    f"ALTER TABLE scan_job_items DROP COLUMN IF EXISTS {column}"
+                ))
+
+        database.init_db()
+
+        with self.engine.connect() as conn:
+            columns = self._scan_item_columns(conn)
+            for column in ("image_hash", "image_stored_at", "duplicate_of_item_id"):
+                self.assertIn(column, columns, f"{column} missing after startup")
+                self.assertEqual(columns[column], "YES", f"{column} must stay nullable")
+            indexes = {
+                row[0] for row in conn.execute(text(
+                    "SELECT indexname FROM pg_indexes WHERE tablename = 'scan_job_items'"
+                ))
+            }
+            self.assertTrue({
+                "ix_scan_job_items_image_hash",
+                "ix_scan_job_items_image_stored_at",
+                "ix_scan_job_items_duplicate_of_item_id",
+            }.issubset(indexes))
+            self.assertEqual(
+                conn.execute(text(
+                    "SELECT image_hash, image_stored_at, duplicate_of_item_id "
+                    "FROM scan_job_items ORDER BY id"
+                )).one(),
+                (None, None, None),
+            )
+
     def test_startup_still_works_on_a_fresh_database(self):
         from database import Base
         import database
