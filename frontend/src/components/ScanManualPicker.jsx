@@ -44,10 +44,14 @@ export default function ScanManualPicker({ defaultLang = 'en', onSelect, onClose
       <div className="space-y-4 p-4">
         <p className="text-sm text-text-muted">{t('scanner.manualPickHint')}</p>
         <form onSubmit={search} className="flex gap-2">
+          <label htmlFor="manual-card-search" className="sr-only">{t('scanner.manualPickPlaceholder')}</label>
           <input
+            id="manual-card-search"
+            name="manual-card-search"
             value={query}
             onChange={event => setQuery(event.target.value)}
             placeholder={t('scanner.manualPickPlaceholder')}
+            autoComplete="off"
             className="input min-w-0 flex-1"
           />
           <button type="submit" disabled={loading || !query.trim()} className="btn-primary px-3">
@@ -55,8 +59,9 @@ export default function ScanManualPicker({ defaultLang = 'en', onSelect, onClose
           </button>
         </form>
         <div>
-          <label className="mb-1.5 block text-xs font-medium text-text-muted">{t('scanner.manualPickLanguage')}</label>
+          <label htmlFor="manual-card-language" className="mb-1.5 block text-xs font-medium text-text-muted">{t('scanner.manualPickLanguage')}</label>
           <TcgdexLanguageSelect
+            id="manual-card-language"
             value={lang}
             onChange={next => {
               // Abandon anything in flight: its answer is for the old language.
@@ -87,6 +92,8 @@ export default function ScanManualPicker({ defaultLang = 'en', onSelect, onClose
                 src={resolveCardImageUrl(card)}
                 alt=""
                 loading="lazy"
+                width={56}
+                height={80}
                 className="h-20 w-14 shrink-0 rounded-md border border-border bg-bg-muted object-cover"
                 onError={event => { event.currentTarget.style.visibility = 'hidden' }}
               />

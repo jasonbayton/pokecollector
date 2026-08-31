@@ -1,4 +1,6 @@
 import { getAvailableVariants, getDefaultVariant } from './cardVariants'
+import { cardNumberMatches } from './cardNumbers'
+import { TCGDEX_LANGUAGES, normalizeTcgdexLanguage } from './tcgdexLanguages'
 
 /**
  * Row bookkeeping for a rapid entry session.
@@ -44,6 +46,27 @@ export const resolveVariant = (card, preferred) => {
 export const variantChoices = (card, canonical) => {
   const available = getAvailableVariants(card)
   return available.length > 0 ? available : canonical
+}
+
+/**
+ * Languages that have a locally cached printing matching this card number.
+ *
+ * Rapid entry resolves the requested language from the local catalogue, so
+ * offering a language without that printing lets a session fail only at
+ * commit time. Keep the picker constrained to choices the server can honour.
+ */
+export const cachedLanguagesForCard = (card, cards) => {
+  const available = new Set(
+    cards
+      .filter(candidate => cardNumberMatches(candidate.number, card.number))
+      .map(candidate => normalizeTcgdexLanguage(candidate.lang)),
+  )
+  return TCGDEX_LANGUAGES.filter(language => available.has(language.code))
+}
+
+export const cachedLanguagesInSet = cards => {
+  const available = new Set(cards.map(card => normalizeTcgdexLanguage(card.lang)))
+  return TCGDEX_LANGUAGES.filter(language => available.has(language.code))
 }
 
 export const newRow = (card, defaults, id) => ({

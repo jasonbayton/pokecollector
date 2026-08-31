@@ -8,6 +8,7 @@ release at all.
 """
 import os
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 try:
@@ -43,4 +44,19 @@ class ForkVersionTests(unittest.TestCase):
         # It shells out to git. A deployment without git, or an export with no
         # .git directory, must degrade rather than crash startup.
         with patch("subprocess.run", side_effect=OSError("no git")):
+            self.assertEqual(read_fork_release(), "")
+
+    def test_only_an_exact_fork_release_tag_is_accepted(self):
+        release = SimpleNamespace(returncode=0, stdout="bayton-v1.39.2-13\n")
+        with patch("subprocess.run", return_value=release) as run:
+            self.assertEqual(read_fork_release(), "bayton-v1.39.2-13")
+
+        self.assertEqual(
+            run.call_args.args[0],
+            ["git", "describe", "--tags", "--exact-match", "--match", "bayton-v*"],
+        )
+
+    def test_a_non_exact_or_non_fork_tag_falls_back(self):
+        no_fork_tag = SimpleNamespace(returncode=128, stdout="v1.39.2-3-gabc123\n")
+        with patch("subprocess.run", return_value=no_fork_tag):
             self.assertEqual(read_fork_release(), "")

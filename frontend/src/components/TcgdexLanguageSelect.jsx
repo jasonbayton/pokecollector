@@ -9,6 +9,7 @@ export default function TcgdexLanguageSelect({
   compact = false,
   languages = TCGDEX_LANGUAGES,
   loadingLabel = 'Loading…',
+  id,
 }) {
   const isLoading = Boolean(languages?.isLoading)
   const normalizedValue = includeAll && value === 'all' ? 'all' : normalizeTcgdexLanguage(value)
@@ -16,6 +17,7 @@ export default function TcgdexLanguageSelect({
 
   return (
     <select
+      id={id}
       value={normalizedValue}
       onChange={(event) => onChange(event.target.value)}
       className={className}
