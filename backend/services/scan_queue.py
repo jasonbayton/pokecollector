@@ -828,7 +828,20 @@ def replace_scan_item_photo(db: Session, item: ScanJobItem, raw_image: bytes) ->
         # other, both conclude they fitted, and commit a job over the limit:
         # two 10 MB photos becoming 15 MB in a 195 MB job each see 185 + 15,
         # while the committed result is 205.
-        db.query(ScanJob).filter(ScanJob.id == item.job.id).with_for_update().first()
+        # Match deletion's child-before-parent order. Locking the job first
+        # and then this item deadlocks a cascade that has already locked the
+        # child and is waiting to remove its parent.
+        locked = (
+            db.query(ScanJobItem)
+            .filter(ScanJobItem.id == item.id)
+            .with_for_update()
+            .one_or_none()
+        )
+        if locked is None:
+            raise ScanItemNoLongerReviewable("This scan no longer exists.")
+        job = db.query(ScanJob).filter(ScanJob.id == locked.job_id).with_for_update().one_or_none()
+        if job is None:
+            raise ScanItemNoLongerReviewable("This scan no longer exists.")
         # Only photos still on disk. byte_size survives resolution, but the
         # file does not, so counting a released photo would charge a job for
         # storage it is no longer using.
@@ -844,14 +857,6 @@ def replace_scan_item_photo(db: Session, item: ScanJobItem, raw_image: bytes) ->
                 "Please remove some photos, or scan it in a job of its own."
             )
 
-        locked = (
-            db.query(ScanJobItem)
-            .filter(ScanJobItem.id == item.id)
-            .with_for_update()
-            .one_or_none()
-        )
-        if locked is None:
-            raise ScanItemNoLongerReviewable("This scan no longer exists.")
         if locked.resolved:
             raise ScanItemNoLongerReviewable("This scan has already been handled.")
         if locked.status not in {"done", "failed"}:

@@ -216,17 +216,17 @@ class LoneCodeNumberConfidenceTests(unittest.TestCase):
         self.assertFalse(confident)
         self.assertIsNone(decision)
 
-    def test_the_same_hit_decides_once_something_corroborates_it(self):
-        # The bystander: refusing every code-number identification would undo
-        # the feature. A second agreeing signal is enough.
+    def test_language_does_not_corrobate_a_code_number_hit(self):
+        # Language is extracted by the same vision observation as the number,
+        # so it cannot turn a possibly misread digit into an automatic add.
         from api.recognize import _metadata_decision
 
         confident, decision = _metadata_decision(
             {"set_code": "SVI", "number_local": "25", "language": "en"},
             [self._candidate()],
         )
-        self.assertTrue(confident)
-        self.assertEqual(decision, "number_unique")
+        self.assertFalse(confident)
+        self.assertIsNone(decision)
 
     def test_a_name_search_hit_on_a_unique_number_still_decides(self):
         # Retrieval by name already constrains the candidate set, so a unique

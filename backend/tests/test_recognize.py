@@ -355,11 +355,11 @@ class PhashMatchingTests(unittest.IsolatedAsyncioTestCase):
         candidates = [
             {
                 "id": "base1-4_de", "tcg_card_id": "base1-4", "_lang": "de",
-                "number": "4", "name": "Glurak", "image": "de.webp",
+                "number": "4", "name": "Glurak", "artist": "Ken Sugimori", "image": "de.webp",
             },
             {
                 "id": "base1-4_en", "tcg_card_id": "base1-4", "_lang": "en",
-                "number": "4", "name": "Charizard", "image": "en.webp",
+                "number": "4", "name": "Charizard", "artist": "Mitsuhiro Arita", "image": "en.webp",
             },
         ]
         with patch(
@@ -368,7 +368,7 @@ class PhashMatchingTests(unittest.IsolatedAsyncioTestCase):
         ):
             result = await match_card_info(
                 object(),
-                {"name": "Glurak", "language": "de", "number_local": "4"},
+                {"name": "Glurak", "language": "de", "number_local": "4", "artist": "Ken Sugimori"},
             )
 
         self.assertTrue(result["_identity_confident"])
@@ -559,7 +559,7 @@ class DeterministicMatchingTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(confident)
         self.assertEqual(decision, "artist_hp")
 
-    def test_number_and_set_metadata_resolve_ambiguous_reprints(self):
+    def test_number_and_set_metadata_do_not_auto_file_ambiguous_reprints(self):
         recognized = normalize_recognized_card_info({
             "number_local": "52",
             "number_total": "130",
@@ -571,10 +571,10 @@ class DeterministicMatchingTests(unittest.IsolatedAsyncioTestCase):
         candidates.sort(key=lambda card: _candidate_rank_key(recognized, card))
         confident, decision = _metadata_decision(recognized, candidates)
         self.assertEqual(candidates[0]["id"], "right")
-        self.assertTrue(confident)
-        self.assertEqual(decision, "number_metadata")
+        self.assertFalse(confident)
+        self.assertIsNone(decision)
 
-    def test_detected_language_resolves_same_printing_across_languages(self):
+    def test_detected_language_does_not_corrobate_a_collector_number(self):
         recognized = normalize_recognized_card_info({
             "number_local": "029",
             "language": "de",
@@ -586,8 +586,8 @@ class DeterministicMatchingTests(unittest.IsolatedAsyncioTestCase):
         candidates.sort(key=lambda card: _candidate_rank_key(recognized, card))
         confident, decision = _metadata_decision(recognized, candidates)
         self.assertEqual(candidates[0]["id"], "german")
-        self.assertTrue(confident)
-        self.assertEqual(decision, "number_metadata")
+        self.assertFalse(confident)
+        self.assertIsNone(decision)
 
     def test_contradictory_known_metadata_prevents_confidence(self):
         recognized = normalize_recognized_card_info({

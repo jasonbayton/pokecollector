@@ -684,18 +684,16 @@ def _metadata_decision(card_info: dict, candidates: list[dict]) -> tuple[bool, s
         # then matches its own number perfectly, so the number agrees with
         # itself and nothing contradicts it.
         #
-        # When the card was retrieved BY that number and nothing else
-        # corroborates it, there is exactly one observation behind the answer.
-        # Refuse to decide automatically and let review, or visual
-        # verification, look at the artwork. A readable name, language, set or
-        # printed total is corroboration; the number alone is not.
-        corroborated = bool(signals - {"number"})
+        # Set code, printed total and language originate from the same prompt
+        # observation as the number (and set/total are often properties of the
+        # same set). They cannot corroborate a potentially misread digit.
+        # Only independently visible card metadata can make a code/number
+        # retrieval safe to file automatically.
+        corroborated = bool(signals.intersection({"regulation", "artist", "hp"}))
         if top.get("_retrieved_by_code_number") and not corroborated:
             return False, None
         return True, "number_unique"
-    if "number" in signals and signals.intersection(
-        {"language", "total", "set", "regulation"}
-    ):
+    if "number" in signals and signals.intersection({"regulation", "artist", "hp"}):
         return True, "number_metadata"
     if not card_info.get("number_local") and {"artist", "hp"}.issubset(signals):
         return True, "artist_hp"
@@ -876,7 +874,7 @@ async def _fill_candidate_details(
         )
         if card_info.get(recognized_field) not in (None, "")
     }
-    if not targets or not required_fields:
+    if not targets or not hasattr(db, "query"):
         return
 
     ids = [card["id"] for card in targets if card.get("id")]
@@ -885,7 +883,11 @@ async def _fill_candidate_details(
         # callers sharing one Session cannot interleave here. Keep it that way:
         # awaiting between the query and the last read of `rows` would let a
         # second matcher re-enter the session mid-transaction.
-        rows = db.query(Card.id, Card.artist, Card.hp, Card.regulation_mark).filter(
+        rows = db.query(
+            Card.id, Card.artist, Card.hp, Card.regulation_mark,
+            Card.variants_normal, Card.variants_reverse, Card.variants_holo,
+            Card.variants_first_edition,
+        ).filter(
             Card.id.in_(ids)
         ).all()
         local = {row.id: row for row in rows}
@@ -895,11 +897,16 @@ async def _fill_candidate_details(
                 card["artist"] = card.get("artist") or row.artist
                 card["hp"] = card.get("hp") or row.hp
                 card["regulation_mark"] = card.get("regulation_mark") or row.regulation_mark
+                for field in ("variants_normal", "variants_reverse", "variants_holo", "variants_first_edition"):
+                    card[field] = card.get(field) if card.get(field) is not None else getattr(row, field)
 
     missing = [
         card
         for card in targets
         if any(not card.get(field) for field in required_fields)
+        or any(card.get(field) is None for field in (
+            "variants_normal", "variants_reverse", "variants_holo", "variants_first_edition"
+        ))
     ]
     if not missing:
         return
@@ -1495,8 +1502,7 @@ async def match_card_info(
     )
     confident, decision = _metadata_decision(card_info, candidates)
     if (
-        confident
-        and candidates
+        candidates
         and candidates[0].get("_retrieved_by_code_number")
         and not _code_number_name_agrees(card_info, candidates[0])
     ):
