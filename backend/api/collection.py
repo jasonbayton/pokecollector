@@ -26,6 +26,7 @@ from services.standard_legality import is_standard_legal_card, is_standard_regul
 from services.tcgdex_languages import SUPPORTED_TCGDEX_LANGUAGES, has_lang_suffix, is_supported_tcgdex_language, normalize_tcgdex_language
 from services.collection_csv import collection_import_key, is_valid_collection_purchase_price, merge_collection_import_item, normalize_collection_variant
 from services.collection_options import ALLOWED_CONDITIONS, ALLOWED_VARIANTS
+from services.collection_merge import lock_collection_identities, merge_collection_item
 from services.rapid_set_entry import commit_rapid_set_entry
 import datetime
 import csv
@@ -1036,6 +1037,38 @@ def update_collection_item(
             new_card_id = f"{tcg_id}_{new_lang}"
             ensure_card_exists(db, new_card_id, lang=new_lang)
             update_data["card_id"] = new_card_id
+
+    target = {
+        "user_id": current_user.id,
+        "card_id": update_data.get("card_id", item.card_id),
+        "condition": update_data.get("condition", item.condition),
+        "variant": update_data.get("variant", item.variant),
+        "lang": update_data.get("lang", item.lang),
+        "purchase_price": update_data.get("purchase_price", item.purchase_price),
+    }
+    # The same owner-wide transaction lock used by every merge path turns the
+    # uniqueness check and edit below into one atomic decision. Without it a
+    # concurrent add could pass this check and make the later commit surface a
+    # raw database IntegrityError as a 500.
+    lock_collection_identities(db, [target])
+    duplicate_query = db.query(CollectionItem.id).filter(
+        CollectionItem.id != item.id,
+        CollectionItem.user_id == target["user_id"],
+        CollectionItem.card_id == target["card_id"],
+        CollectionItem.condition == target["condition"],
+        CollectionItem.variant == target["variant"],
+        CollectionItem.lang == target["lang"],
+    )
+    duplicate_query = duplicate_query.filter(
+        CollectionItem.purchase_price.is_(None)
+        if target["purchase_price"] is None
+        else CollectionItem.purchase_price == target["purchase_price"]
+    )
+    if duplicate_query.first():
+        raise HTTPException(
+            status_code=409,
+            detail="An identical collection row already exists. Merge or remove one row before changing this identity.",
+        )
 
     if "card_id" in update_data and update_data["card_id"] != item.card_id:
         db.query(BinderCard).filter(BinderCard.collection_item_id == item.id).update(

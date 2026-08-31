@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-import datetime
 from collections import defaultdict
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from models import Card, CollectionItem, Set, User
+from models import Card, Set, User
 from services.card_numbers import card_number_matches
 from services.collection_options import ALLOWED_CONDITIONS, ALLOWED_VARIANTS
+from services.collection_merge import lock_collection_identities, merge_collection_item
 from services.tcgdex_languages import is_supported_tcgdex_language
 
 
@@ -75,31 +75,6 @@ def prepare_rapid_set_entry(db: Session, *, set_id: str, items: list) -> list[di
     return prepared
 
 
-def _locked_collection_item(
-    db: Session,
-    *,
-    card_id: str,
-    condition: str,
-    variant: str,
-    lang: str,
-    user_id: int,
-) -> CollectionItem | None:
-    """Return the merge target while holding its PostgreSQL row lock."""
-    return (
-        db.query(CollectionItem)
-        .filter(
-            CollectionItem.card_id == card_id,
-            CollectionItem.condition == condition,
-            CollectionItem.variant == variant,
-            CollectionItem.lang == lang,
-            CollectionItem.purchase_price.is_(None),
-            CollectionItem.user_id == user_id,
-        )
-        .with_for_update()
-        .first()
-    )
-
-
 def commit_rapid_set_entry(db: Session, *, set_id: str, items: list, current_user: User) -> dict:
     """Commit a prepared session in one transaction, locking every merged row."""
     prepared = list(items)
@@ -120,30 +95,27 @@ def commit_rapid_set_entry(db: Session, *, set_id: str, items: list, current_use
         # orders would otherwise be able to deadlock, each holding the row the
         # other is waiting for. The scan path orders its locks for the same
         # reason, by ScanJobItem.position.
-        for (card_id, condition, variant, lang), quantity in sorted(combined.items()):
-            existing = _locked_collection_item(
-                db,
-                card_id=card_id,
-                condition=condition,
-                variant=variant,
-                lang=lang,
-                user_id=current_user.id,
+        ordered = sorted(combined.items())
+        lock_collection_identities(db, [
+            {
+                "user_id": current_user.id,
+                "card_id": card_id,
+                "condition": condition,
+                "variant": variant,
+                "lang": lang,
+                "purchase_price": None,
+            }
+            for (card_id, condition, variant, lang), _quantity in ordered
+        ])
+        for (card_id, condition, variant, lang), quantity in ordered:
+            _, created = merge_collection_item(
+                db, card_id=card_id, quantity=quantity, condition=condition,
+                variant=variant, purchase_price=None, lang=lang, user_id=current_user.id,
             )
-            if existing is not None:
-                existing.quantity += quantity
+            if created:
+                added += 1
+            else:
                 updated += 1
-                continue
-            db.add(CollectionItem(
-                card_id=card_id,
-                quantity=quantity,
-                condition=condition,
-                variant=variant,
-                purchase_price=None,
-                lang=lang,
-                user_id=current_user.id,
-                added_at=datetime.datetime.utcnow(),
-            ))
-            added += 1
         db.commit()
         return {"added": added, "updated": updated, "quantity": sum(combined.values())}
     except Exception:

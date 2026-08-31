@@ -85,28 +85,27 @@ class RapidSetEntryTests(unittest.TestCase):
                 self.assertIn(expected, raised.exception.detail["message"])
                 self.assertEqual(self.db.query(CollectionItem).count(), 0)
 
-    def test_rows_are_locked_in_a_fixed_order_whatever_order_they_arrive_in(self):
-        # Two sessions filing the same cards in opposite orders would deadlock
-        # if each locked rows in the order its browser happened to send: one
-        # holds the row the other is waiting for. Ordering is what prevents
-        # it, so ordering is what this asserts - the deadlock itself is a
-        # PostgreSQL behaviour, and reproducing it would be a race.
-        locked = []
-        original = rapid_set_entry._locked_collection_item
+    def test_all_rows_share_one_owner_lock_boundary(self):
+        # Per-identity locks can deadlock when scan position and request order
+        # differ. Every item in this request must therefore enter one owner
+        # transaction boundary before individual merges begin.
+        lock_batches = []
+        original = rapid_set_entry.lock_collection_identities
 
-        def record(db, **kwargs):
-            locked.append((kwargs["card_id"], kwargs["condition"], kwargs["variant"], kwargs["lang"]))
-            return original(db, **kwargs)
+        def record(db, identities):
+            lock_batches.append(identities)
+            return original(db, identities)
 
-        with patch.object(rapid_set_entry, "_locked_collection_item", side_effect=record):
+        with patch.object(rapid_set_entry, "lock_collection_identities", side_effect=record):
             self._commit([
                 self._item(self.card_two.id),
                 self._item(self.card_one.id),
                 self._item(self.card_one.id, condition="NM"),
             ])
 
-        self.assertEqual(locked, sorted(locked))
-        self.assertEqual(len(locked), 3)
+        self.assertEqual(len(lock_batches), 1)
+        self.assertEqual({item["user_id"] for item in lock_batches[0]}, {self.user.id})
+        self.assertEqual(len(lock_batches[0]), 3)
 
     def test_a_failed_commit_rolls_back_every_rapid_row_and_bystander(self):
         existing = CollectionItem(card_id=self.card_one.id, user_id=self.user.id, quantity=7, condition="Mint", variant="Normal", lang="en")
