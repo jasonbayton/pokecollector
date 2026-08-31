@@ -607,6 +607,33 @@ def _confirmation_name(value) -> str | None:
     return text or None
 
 
+_BASIC_ENERGY_NAMES = frozenset({
+    "grassenergy",
+    "fireenergy",
+    "waterenergy",
+    "lightningenergy",
+    "psychicenergy",
+    "fightingenergy",
+    "darknessenergy",
+    "metalenergy",
+})
+
+
+def _confirmation_energy_name(value) -> str | None:
+    """Normalise the optional ``Basic`` title used by basic Energy printings.
+
+    Pokémon card faces say ``Basic Fire Energy`` while TCGdex's Energy mini-set
+    records call the same printing ``Fire Energy``.  This is deliberately not a
+    general search simplification: it is used only for card_type=Energy and only
+    for the small closed list of basic Energy names, so identities such as
+    Charizard ex remain exact comparisons.
+    """
+    name = _confirmation_name(value)
+    if name and name.startswith("basic") and name[5:] in _BASIC_ENERGY_NAMES:
+        return name[5:]
+    return name
+
+
 def _code_number_name_agrees(card_info: dict, candidate: dict) -> bool:
     """A readable name may confirm a direct printing lookup, never retrieve it.
 
@@ -615,7 +642,12 @@ def _code_number_name_agrees(card_info: dict, candidate: dict) -> bool:
     English name_en and treating that as a contradiction would reject correct
     results. Where the language is unknown, either reading may confirm.
     """
-    candidate_name = _confirmation_name(candidate.get("name"))
+    confirmation_name = (
+        _confirmation_energy_name
+        if str(card_info.get("card_type") or "").strip().casefold() == "energy"
+        else _confirmation_name
+    )
+    candidate_name = confirmation_name(candidate.get("name"))
     if candidate_name is None:
         # Nothing to confirm against: unknown, not disagreement.
         return True
@@ -624,13 +656,13 @@ def _code_number_name_agrees(card_info: dict, candidate: dict) -> bool:
     recognized_lang = str(card_info.get("language") or "").strip().lower()
     if candidate_lang and recognized_lang:
         field = "name" if candidate_lang == recognized_lang else "name_en"
-        expected = _confirmation_name(card_info.get(field))
+        expected = confirmation_name(card_info.get(field))
         if expected is None and field == "name_en":
-            expected = _confirmation_name(card_info.get("name"))
+            expected = confirmation_name(card_info.get("name"))
         return expected is None or candidate_name == expected
 
     recognized_names = {
-        _confirmation_name(card_info.get(field))
+        confirmation_name(card_info.get(field))
         for field in ("name", "name_en")
     }
     recognized_names.discard(None)
