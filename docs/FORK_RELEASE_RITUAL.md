@@ -108,6 +108,30 @@ against it. Nothing else proves the upgrade works.
 Back up first, deploy, then verify the schema actually changed on the live
 database rather than trusting that the service came up.
 
+Native deployments must configure `SCAN_UPLOAD_DIR` outside the release
+checkout. Before tagging the first release with this arrangement, install all
+three exact files, stop the writer, perform the one-time move, then reload and
+restart it:
+
+```bash
+install -D -m 0644 ops/pokecollector.service.d/scan-storage.conf \
+  /etc/systemd/system/pokecollector.service.d/scan-storage.conf
+install -m 0755 ops/pokecollector-prepare-scan-storage \
+  /usr/local/bin/pokecollector-prepare-scan-storage
+install -m 0755 ops/pokecollector-deploy /usr/local/bin/pokecollector-deploy
+systemctl stop pokecollector
+/usr/local/bin/pokecollector-prepare-scan-storage /opt/pokecollector
+systemctl daemon-reload
+systemctl start pokecollector
+systemctl is-active --quiet pokecollector
+```
+
+The helper copies legacy uploads before removing their checkout directory, so
+it is safe to rerun but cannot resurrect a photo that later expires, is
+replaced, or is deleted. Stopping the service closes the write window, and the
+drop-in makes both a candidate release and any health-gated rollback use the
+same durable storage.
+
 ```bash
 ssh <host> 'lxc exec pokecollector -- systemctl is-active pokecollector'
 ```

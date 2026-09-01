@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# One-time, service-stopped cutover of native scan uploads into durable state.
+set -euo pipefail
+
+REPO=${1:?usage: pokecollector-prepare-scan-storage <repo>}
+SCAN_UPLOAD_ROOT=/var/lib/pokecollector/scan-uploads
+
+path_owner() {
+  stat -c '%U:%G' "$1" 2>/dev/null || stat -f '%Su:%Sg' "$1"
+}
+
+repo_owner=$(path_owner "${REPO}")
+install -d -m 0700 -o "${repo_owner%%:*}" -g "${repo_owner##*:}" "${SCAN_UPLOAD_ROOT}"
+
+legacy_scan_uploads="${REPO}/backend/data/scan-uploads"
+if [ -d "${legacy_scan_uploads}" ]; then
+  # The caller has stopped the service. Copy before removing the old tree so a
+  # failed copy never loses a retained photo. Removing legacy storage is what
+  # makes this a one-time cutover: later retention/deletion cannot be undone
+  # by a subsequent release copying stale files back into durable storage.
+  cp -a "${legacy_scan_uploads}/." "${SCAN_UPLOAD_ROOT}/"
+  rm -rf "${legacy_scan_uploads}"
+fi
