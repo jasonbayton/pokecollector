@@ -87,6 +87,15 @@ def _item_payload(
             CollectionItem.card_id == item.suggested_match_id,
             CollectionItem.quantity > 0,
         ).first() is not None
+    has_image = False
+    if item.image_path:
+        try:
+            has_image = resolve_scan_path(item.image_path).is_file()
+        except ScanUploadError:
+            # Do not advertise a retry just because a stale database path is
+            # present. This read must not mutate review state; maintenance can
+            # clean stale references separately.
+            has_image = False
     return {
         "id": item.id,
         "position": item.position,
@@ -108,7 +117,7 @@ def _item_payload(
         "suggested_already_owned": suggested_already_owned,
         "duplicate_scan_detected": item.duplicate_of_item_id is not None,
         "error": item.error,
-        "has_image": bool(item.image_path),
+        "has_image": has_image,
         # Changes when, and only when, the stored file changes. The review
         # panel fetches each photo into a blob URL once and keyed that fetch on
         # the item id, so a re-take left it showing the photo it had just
@@ -116,7 +125,7 @@ def _item_payload(
         # sent raw so the payload never carries the storage layout.
         "image_token": (
             hashlib.sha256(item.image_path.encode()).hexdigest()[:16]
-            if item.image_path else None
+            if has_image else None
         ),
         "next_attempt_at": (
             item.next_attempt_at.isoformat() if item.next_attempt_at else None

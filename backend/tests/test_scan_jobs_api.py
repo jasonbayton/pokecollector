@@ -102,6 +102,18 @@ class ScanJobsApiTests(unittest.TestCase):
         self.assertEqual(image.status_code, 200)
         self.assertEqual(image.content[:2], b"\xff\xd8")
 
+    def test_detail_does_not_advertise_a_missing_photo_as_retryable(self):
+        created = self._enqueue()
+        item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
+        resolve_scan_path(item.image_path).unlink()
+
+        detail = self.client.get(f"/api/cards/recognize/jobs/{created['id']}")
+
+        payload = detail.json()["items"][0]
+        self.assertFalse(payload["has_image"])
+        self.assertIsNone(payload["image_token"])
+        self.assertIsNotNone(self.db.get(ScanJobItem, item.id).image_path)
+
     def test_detail_flags_a_confident_suggestion_already_owned_by_the_user(self):
         created = self._enqueue()
         item = self.db.query(ScanJobItem).filter(ScanJobItem.job_id == created["id"]).one()
